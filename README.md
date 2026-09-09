@@ -439,8 +439,29 @@ TEST_DB_HOST=127.0.0.1 TEST_DB_NAME=dissertation_test \
 TEST_DB_USER=dissertation TEST_DB_PASSWORD=… npm test
 ```
 
-With no database reachable they skip rather than fail, so the unit suites
-still run.
+With no database reachable they skip rather than fail, so the unit suites still
+run. That is convenient locally and dangerous anywhere else — a run that
+skipped every visibility test is green and proves nothing — so set
+`REQUIRE_TEST_DB=1` to make an unreachable database an error instead.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs the same gate on every pull request, in three
+independent jobs:
+
+| Job      | Runs                                                                                                                                                       |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node`   | format, typecheck, lint, build, then vitest against a MySQL 8.4 service container with `REQUIRE_TEST_DB=1`                                                 |
+| `python` | the pinned pandoc, then ruff and pytest                                                                                                                    |
+| `docker` | builds the image and smoke-tests it — runs as uid 1000, pandoc and tectonic present, the worker venv imports, built assets landed, dev dependencies pruned |
+
+`docker` reaches out to Debian mirrors and GitHub releases, so it can go red
+without a code change; nothing depends on it.
+
+CI installs the **same pinned pandoc `.deb`** the image does
+(`.github/scripts/install-pandoc.sh` and the `PANDOC_VERSION` arg in the
+`Dockerfile`), so the end-to-end citation test validates the binary that
+actually renders your dissertation. Bumping the version means changing both.
 
 ### Layout
 
