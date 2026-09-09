@@ -16,6 +16,8 @@ task, what to verify, and what to escalate rather than decide.
 2. **Find the existing pattern.** Every entity type follows the same shape:
    `content_item` + detail table + repository + routes + templates. Sources
    are the worked example — copy that structure rather than inventing one.
+   For anything that reads content, `visibilityFilter` and a `Viewer`
+   parameter are part of the shape, not an addition to it.
 3. **State the plan before implementing.** Which components (TypeScript
    service, Python worker, templates, schema), which files change, whether a
    migration is needed, what could regress.
@@ -44,7 +46,12 @@ Some things are cheap to get wrong and expensive to discover later. Raise
 these rather than deciding alone:
 
 - **Anything that could make private material public**, or that changes how
-  visibility is computed.
+  visibility is computed. This includes anything derived from content: a
+  backlink listing, a manuscript's contents, a graph traversal, a compiled
+  document's contents or who may download it.
+- **Making compiled documents downloadable without authentication.** The
+  `audience` column exists so this is a config change, but it is the operator's
+  decision, not yours.
 - **A breaking schema change** — dropping or renaming a column, changing a
   type, anything that loses data. Propose a migration and rollback plan first.
 - **Changes to authentication**: the WebAuthn options, session lifecycle,
@@ -144,3 +151,19 @@ Recorded so they are not rediscovered:
   `Anii \cScolii` unless `decode_latex` runs first.
 - **`slugify` exists in TypeScript and Python** and the two must agree
   exactly. The same fixture list is asserted in both suites.
+- **Sentence boundaries cannot be found in raw Markdown.** A sentence
+  routinely ends `.[[cite:x|45]]`, where the full stop is not followed by
+  whitespace and so is invisible to a boundary search. `extractContext`
+  rewrites references to their display text first, tracking the anchor's new
+  offset, and only then looks for boundaries.
+- **`MIN(context)` picks alphabetically, not chronologically.** Backlink
+  context joins the `occurrence = 0` row instead, so the reader gets the first
+  mention's wording rather than a sentence from the middle of the piece.
+- **`isinstance(x, int)` is true for `True` in Python.** A `buildId` of `true`
+  would have reached a storage path as `builds/True`. Job payload validation
+  excludes `bool` explicitly.
+- **Migration assertions must be derived, not written out.** The suite reads
+  the versions off disk; hard-coded lists broke on every new migration and
+  stopped asserting "every migration" in the process.
+- **`person` does not pluralise to `persons`.** `KIND_PATHS` is the single
+  definition of every kind's URL segment; do not build one by appending "s".

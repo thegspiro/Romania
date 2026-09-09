@@ -8,6 +8,11 @@ they concern — and lets each item be **public or private individually**.
 Everything is cross-referenced, and every source carries a citation formatted
 to the **Chicago Manual of Style** (notes and bibliography).
 
+The site shows the work as **pieces of a whole**: each essay is its own page,
+and behind them is an outline that knows how to recompile those pieces into a
+single document — PDF, DOCX, HTML or LaTeX — with the footnotes and
+bibliography rendered by the same Chicago style the web pages use.
+
 Designed for one researcher, on their own hardware, with the public side
 exposed to the internet.
 
@@ -15,21 +20,27 @@ exposed to the internet.
 
 ## Status
 
-This is the **foundation** release. What is built and working:
+What is built and working:
 
-| Area                                                                     | State                                                                                                               |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| Schema for all entity types                                              | Complete (sources, artifacts, essays, people, organizations, places, events, relationships, citations, tags, files) |
-| **Sources** — admin CRUD, publish/unpublish, public pages                | Complete                                                                                                            |
-| Chicago citation rendering                                               | Complete (CMOS 18th ed., notes and bibliography)                                                                    |
-| Authentication — password + passkey, recovery codes                      | Complete                                                                                                            |
-| Public/private enforcement                                               | Complete and tested                                                                                                 |
-| Background worker — derivatives, bibliography import, geocoding, backups | Complete                                                                                                            |
-| Deployment — Docker, Compose, migrations, CLI                            | Complete                                                                                                            |
-| Admin UI for artifacts, essays, people, places, events                   | **Not yet** (schema exists)                                                                                         |
-| File upload UI                                                           | **Not yet** (storage layer and worker exist)                                                                        |
-| Maps and relational network graphs                                       | **Not yet** (Leaflet and Cytoscape are vendored; coordinates and edges are in the schema)                           |
-| Pandoc export to PDF/DOCX/LaTeX                                          | **Not yet** (toolchain is in the image)                                                                             |
+| Area                                                                      | State                                                                                                               |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Schema for all entity types                                               | Complete (sources, artifacts, essays, people, organizations, places, events, relationships, citations, tags, files) |
+| **Sources** — admin CRUD, publish/unpublish, public pages                 | Complete                                                                                                            |
+| **Essays** — Markdown editor, reference picker, server-rendered preview   | Complete                                                                                                            |
+| **People, organizations, places, events** — admin CRUD and public pages   | Complete                                                                                                            |
+| **Artifacts** — catalogue records, file upload, access-controlled serving | Complete                                                                                                            |
+| **Inline references and backlinks** — "everywhere this person is named"   | Complete                                                                                                            |
+| **Manuscripts** — nested outline, prev/next navigation, reusable sections | Complete                                                                                                            |
+| **Compilation** — Pandoc to PDF, DOCX, HTML, LaTeX, per audience          | Complete                                                                                                            |
+| **Relationship graph** — typed edges plus mentions, Cytoscape             | Complete                                                                                                            |
+| Chicago citation rendering                                                | Complete (CMOS 18th ed., notes and bibliography)                                                                    |
+| Authentication — password + passkey, recovery codes                       | Complete                                                                                                            |
+| Public/private enforcement                                                | Complete and tested                                                                                                 |
+| Background worker — derivatives, bibliography import, geocoding, backups  | Complete                                                                                                            |
+| Deployment — Docker, Compose, migrations, CLI                             | Complete                                                                                                            |
+| Maps                                                                      | **Not yet** (Leaflet is vendored; coordinates are in the schema)                                                    |
+| Public downloads of compiled documents                                    | **Not yet** (deliberately admin-only for now — see below)                                                           |
+| Search beyond `LIKE`                                                      | **Not yet** (a search service is the first side-cart candidate)                                                     |
 
 Each of those is a separate change set on top of this one. The architecture
 below is what makes them additive rather than rewrites.
@@ -54,8 +65,9 @@ One Docker image, three roles:
 ```
 
 - **web** — Fastify serving server-rendered HTML (Nunjucks). No client-side
-  framework; the only JavaScript is the passkey ceremony and, later, the map
-  and graph widgets.
+  framework; the only JavaScript is the passkey ceremony, the essay editor's
+  reference picker, and the network graph. All three are vanilla, vendored
+  locally, and loaded with a CSP nonce.
 - **worker** — polls a job table in MySQL. There is no Redis: one fewer
   service to run, and a job commits in the same transaction as the data that
   caused it.
@@ -69,17 +81,74 @@ indexing policy. Kind-specific fields live in a detail table keyed 1:1 on it.
 
 ```
 content_item (kind, slug, title, visibility, …)
-  ├── source_detail    (csl_json, archive, call_number, …)
-  ├── artifact_detail  (file, provenance, repository, …)
-  ├── essay_detail     (body_markdown, status, …)
-  ├── agent_detail     (people and organizations)
-  ├── place_detail     (latitude, longitude, historical names)
-  └── event_detail     (dates, place)
+  ├── source_detail      (csl_json, archive, call_number, …)
+  ├── artifact_detail    (file, provenance, repository, …)
+  ├── essay_detail       (body_markdown, status, …)
+  ├── agent_detail       (people and organizations)
+  ├── place_detail       (latitude, longitude, historical names)
+  ├── event_detail       (dates, place)
+  └── manuscript_detail  (title page, abstract, numbering)
 ```
 
 Cross-referencing, the public/private rule, tagging, search and the
 relationship graph are therefore implemented **once**. Adding an entity type
 is a new detail table plus templates — never a rewrite of those mechanisms.
+
+### References, and what they make possible
+
+While writing, a sidebar picker inserts a reference at the cursor. The text it
+writes is readable and stays meaningful in any other Markdown editor:
+
+```
+[[person:ion-antonescu|Antonescu]]     a mention  → link on the web, plain text in print
+[[place:iasi]]                         a mention  → display defaults to the target's title
+[[cite:hooligan-year|45-47]]           a citation → footnote on the web and in print
+```
+
+References are keyed to the **slug**, not to a database id, so they survive a
+title being corrected and remain readable outside the application.
+
+Every save rebuilds the `mention` and `citation` rows from the prose, in the
+same transaction as the text itself. Nothing else writes them. That is what
+makes **"everywhere this person is mentioned"** trustworthy: the listing is
+derived from the writing and cannot drift from it, and a reference removed
+from an essay disappears from the subject's page immediately.
+
+Each person, organization, place and event page therefore shows its own
+fields, everywhere it is mentioned (with the surrounding sentence as context),
+its typed relationships, and a network graph of connections within two hops.
+
+### From pieces to a single document
+
+A manuscript is an ordered outline of existing essays with a depth column —
+a document outline, not a tree of new content. One essay may appear in several
+manuscripts, which is what makes a chapter reusable as a journal article, but
+at most once within any one of them.
+
+Compilation splits along the same seam as everything else:
+
+```
+web (TypeScript)                            worker (Python)
+  walk the outline, viewer-filtered
+  demote headings by depth
+  [[cite:x|45]]  → [@x, 45]
+  [[person:x|N]] → N, or a cross-reference
+  write document.md + references.json  ──►  pandoc --citeproc --csl=…
+  insert manuscript_build (pending)         --pdf-engine=tectonic
+  enqueue the job                           store the output, mark it succeeded
+```
+
+The worker makes **no visibility decisions** and does no reference parsing.
+The rule stays in the one place that is auditable, and there is no second
+cross-language copy of the parser to fall out of step.
+
+A compiled file is one object containing many sections, so it is the single
+place where one mistake would leak everything at once. `manuscript_build`
+records the `audience` it was assembled for — `admin` or `public` — and a
+public build is assembled with an **anonymous viewer**, so it can only contain
+what an anonymous reader could already read one page at a time. Downloads
+require an authenticated administrator; the column is what makes opening them
+up later a configuration change rather than a rewrite.
 
 ### Citations
 
@@ -88,8 +157,15 @@ citeproc all speak. Chicago output is produced by citeproc against a vendored
 CSL style; this project writes no citation formatting of its own, because
 Chicago's edge cases are where citation bugs live.
 
-The same data is what Pandoc needs to produce PDF, DOCX, HTML or LaTeX later,
-with no conversion step in between.
+The same data is what Pandoc needs to produce PDF, DOCX, HTML or LaTeX, with
+no conversion step in between — the web page and the compiled document render
+the same CSL-JSON against the same style file.
+
+One Markdown-plus-CSL-JSON source feeds all four outputs. PDF goes through
+XeLaTeX (Tectonic), which fetches only the TeX packages a document actually
+uses. LaTeX is offered as an output, not as an intermediate: LaTeX → Word is
+lossy for exactly the things a dissertation depends on — footnotes, citations,
+floats, tracked changes — so DOCX is produced from the same source directly.
 
 ---
 
@@ -128,6 +204,18 @@ decides what a viewer may see, and three invariants are enforced and tested:
    link, and never leaks its title or slug.
 3. File bytes are served only through a route that re-checks the owning item's
    visibility on every request.
+
+That rule reaches everything derived from content, not just pages:
+
+- A private essay that mentions a public person does not appear on that
+  person's page — not its title, not its slug, not a sentence quoted from it.
+- A manuscript's public contents list omits private sections **entirely**,
+  with no gap or "section withheld" placeholder, and prev/next numbering is
+  computed over the filtered list so a reader never sees a skipped step.
+- The network graph never traverses _through_ a private node, so the shape of
+  the drawing cannot betray one sitting between two public ones.
+- A citation to a source the viewer may not see is withheld rather than
+  rendered, in the browser and in a compiled document alike.
 
 **Everything else.** Strict CSP with per-response nonces and no
 `unsafe-inline`; CSRF tokens on every state-changing request; HttpOnly,
@@ -234,6 +322,11 @@ services:
 The containers run as uid 1000, which matches the default ownership of Unraid
 shares. If yours differ, `chown -R 1000:1000` those paths.
 
+**`web` and `worker` must share `/data/files`.** Compilation hands work across
+that volume: the web app writes the assembled Markdown there and the worker
+reads it back. The Compose files already mount the same volume into both; keep
+that true if you split the roles across hosts.
+
 ### On AWS or another cloud host
 
 Point `DB_HOST` at RDS for MySQL 8 and delete the `db` service from
@@ -262,6 +355,26 @@ docker compose exec web /app/scripts/entrypoint.sh <command>
 | `migrate status`                           | Show which migrations are applied          |
 | `migrate up`                               | Apply pending migrations                   |
 | `migrate down --to 2`                      | Roll back to version 2                     |
+
+### Compiling a manuscript
+
+From the outline page (`/admin/manuscripts/:id/outline`), choose a format and
+an audience and press build. The web app assembles the document immediately
+and queues the render; the worker picks it up on its next poll, so a PDF of a
+long manuscript appears a little after the page returns rather than blocking
+it. Builds are listed on the same page with their state, section count and
+word count, and a download link once they succeed.
+
+**Build for the audience you mean.** An `admin` build contains every section
+you can see, private ones included. A `public` build is assembled as an
+anonymous reader and contains only what is already published — which is the
+one to send anybody. Both are downloadable only while signed in, and the
+filename records which it was (`manuscript-public-12.pdf`).
+
+If a build fails, its row carries Pandoc's stderr; the usual causes are a
+malformed YAML value on the manuscript's title-page fields and, for PDF, a TeX
+package Tectonic could not fetch because the container has no outbound
+network.
 
 ### Backups
 
@@ -337,11 +450,14 @@ src/
   db/                Connection pool, migration runner
   auth/              Password, WebAuthn, sessions, CSRF, recovery codes
   content/           Repositories, the visibility chokepoint, slugs, audit
+                     references, markdown, mentions, manuscripts, builds, graph
   citations/         CSL-JSON model, citeproc rendering, vendored CSL style
+  files/             Hash-addressed storage, magic-byte typing, serving
   http/              Server assembly, security headers, error handling
-  routes/            auth, admin, public
+  routes/            auth, admin-*, public-*
   views/             Nunjucks templates
   cli/               Administrative command line
+public/js/           Vanilla enhancement: passkey, editor, graph
 worker/              Python job runner and handlers
 db/migrations/       Numbered SQL, each with a tested rollback
 tests/               Vitest unit and integration suites

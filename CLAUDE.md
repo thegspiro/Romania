@@ -56,6 +56,46 @@ hundreds of edge cases; the style file already handles them.
 **Job queue.** A MySQL table claimed with `FOR UPDATE SKIP LOCKED`. No Redis.
 Enqueue in the same transaction as the data that caused the job.
 
+**References are one syntax with two meanings**, parsed by
+`src/content/references.ts`:
+
+```
+[[person:ion-antonescu|Antonescu]]   a mention  -> link on the web, plain text in print
+[[cite:hooligan-year|45-47]]         a citation -> footnote on the web and in print
+```
+
+`mention` and `citation` rows are **projections of the prose**, rebuilt
+wholesale by `rebuildReferences` in the same transaction as the save that
+changed the text. Nothing else writes them — no diffing, no reconciliation
+job, no admin form. That is what makes "everywhere this person is mentioned"
+trustworthy, and it is why `mention` has no visibility column of its own: a
+mention is exactly as visible as the item whose prose contains it.
+
+Backlink reads filter on the **citing** item. A private essay naming a public
+person must not surface on that person's public page.
+
+**Manuscripts are a flat ordered list with a depth column**, not a
+self-referencing tree. Ordering, prev/next, subtree moves and compilation are
+all simple walks over it, and MySQL's self-referencing foreign keys have
+awkward cascade behaviour. It renders as a nested outline regardless.
+
+**Compilation: TypeScript assembles, Python renders.** The web app walks the
+outline for a `Viewer`, demotes headings, rewrites references into Pandoc
+syntax and stages `document.md` plus `references.json`; the worker runs
+Pandoc over them and stores the output.
+
+> The worker makes **no visibility decisions** and does no reference parsing.
+> Moving either into `worker/` would put a second copy of the rule outside the
+> chokepoint, or a second parser to fall out of step. Don't.
+
+A compiled file holds many sections at once, so it is the one place a mistake
+would leak everything. `manuscript_build.audience` records what it was
+assembled for; a `public` build is assembled with `ANONYMOUS`, and the
+download route requires an authenticated administrator. Compiled outputs are
+deliberately not reachable through `/files/:id/:variant` — no artifact owns
+them, so that route 404s for them, which is the intended behaviour and is
+tested.
+
 ---
 
 ## Conventions
@@ -95,14 +135,28 @@ Use `async` when there is something to await, and the `done` form when there
 is not. This bit us once already; both forms are in the codebase with
 comments explaining which is which.
 
+### Markdown
+
+- markdown-it, configured `html: false`. Raw HTML in an essay body is escaped,
+  not sanitised — there is nothing to get wrong later.
+- References are a real **inline rule**, not a string substitution over the
+  source. That is why `` `[[person:x]]` `` inside a code span stays literal.
+- The renderer is the only place the visible/not-visible decision becomes
+  markup. A target the viewer may not see renders as **escaped display text
+  and nothing else** — no `href`, no `title`, no slug, no id.
+
 ### Templates
 
 - Nunjucks with autoescape on.
 - `| safe` is permitted **only** for citeproc output, which has already been
-  through `sanitizeCitationHtml`. Never mark user-supplied text safe.
+  through `sanitizeCitationHtml`, and for `renderProse` output, which is built
+  by markdown-it with HTML disabled. Never mark user-supplied text safe.
 - The CSP forbids inline styles and inline scripts. There are no `style=`
   attributes; scripts carry `nonce="{{ nonce }}"`.
 - Every form carries `<input type="hidden" name="_csrf" value="{{ csrfToken }}">`.
+- Client JavaScript is progressive enhancement. The editor's picker, the
+  preview and the graph all have a server-rendered equivalent above them; if
+  the script does not run, nothing is lost but convenience.
 
 ### Python
 
@@ -143,6 +197,14 @@ comments explaining which is which.
 - Add a client-side framework. The site is server-rendered HTML by choice.
 - Load anything from a CDN. Browser libraries are vendored from `node_modules`
   by `scripts/vendor-assets.mjs`, so no third party sees a visitor's IP.
+- Write to `mention` or `citation` from anywhere but `rebuildReferences`. A
+  hand-edited projection is a listing that no longer matches the prose.
+- Serve a compiled build to anyone but an authenticated administrator, or
+  assemble a `public` build with anything but `ANONYMOUS`.
+- Put a visibility decision, or reference parsing, into `worker/`.
+- Leave a gap or a "withheld" placeholder where a private section was filtered
+  out of a listing. The absence must be indistinguishable from never having
+  existed.
 
 ---
 
@@ -171,18 +233,27 @@ the properties being asserted actually live.
 
 ## Where things are
 
-| Concern                               | File                        |
-| ------------------------------------- | --------------------------- |
-| Who may see what                      | `src/content/visibility.ts` |
-| Config validation                     | `src/config.ts`             |
-| Chicago rendering, HTML sanitising    | `src/citations/render.ts`   |
-| CSL-JSON model, form mapping          | `src/citations/csl.ts`      |
-| Passkey ceremonies                    | `src/auth/webauthn.ts`      |
-| Sessions, CSRF comparison, IP packing | `src/auth/session.ts`       |
-| Security headers, CSP, robots policy  | `src/http/security.ts`      |
-| Request lifecycle                     | `src/http/server.ts`        |
-| Slugs (mirrored in Python)            | `src/content/slug.ts`       |
-| Job runner                            | `worker/runner.py`          |
+| Concern                                | File                                |
+| -------------------------------------- | ----------------------------------- |
+| Who may see what                       | `src/content/visibility.ts`         |
+| Config validation                      | `src/config.ts`                     |
+| Chicago rendering, HTML sanitising     | `src/citations/render.ts`           |
+| CSL-JSON model, form mapping           | `src/citations/csl.ts`              |
+| Passkey ceremonies                     | `src/auth/webauthn.ts`              |
+| Sessions, CSRF comparison, IP packing  | `src/auth/session.ts`               |
+| Security headers, CSP, robots policy   | `src/http/security.ts`              |
+| Request lifecycle                      | `src/http/server.ts`                |
+| Slugs (mirrored in Python)             | `src/content/slug.ts`               |
+| Reference syntax, context extraction   | `src/content/references.ts`         |
+| Prose → HTML, the visible/not decision | `src/content/markdown.ts`           |
+| Projections and backlinks              | `src/content/mentions.ts`           |
+| Outline, navigation, assembly          | `src/content/manuscripts.ts`        |
+| Build records, staging, enqueue        | `src/content/builds.ts`             |
+| Graph traversal with per-hop filtering | `src/content/graph.ts`              |
+| Path safety, magic bytes, hashing      | `src/files/storage.ts`              |
+| Access-checked file lookup             | `src/files/repository.ts`           |
+| Job runner                             | `worker/runner.py`                  |
+| Pandoc invocation                      | `worker/jobs/manuscript_compile.py` |
 
 ### Two implementations that must stay in step
 
@@ -199,10 +270,16 @@ of the two suites will fail otherwise, which is the point.
 
 ## What is deliberately not built yet
 
-Admin UI for artifacts, essays, people, places and events (the schema is
-there); file upload; maps and network graphs (Leaflet and Cytoscape are
-vendored, coordinates and edges are in the schema); Pandoc export (the
-toolchain is in the image).
+Maps (Leaflet is vendored and `place_detail` carries coordinates); public
+downloads of compiled documents (`manuscript_build.audience` is what makes
+that a config change rather than a rewrite); search beyond `LIKE`; an S3
+storage backend; Zotero sync.
 
-Each is its own change set. Keep them that way — the point of the foundation
-is that they are additive.
+The last two are the first genuine **side-cart** candidates — a search service
+such as Meilisearch, and a Zotero sync service. Nothing needs one today:
+Pandoc and Tectonic are already in the image and MySQL handles the graph
+queries at this scale. Reach for a separate service only when something truly
+cannot live in the application, not to avoid writing a query.
+
+Each is its own change set. Keep them that way — the point of the content
+model is that they are additive.
