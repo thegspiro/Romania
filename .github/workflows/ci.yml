@@ -1,0 +1,201 @@
+# The verification gate from CLAUDE.md, run on every proposed change.
+#
+# The point of this workflow is not that it runs the tests. It is that it
+# cannot pass while the integration suites are silently absent. Those suites
+# are where the visibility rules are proved -- a private item is 404 not 403,
+# a public page leaks no private reference, file bytes re-check visibility --
+# and without a database they skip rather than fail. REQUIRE_TEST_DB in the
+# `node` job is what closes that hole; the pandoc probe in `python` closes the
+# smaller one beside it.
+name: CI
+
+# pull_request covers every proposed change. push is narrowed to main so a
+# branch with an open pull request is not built twice for the same commit.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Superseded pushes to a pull request are cancelled; main is never
+  # cancelled, so the record of what passed on the default branch stays whole.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  node:
+    name: node
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      # 8.4 is what docker-compose.yml pins for production. Not substitutable:
+      # the migrations declare utf8mb4_0900_ai_ci and migrations.test.ts
+      # asserts TABLE_COLLATION, so MariaDB or MySQL 5.7 would fail outright.
+      #
+      # Service containers accept no `command:`, so the compose file's
+      # --character-set-server / --collation-server flags cannot be passed
+      # here. That is fine only because every CREATE TABLE states its
+      # collation explicitly and 8.4 already defaults to utf8mb4_0900_ai_ci.
+      # A future table without an explicit collation would diverge from
+      # production silently.
+      mysql:
+        image: mysql:8.4
+        env:
+          # Throwaway values for an ephemeral container that exists for the
+          # length of one job. Nothing secret belongs in a workflow file.
+          MYSQL_ROOT_PASSWORD: ci-root-not-a-secret
+          # Must equal TEST_DB_NAME below: createHarness() runs migrateDown(0)
+          # then migrateUp(), and never issues CREATE DATABASE.
+          MYSQL_DATABASE: dissertation_test
+          MYSQL_USER: dissertation
+          MYSQL_PASSWORD: testpass
+        ports:
+          - 3306:3306
+        # --host=127.0.0.1 is deliberate. The image's init phase runs a
+        # temporary server with --skip-networking, so a socket-based ping goes
+        # green before MYSQL_DATABASE and MYSQL_USER exist. TCP cannot.
+        options: >-
+          --health-cmd="mysqladmin ping --host=127.0.0.1 --user=root --password=ci-root-not-a-secret --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+          --health-start-period=10s
+
+    env:
+      TEST_DB_HOST: 127.0.0.1
+      TEST_DB_PORT: '3306'
+      TEST_DB_NAME: dissertation_test
+      TEST_DB_USER: dissertation
+      TEST_DB_PASSWORD: testpass
+      # Without this the job passes green having run zero visibility tests.
+      REQUIRE_TEST_DB: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Nothing here pushes; the default writes the token into .git/config.
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          # engines.node is >=22 and the Dockerfile builds on node:22.
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Cheapest and most commonly forgotten, so it goes first.
+      - name: Format
+        run: npm run format:check
+
+      # Before lint on purpose: both read tsconfig.typecheck.json, but on a
+      # broken program tsc gives one located message where the typed ESLint
+      # rules give a cascade. Running tsc first makes the clearer one win.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      # Not redundant with typecheck, which is a strict superset of this
+      # tsconfig's type checking. `npm run build` also runs copy-assets.mjs and
+      # vendor-assets.mjs, which no other gate exercises at all.
+      - name: Build
+        run: npm run build
+
+      # The service is already healthy before step one runs, so this is a
+      # second line of defence rather than a wait. It connects through the same
+      # driver, with the same TEST_DB_* values, to the same database that
+      # vitest will -- so a green check here cannot mean something different
+      # from a green connect inside the suites, and a credential mismatch
+      # fails here with an obvious step name instead of seven times over.
+      - name: Confirm the test database accepts the test credentials
+        run: node .github/scripts/check-test-db.mjs
+
+      # Never shard this run and never touch poolOptions. vitest.config.ts sets
+      # singleFork because all seven integration suites share one schema and
+      # each drops it; any parallelism is cross-file schema corruption.
+      - name: Test
+        run: npm test
+
+  python:
+    name: python
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          # Pinned rather than a matrix: the runtime image is Debian bookworm,
+          # whose python3 is 3.11. CI should run what ships.
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # The same pinned .deb the Dockerfile installs, so the end-to-end
+      # citation test here exercises the exact binary production runs.
+      - name: Install pandoc
+        run: .github/scripts/install-pandoc.sh
+
+      # test_manuscript_compile.py skips its end-to-end class when
+      # shutil.which("pandoc") comes back empty. This step and pytest read the
+      # same PATH in the same job, so a green check here means the class really
+      # ran -- which is why this needs no environment variable of its own, in
+      # contrast to the database above.
+      - name: Confirm pandoc is on PATH
+        run: pandoc --version | head -n 1
+
+      # No venv: the runner is already disposable, so one buys nothing.
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check worker/
+
+      # -rs prints every skip with its reason, so the log says out loud whether
+      # the pandoc end-to-end case ran.
+      - name: Test
+        run: pytest -q -rs
+
+  docker:
+    name: docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Third-party actions are pinned to a commit, not a tag: a tag is a
+      # mutable reference, and this repository's whole point is that
+      # unpublished material stays unreadable.
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@6524bf65af31da8d45b59e8c27de4bd072b392f5 # v3.8.0
+
+      - name: Build the image
+        uses: docker/build-push-action@67a2d409c0a876cbe6b11854e3e25193efe4e62d # v6.12.0
+        with:
+          context: .
+          # amd64 only: Unraid and the AWS target are x86_64, and the
+          # Dockerfile's aarch64 path is untested.
+          platforms: linux/amd64
+          tags: dissertation-platform:ci
+          load: true
+          # `load` cannot consume the manifest list an attestation build
+          # produces.
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the image
+        run: .github/scripts/smoke-test-image.sh dissertation-platform:ci
