@@ -223,7 +223,15 @@ TEST_DB_USER=dissertation TEST_DB_PASSWORD=… npm test
 ```
 
 Without a database they skip rather than fail — so **a green run does not mean
-the integration tests ran.** Check the output.
+the integration tests ran.** Check the output, or set `REQUIRE_TEST_DB=1` to
+turn an unreachable database into a failure:
+
+```sh
+REQUIRE_TEST_DB=1 npm test
+```
+
+CI sets it, so a pull request cannot go green with the visibility suites
+silently absent. Locally it is opt-in, and without it the skip still works.
 
 New or changed behaviour needs a test. Anything touching visibility, auth or
 SQL needs an integration test against a real database, because that is where

@@ -84,7 +84,9 @@ npm test                 # vitest
 ```
 
 **Integration tests skip silently without a database.** A green run is not
-evidence they executed — read the output. To run them for real:
+evidence they executed — read the output, or set `REQUIRE_TEST_DB=1`, which
+turns an unreachable database into a failure. CI sets it, so do not "fix" a
+red CI run by unsetting it. To run them for real:
 
 ```sh
 TEST_DB_HOST=127.0.0.1 TEST_DB_NAME=dissertation_test \
