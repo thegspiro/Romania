@@ -114,6 +114,10 @@ export async function createHarness(overrides: Record<string, string> = {}): Pro
 export async function truncateContent(pool: Pool): Promise<void> {
   await execute(pool, 'SET FOREIGN_KEY_CHECKS = 0');
   for (const table of [
+    'manuscript_build',
+    'manuscript_section',
+    'manuscript_detail',
+    'mention',
     'citation',
     'relationship',
     'content_tag',

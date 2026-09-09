@@ -16,6 +16,11 @@ const available = await databaseAvailable();
 const config = testConfig();
 const options = { config, directory: MIGRATIONS_DIR };
 
+// Derived from the files on disk rather than written out, so adding a
+// migration does not require editing four assertions here -- and so these
+// tests keep asserting "every migration", which is the actual property.
+const ALL_VERSIONS = (await loadMigrations(MIGRATIONS_DIR)).map((entry) => entry.version);
+
 describe('migration files', () => {
   it('every up-migration has a down-migration', async () => {
     const migrations = await loadMigrations(MIGRATIONS_DIR);
@@ -48,7 +53,7 @@ describe.skipIf(!available)('migration runner', () => {
 
   it('applies every migration from an empty database', async () => {
     const applied = await migrateUp(options);
-    expect(applied).toEqual([1, 2, 3]);
+    expect(applied).toEqual(ALL_VERSIONS);
 
     const tables = await queryRows<RowDataPacket & { TABLE_NAME: string }>(
       pool,
@@ -60,6 +65,10 @@ describe.skipIf(!available)('migration runner', () => {
     expect(names).toContain('source_detail');
     expect(names).toContain('admin_user');
     expect(names).toContain('job');
+    expect(names).toContain('mention');
+    expect(names).toContain('manuscript_detail');
+    expect(names).toContain('manuscript_section');
+    expect(names).toContain('manuscript_build');
   });
 
   it('is a no-op when already up to date', async () => {
@@ -68,7 +77,7 @@ describe.skipIf(!available)('migration runner', () => {
 
   it('reports status for each migration', async () => {
     const status = await migrationStatus(options);
-    expect(status).toHaveLength(3);
+    expect(status.map((entry) => entry.version)).toEqual(ALL_VERSIONS);
     expect(status.every((entry) => entry.applied)).toBe(true);
     expect(status[0]?.appliedAt).toBeInstanceOf(Date);
   });
@@ -162,7 +171,7 @@ describe.skipIf(!available)('migration runner', () => {
 
   it('rolls every migration back', async () => {
     const reverted = await migrateDown(0, options);
-    expect(reverted).toEqual([3, 2, 1]);
+    expect(reverted).toEqual([...ALL_VERSIONS].reverse());
 
     const tables = await queryRows<RowDataPacket & { TABLE_NAME: string }>(
       pool,
@@ -172,6 +181,8 @@ describe.skipIf(!available)('migration runner', () => {
     const names = tables.map((row) => row.TABLE_NAME);
     expect(names).not.toContain('content_item');
     expect(names).not.toContain('admin_user');
+    expect(names).not.toContain('mention');
+    expect(names).not.toContain('manuscript_section');
     // The registry survives, so re-applying knows where it stands.
     expect(names).toContain('schema_migration');
   });
@@ -179,7 +190,7 @@ describe.skipIf(!available)('migration runner', () => {
   it('rolls back partially to a target version', async () => {
     await migrateUp(options);
     const reverted = await migrateDown(1, options);
-    expect(reverted).toEqual([3, 2]);
+    expect(reverted).toEqual(ALL_VERSIONS.filter((version) => version > 1).reverse());
 
     const status = await migrationStatus(options);
     expect(status.find((entry) => entry.version === 1)?.applied).toBe(true);
