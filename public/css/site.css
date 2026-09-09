@@ -569,3 +569,347 @@ button.danger {
     columns: 1;
   }
 }
+
+/* --- Prose ---------------------------------------------------------------- */
+
+.prose {
+  max-width: var(--measure);
+}
+
+.prose h1,
+.prose h2,
+.prose h3 {
+  margin-top: 2rem;
+}
+
+.prose blockquote {
+  margin: 1.5rem 0;
+  padding-left: 1.25rem;
+  border-left: 3px solid var(--rule);
+  color: var(--ink-muted);
+}
+
+.prose pre {
+  overflow-x: auto;
+  padding: 0.75rem 1rem;
+  background: #f4f1ec;
+  font-family: var(--mono);
+  font-size: 0.875rem;
+}
+
+.prose code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+/* A reference to something the reader may not see renders as plain text, so
+   there is deliberately no style that would distinguish it from prose. */
+.reference-broken {
+  border-bottom: 1px dotted var(--warn);
+  cursor: help;
+}
+
+.reference-withheld {
+  color: var(--ink-muted);
+  font-style: italic;
+}
+
+/* --- Footnotes ------------------------------------------------------------ */
+
+.footnote-ref {
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+.footnotes-section {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+}
+
+.footnotes {
+  font-size: 0.9375rem;
+  color: var(--ink);
+}
+
+.footnotes li {
+  margin-bottom: 0.5rem;
+}
+
+.footnote-back {
+  text-decoration: none;
+  margin-left: 0.35rem;
+}
+
+/* --- Mentions and relationships ------------------------------------------- */
+
+.mentions,
+.relationships,
+.graph-section {
+  margin-top: 2.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+}
+
+.mention-list,
+.relationship-list {
+  list-style: none;
+  padding: 0;
+}
+
+.mention-list li,
+.relationship-list li {
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.mention-context {
+  margin: 0.35rem 0 0;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--rule);
+  color: var(--ink-muted);
+  font-size: 0.9375rem;
+}
+
+.relationship-label {
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+  margin-right: 0.5rem;
+}
+
+.relationship-form {
+  margin-top: 1.5rem;
+  padding: 1rem 1.25rem;
+  background: #f7f5f1;
+  border: 1px solid var(--rule);
+}
+
+/* --- Network graph -------------------------------------------------------- */
+
+.graph-canvas {
+  height: 420px;
+  margin: 1rem 0 0.5rem;
+  border: 1px solid var(--rule);
+  background: #fff;
+}
+
+/* --- Editor --------------------------------------------------------------- */
+
+.editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.editor-toolbar input[type='search'] {
+  flex: 1 1 18rem;
+  width: auto;
+}
+
+.editor-toolbar select {
+  width: auto;
+}
+
+.reference-results {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  max-height: 15rem;
+  overflow-y: auto;
+  border: 1px solid var(--rule);
+  background: #fff;
+}
+
+.reference-result {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--rule);
+  color: var(--ink);
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+}
+
+.reference-result:hover,
+.reference-result:focus {
+  background: var(--accent-soft);
+}
+
+.reference-meta,
+.reference-empty {
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+}
+
+.reference-empty {
+  padding: 0.5rem 0.6rem;
+}
+
+.editor-panes {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+}
+
+.editor-panes:has(.preview-pane:not([hidden])) {
+  grid-template-columns: 1fr 1fr;
+}
+
+.editor textarea {
+  max-width: none;
+  font-family: var(--mono);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+.preview-pane {
+  border-left: 1px solid var(--rule);
+  padding-left: 1.5rem;
+  overflow-y: auto;
+  max-height: 40rem;
+}
+
+/* --- Manuscript outline --------------------------------------------------- */
+
+.outline-table select,
+.outline-table input[type='text'] {
+  width: auto;
+  min-width: 4rem;
+}
+
+.outline-indent {
+  display: inline-block;
+}
+
+.outline-depth-1 {
+  padding-left: 1.5rem;
+}
+.outline-depth-2 {
+  padding-left: 3rem;
+}
+.outline-depth-3 {
+  padding-left: 4.5rem;
+}
+.outline-depth-4 {
+  padding-left: 6rem;
+}
+.outline-depth-5 {
+  padding-left: 7.5rem;
+}
+
+.contents {
+  padding-left: 1.25rem;
+}
+
+.contents li {
+  padding: 0.3rem 0;
+}
+
+.contents-depth-1 {
+  padding-left: 1.25rem;
+}
+.contents-depth-2 {
+  padding-left: 2.5rem;
+}
+.contents-depth-3 {
+  padding-left: 3.75rem;
+}
+.contents-depth-4 {
+  padding-left: 5rem;
+}
+.contents-depth-5 {
+  padding-left: 6.25rem;
+}
+
+.manuscript-crumbs {
+  font-family: var(--sans);
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+}
+
+.section-nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+  font-family: var(--sans);
+  font-size: 0.9375rem;
+}
+
+.section-nav-next {
+  margin-left: auto;
+}
+
+.build-log {
+  max-width: 40rem;
+  max-height: 12rem;
+  overflow: auto;
+  padding: 0.5rem;
+  background: #f4f1ec;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+}
+
+/* --- Artifacts ------------------------------------------------------------ */
+
+.artifact-list li {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.artifact-thumb img {
+  width: 90px;
+  height: auto;
+  border: 1px solid var(--rule);
+}
+
+.artifact-figure {
+  margin: 1.5rem 0;
+}
+
+.artifact-figure img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--rule);
+}
+
+.artifact-figure figcaption {
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+  color: var(--ink-muted);
+  margin-top: 0.5rem;
+}
+
+.upload-section {
+  margin-top: 2.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+}
+
+@media (max-width: 60rem) {
+  .editor-panes:has(.preview-pane:not([hidden])) {
+    grid-template-columns: 1fr;
+  }
+
+  .preview-pane {
+    border-left: none;
+    border-top: 1px solid var(--rule);
+    padding-left: 0;
+    padding-top: 1rem;
+  }
+}

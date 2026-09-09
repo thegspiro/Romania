@@ -1,0 +1,29 @@
+{#
+  "Mentioned in" — everywhere this item is named in someone's prose.
+
+  The list is already visibility-filtered by `listMentionsOf`, so a private
+  essay never reaches this template at all. The context snippet is a quotation
+  from an item the viewer may read, which is why it is safe to show.
+#}
+<section class="mentions">
+  <h2>{{ heading | default('Mentioned in') }}</h2>
+
+  {% if mentions.length == 0 %}
+    <p class="empty">{{ emptyText | default('Not yet mentioned anywhere.') }}</p>
+  {% else %}
+    <ul class="mention-list">
+      {% for mention in mentions %}
+        <li>
+          <a href="{{ mention.href }}">{{ mention.title }}</a>
+          <span class="muted small">{{ mention.kind }}</span>
+          {% if mention.occurrences > 1 %}
+            <span class="muted small">· {{ mention.occurrences }} mentions</span>
+          {% endif %}
+          {% if mention.context %}
+            <blockquote class="mention-context">{{ mention.context }}</blockquote>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</section>

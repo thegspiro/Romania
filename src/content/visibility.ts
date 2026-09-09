@@ -19,6 +19,7 @@
  *      filter to the owning item on every request.
  */
 import type { SqlParam } from '../db/pool.js';
+import { referenceHref } from './references.js';
 
 export type Viewer =
   { readonly kind: 'anonymous' } | { readonly kind: 'admin'; readonly userId: number };
@@ -99,6 +100,6 @@ export function resolveReference(
   return {
     linkable: true,
     title: target.title,
-    href: `/${target.kind}s/${encodeURIComponent(target.slug)}`,
+    href: referenceHref(target.kind, target.slug),
   };
 }

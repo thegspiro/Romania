@@ -1,0 +1,86 @@
+{#
+  Typed relationships, and the form to add one.
+
+  `listRelationshipsFor` has already applied the visibility rule to the edge
+  and to both endpoints, so anything reaching this template is showable.
+#}
+<section class="relationships">
+  <h2>Relationships</h2>
+
+  {% if relationships.length == 0 %}
+    <p class="empty">No relationships recorded.</p>
+  {% else %}
+    <ul class="relationship-list">
+      {% for relationship in relationships %}
+        <li>
+          <span class="relationship-label">{{ relationship.label }}</span>
+          <a href="{{ relationship.other.href }}">{{ relationship.other.title }}</a>
+          <span class="muted small">{{ relationship.other.kind }}</span>
+          {% if relationship.visibility != 'public' %}
+            <span class="badge badge-private">Private</span>
+          {% endif %}
+          {% if relationship.note %}<div class="muted small">{{ relationship.note }}</div>{% endif %}
+
+          {% if isAdmin and editable %}
+            <form method="post" action="/admin/relationships/{{ relationship.id }}/delete" class="inline-form">
+              <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+              <input type="hidden" name="returnTo" value="{{ returnTo }}" />
+              <button type="submit" class="link-button danger">Remove</button>
+            </form>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  {% if isAdmin and editable %}
+    <form method="post" action="/admin/relationships" class="relationship-form">
+      <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+      <input type="hidden" name="fromItemId" value="{{ record.id }}" />
+      <input type="hidden" name="returnTo" value="{{ returnTo }}" />
+
+      <p class="field">
+        <label for="predicateId">Relationship</label>
+        <select id="predicateId" name="predicateId" required>
+          {% for predicate in predicates %}
+            <option value="{{ predicate.id }}">{{ predicate.label }}</option>
+          {% endfor %}
+        </select>
+      </p>
+
+      <p class="field">
+        <label for="targetKind">To</label>
+        <select id="targetKind" name="targetKind">
+          <option value="person">Person</option>
+          <option value="organization">Organization</option>
+          <option value="place">Place</option>
+          <option value="event">Event</option>
+        </select>
+      </p>
+
+      <p class="field">
+        <label for="targetSlug">Slug</label>
+        <input type="text" id="targetSlug" name="targetSlug" placeholder="ion-antonescu" required />
+        <span class="hint">The URL segment of the other item's page.</span>
+      </p>
+
+      <p class="field">
+        <label for="relationshipNote">Note</label>
+        <input type="text" id="relationshipNote" name="note" maxlength="500" />
+      </p>
+
+      <p class="field">
+        <label for="relationshipVisibility">Visibility</label>
+        <select id="relationshipVisibility" name="visibility">
+          <option value="private">Private</option>
+          <option value="public">Public</option>
+        </select>
+        <span class="hint">
+          A relationship can be more sensitive than either page it connects.
+        </span>
+      </p>
+
+      <button type="submit">Add relationship</button>
+    </form>
+  {% endif %}
+</section>

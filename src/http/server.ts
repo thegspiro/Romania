@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import fastifyFormbody from '@fastify/formbody';
+import fastifyMultipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import fastifyView from '@fastify/view';
 import nunjucks from 'nunjucks';
@@ -29,6 +30,7 @@ import { applySecurityHeaders, robotsTxt } from './security.js';
 import { registerAuthRoutes } from '../routes/auth.js';
 import { registerAdminRoutes } from '../routes/admin.js';
 import { registerPublicRoutes } from '../routes/public.js';
+import { registerPublicContentRoutes } from '../routes/public-content.js';
 
 export interface AppContext {
   config: Config;
@@ -66,6 +68,12 @@ export async function buildServer(context: AppContext): Promise<FastifyInstance>
 
   await app.register(fastifyCookie);
   await app.register(fastifyFormbody);
+
+  // Uploads. The per-file limit is enforced again while streaming, in
+  // storeStream, so the two cannot drift apart.
+  await app.register(fastifyMultipart, {
+    limits: { fileSize: config.UPLOAD_MAX_BYTES, files: 1, fields: 40 },
+  });
 
   await app.register(fastifyView, {
     engine: { nunjucks },
@@ -147,6 +155,7 @@ export async function buildServer(context: AppContext): Promise<FastifyInstance>
   registerAuthRoutes(app, context);
   await registerAdminRoutes(app, context);
   registerPublicRoutes(app, context);
+  registerPublicContentRoutes(app, context);
 
   app.setNotFoundHandler(async (request, reply) => {
     return renderPage(config, request, reply, 'errors/404', {}, { status: 404, noindex: true });

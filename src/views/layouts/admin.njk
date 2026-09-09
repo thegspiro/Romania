@@ -6,7 +6,14 @@
   <div class="admin-shell">
     <nav class="admin-nav" aria-label="Administration">
       <a href="/admin"{% if currentPath == '/admin' %} aria-current="page"{% endif %}>Dashboard</a>
+      <a href="/admin/essays"{% if currentPath.startsWith('/admin/essays') %} aria-current="page"{% endif %}>Essays</a>
+      <a href="/admin/manuscripts"{% if currentPath.startsWith('/admin/manuscripts') %} aria-current="page"{% endif %}>Manuscripts</a>
       <a href="/admin/sources"{% if currentPath.startsWith('/admin/sources') %} aria-current="page"{% endif %}>Sources</a>
+      <a href="/admin/artifacts"{% if currentPath.startsWith('/admin/artifacts') %} aria-current="page"{% endif %}>Artifacts</a>
+      <a href="/admin/people"{% if currentPath.startsWith('/admin/people') %} aria-current="page"{% endif %}>People</a>
+      <a href="/admin/organizations"{% if currentPath.startsWith('/admin/organizations') %} aria-current="page"{% endif %}>Organizations</a>
+      <a href="/admin/places"{% if currentPath.startsWith('/admin/places') %} aria-current="page"{% endif %}>Places</a>
+      <a href="/admin/events"{% if currentPath.startsWith('/admin/events') %} aria-current="page"{% endif %}>Events</a>
       <a href="/admin/security"{% if currentPath.startsWith('/admin/security') %} aria-current="page"{% endif %}>Security</a>
     </nav>
     <div class="admin-body">

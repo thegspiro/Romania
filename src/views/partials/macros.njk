@@ -1,0 +1,105 @@
+{#
+  Shared form and display macros.
+
+  Every admin form is built from these, so a field renders identically
+  wherever it appears and a change to the markup happens in one place.
+#}
+
+{% macro field(name, label, values, type='text', hint='') %}
+  <p class="field">
+    <label for="{{ name }}">{{ label }}</label>
+    <input type="{{ type }}" id="{{ name }}" name="{{ name }}"
+           value="{{ values[name] if values[name] is not none else '' }}" />
+    {% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
+  </p>
+{% endmacro %}
+
+{% macro area(name, label, values, hint='', rows=3) %}
+  <p class="field">
+    <label for="{{ name }}">{{ label }}</label>
+    <textarea id="{{ name }}" name="{{ name }}" rows="{{ rows }}">{{ values[name] if values[name] is not none else '' }}</textarea>
+    {% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
+  </p>
+{% endmacro %}
+
+{% macro choose(name, label, values, options, hint='') %}
+  <p class="field">
+    <label for="{{ name }}">{{ label }}</label>
+    <select id="{{ name }}" name="{{ name }}">
+      {% for option in options %}
+        <option value="{{ option.value }}"{% if values[name] == option.value %} selected{% endif %}>
+          {{ option.label }}
+        </option>
+      {% endfor %}
+    </select>
+    {% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
+  </p>
+{% endmacro %}
+
+{% macro visibilityFields(values) %}
+  <fieldset>
+    <legend>Publication status</legend>
+    <p class="field">
+      <label for="visibility">Visibility</label>
+      <select id="visibility" name="visibility">
+        <option value="private"{% if values.visibility != 'public' %} selected{% endif %}>
+          Private — only visible to you
+        </option>
+        <option value="public"{% if values.visibility == 'public' %} selected{% endif %}>
+          Public — visible to anyone
+        </option>
+      </select>
+    </p>
+    <p class="field checkbox">
+      <label>
+        <input type="checkbox" name="noindex" {% if values.noindex %}checked{% endif %} />
+        Keep out of search engines even when public
+      </label>
+    </p>
+  </fieldset>
+{% endmacro %}
+
+{% macro badge(visibility) %}
+  {% if visibility == 'public' %}
+    <span class="badge badge-public">Public</span>
+  {% else %}
+    <span class="badge badge-private">Private</span>
+  {% endif %}
+{% endmacro %}
+
+{% macro errorList(errors) %}
+  {% if errors and errors.length > 0 %}
+    <div class="flash flash-error" role="alert">
+      <p>Please correct the following:</p>
+      <ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>
+    </div>
+  {% endif %}
+{% endmacro %}
+
+{% macro pagination(base, page, pageCount, search) %}
+  {% if pageCount > 1 %}
+    <nav class="pagination" aria-label="Pagination">
+      {% if page > 1 %}
+        <a href="{{ base }}?page={{ page - 1 }}{% if search %}&amp;q={{ search | urlencode }}{% endif %}">Previous</a>
+      {% endif %}
+      <span>Page {{ page }} of {{ pageCount }}</span>
+      {% if page < pageCount %}
+        <a href="{{ base }}?page={{ page + 1 }}{% if search %}&amp;q={{ search | urlencode }}{% endif %}">Next</a>
+      {% endif %}
+    </nav>
+  {% endif %}
+{% endmacro %}
+
+{#
+  Publish / unpublish and delete controls for an admin listing row.
+#}
+{% macro rowActions(basePath, item, csrfToken) %}
+  <form method="post" action="{{ basePath }}/{{ item.id }}/visibility" class="inline-form">
+    <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+    <input type="hidden" name="visibility" value="{{ 'private' if item.visibility == 'public' else 'public' }}" />
+    <button type="submit" class="link-button">
+      {{ 'Unpublish' if item.visibility == 'public' else 'Publish' }}
+    </button>
+  </form>
+  <a href="{{ item.href }}">View</a>
+{% endmacro %}

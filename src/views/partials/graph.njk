@@ -1,0 +1,24 @@
+{#
+  The relationship network.
+
+  The drawing is progressive enhancement: the mentions and relationships lists
+  above it carry the same information as text, so the page is complete without
+  JavaScript and without Cytoscape.
+#}
+<section class="graph-section">
+  <h2>Connections</h2>
+  <p class="hint">
+    Solid lines are relationships you recorded; dotted lines are mentions found
+    in your writing. Only what you may see is drawn.
+  </p>
+
+  <div
+    id="relationship-graph"
+    class="graph-canvas"
+    data-graph-url="/graph/{{ path }}/{{ record.slug }}.json"
+    role="img"
+    aria-label="Network of connections for {{ record.title }}"
+  ></div>
+
+  <p id="graph-status" class="muted small" role="status"></p>
+</section>
