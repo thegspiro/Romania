@@ -1,0 +1,42 @@
+{% extends "layouts/base.njk" %}
+{% import "partials/macros.njk" as ui %}
+
+{% block title %}Artifacts — Dissertation Research{% endblock %}
+
+{% block content %}
+  <h1>Artifacts</h1>
+
+  <form method="get" action="/artifacts" class="search-form" role="search">
+    <label for="q">Search artifacts</label>
+    <input type="search" id="q" name="q" value="{{ search }}" placeholder="Title, repository, location" />
+    <button type="submit">Search</button>
+  </form>
+
+  {% if artifacts.length == 0 %}
+    <p class="empty">
+      {% if search %}Nothing matches that search.{% else %}Nothing published yet.{% endif %}
+    </p>
+  {% else %}
+    <p class="muted">{{ total }} artifact{{ 's' if total != 1 }}</p>
+    <ul class="item-list artifact-list">
+      {% for artifact in artifacts %}
+        <li>
+          {% if artifact.fileObjectId %}
+            <a href="{{ artifact.href }}" class="artifact-thumb">
+              <img src="/files/{{ artifact.fileObjectId }}/thumb" alt="" loading="lazy" />
+            </a>
+          {% endif %}
+          <div>
+            <a href="{{ artifact.href }}">{{ artifact.title }}</a>
+            {% if artifact.visibility != 'public' %}{{ ui.badge(artifact.visibility) }}{% endif %}
+            {% if artifact.repositoryName %}
+              <div class="muted small">{{ artifact.repositoryName }}</div>
+            {% endif %}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+
+    {{ ui.pagination('/artifacts', page, pageCount, search) }}
+  {% endif %}
+{% endblock %}

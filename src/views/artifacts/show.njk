@@ -1,0 +1,59 @@
+{% extends "layouts/base.njk" %}
+
+{% block title %}{{ artifact.title }} — Dissertation Research{% endblock %}
+
+{% block head %}<link rel="canonical" href="{{ canonicalUrl }}" />{% endblock %}
+
+{% block content %}
+  <article class="artifact">
+    <header>
+      <p class="kicker">Artifact</p>
+      <h1>{{ artifact.title }}</h1>
+      {% if artifact.titleOriginal %}
+        <p class="title-original"{% if artifact.language %} lang="{{ artifact.language }}"{% endif %}>
+          {{ artifact.titleOriginal }}
+        </p>
+      {% endif %}
+      {% if artifact.visibility != 'public' %}
+        <p class="badge badge-private">Private — visible to you because you are signed in.</p>
+      {% endif %}
+    </header>
+
+    {% if artifact.fileObjectId %}
+      <figure class="artifact-figure">
+        {# Every request for these bytes re-checks this item's visibility. #}
+        <a href="/files/{{ artifact.fileObjectId }}/original">
+          <img src="/files/{{ artifact.fileObjectId }}/web" alt="{{ artifact.title }}" />
+        </a>
+        <figcaption>
+          {% if artifact.creditLine %}{{ artifact.creditLine }}{% endif %}
+          <a href="/files/{{ artifact.fileObjectId }}/original">Download the original</a>
+          <span class="muted small">({{ artifact.mimeType }}, {{ (artifact.byteSize / 1024) | round | int }} KB)</span>
+        </figcaption>
+      </figure>
+    {% endif %}
+
+    {% if summaryHtml %}
+      <div class="prose">{{ summaryHtml | safe }}</div>
+    {% endif %}
+
+    <section>
+      <h2>Provenance</h2>
+      <dl class="details">
+        {% if artifact.dateCreated %}<dt>Created</dt><dd>{{ artifact.dateCreated }}</dd>{% endif %}
+        {% if artifact.repositoryName %}<dt>Repository</dt><dd>{{ artifact.repositoryName }}</dd>{% endif %}
+        {% if artifact.physicalLocation %}<dt>Location</dt><dd>{{ artifact.physicalLocation }}</dd>{% endif %}
+        {% if artifact.provenance %}<dt>Provenance</dt><dd>{{ artifact.provenance }}</dd>{% endif %}
+        {% if artifact.rightsStatement %}<dt>Rights</dt><dd>{{ artifact.rightsStatement }}</dd>{% endif %}
+      </dl>
+    </section>
+
+    {% include "partials/mentions.njk" %}
+
+    {% if isAdmin %}
+      <p class="admin-actions">
+        <a href="/admin/artifacts/{{ artifact.id }}/edit">Edit this artifact</a>
+      </p>
+    {% endif %}
+  </article>
+{% endblock %}

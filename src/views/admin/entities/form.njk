@@ -1,0 +1,102 @@
+{% extends "layouts/admin.njk" %}
+{% import "partials/macros.njk" as ui %}
+
+{% block adminTitle %}
+  {{ 'Edit' if mode == 'edit' else 'New' }} {{ labels.singular | lower }}
+{% endblock %}
+
+{% block adminContent %}
+  <h1>{{ 'Edit' if mode == 'edit' else 'New' }} {{ labels.singular | lower }}</h1>
+
+  {{ ui.errorList(errors) }}
+
+  <form method="post" action="{{ action }}" class="stacked-form">
+    <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+
+    <fieldset>
+      <legend>Identity</legend>
+      <p class="field">
+        <label for="title">Name</label>
+        <input type="text" id="title" name="title" value="{{ values.title | default('') }}" required maxlength="500" />
+      </p>
+      {{ ui.field('titleOriginal', 'Name in original language or script', values) }}
+      {{ ui.field('language', 'Language', values, 'text', 'BCP-47 tag such as ro, en, de, hu.') }}
+      {{ ui.area('summary', 'Summary', values, 'Shown on the public page. Markdown.', 4) }}
+    </fieldset>
+
+    {% if kind == 'person' %}
+      <fieldset>
+        <legend>Person</legend>
+        {{ ui.field('familyName', 'Family name', values) }}
+        {{ ui.field('givenName', 'Given name', values) }}
+        {{ ui.area('alternateNames', 'Other names', values, 'One per line: maiden names, pseudonyms, transliterations.', 3) }}
+        {{ ui.field('birthDate', 'Born', values, 'text', 'Free text: "1882", "c. 1882", "n.d." are all fine.') }}
+        {{ ui.field('deathDate', 'Died', values) }}
+        {{ ui.field('occupation', 'Occupation or role', values) }}
+        {{ ui.area('biography', 'Biography', values, 'Markdown. References inserted here are indexed like anywhere else.', 6) }}
+      </fieldset>
+    {% elif kind == 'organization' %}
+      <fieldset>
+        <legend>Organization</legend>
+        {{ ui.area('alternateNames', 'Other names', values, 'One per line.', 3) }}
+        {{ ui.field('foundedDate', 'Founded', values) }}
+        {{ ui.field('dissolvedDate', 'Dissolved', values) }}
+        {{ ui.field('occupation', 'Type or sector', values) }}
+        {{ ui.area('biography', 'Description', values, 'Markdown.', 6) }}
+      </fieldset>
+    {% elif kind == 'place' %}
+      <fieldset>
+        <legend>Place</legend>
+        {{ ui.field('latitude', 'Latitude', values, 'text', 'Decimal degrees. Leave both blank if unknown.') }}
+        {{ ui.field('longitude', 'Longitude', values) }}
+        {{ ui.choose('geocodePrecision', 'Precision', values, [
+          { value: 'unknown', label: 'Unknown' },
+          { value: 'exact', label: 'Exact' },
+          { value: 'approximate', label: 'Approximate' },
+          { value: 'region', label: 'Region' }
+        ]) }}
+        {{ ui.field('countryCode', 'Country code', values, 'text', 'Two letters, e.g. RO.') }}
+        {{ ui.field('adminArea', 'Region or county', values) }}
+        {{ ui.area('historicalNames', 'Historical names', values, 'One per line. Borders and regimes change names.', 3) }}
+      </fieldset>
+    {% elif kind == 'event' %}
+      <fieldset>
+        <legend>Event</legend>
+        {{ ui.field('startDate', 'Start date', values, 'text', 'YYYY-MM-DD.') }}
+        {{ ui.field('endDate', 'End date', values, 'text', 'YYYY-MM-DD.') }}
+        {{ ui.choose('datePrecision', 'Date precision', values, [
+          { value: 'unknown', label: 'Unknown' },
+          { value: 'day', label: 'Day' },
+          { value: 'month', label: 'Month' },
+          { value: 'year', label: 'Year' },
+          { value: 'decade', label: 'Decade' }
+        ], 'How much of the date is actually known. 1944-01-01 with precision "year" means 1944.') }}
+        {{ ui.field('placeSlug', 'Place', values, 'text', "The place page's URL segment, e.g. iasi.") }}
+      </fieldset>
+    {% endif %}
+
+    {{ ui.visibilityFields(values) }}
+
+    <div class="form-actions">
+      <button type="submit">{{ 'Save changes' if mode == 'edit' else 'Create' }}</button>
+      <a href="/admin/{{ path }}">Cancel</a>
+    </div>
+  </form>
+
+  {% if mode == 'edit' %}
+    {% set editable = true %}
+    {% set returnTo = '/admin/' + path + '/' + record.id + '/edit' %}
+    {% include "partials/relationships.njk" %}
+    {% include "partials/mentions.njk" %}
+
+    <form method="post" action="/admin/{{ path }}/{{ record.id }}/delete" class="danger-form">
+      <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+      <h2>Delete</h2>
+      <p class="hint">
+        Refused while your writing still refers to this. Remove those
+        references first.
+      </p>
+      <button type="submit" class="danger">Delete</button>
+    </form>
+  {% endif %}
+{% endblock %}

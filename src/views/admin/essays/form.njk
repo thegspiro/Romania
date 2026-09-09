@@ -1,0 +1,133 @@
+{% extends "layouts/admin.njk" %}
+{% import "partials/macros.njk" as ui %}
+
+{% block adminTitle %}{{ 'Edit essay' if mode == 'edit' else 'New essay' }}{% endblock %}
+
+{% block adminContent %}
+  <h1>{{ 'Edit essay' if mode == 'edit' else 'New essay' }}</h1>
+
+  {{ ui.errorList(errors) }}
+
+  {% if unresolved and unresolved.length > 0 %}
+    <div class="flash flash-error" role="alert">
+      <p>These references point at nothing and will render as plain text:</p>
+      <ul>{% for reference in unresolved %}<li><code>{{ reference }}</code></li>{% endfor %}</ul>
+    </div>
+  {% endif %}
+
+  {% if privateCitations and privateCitations.length > 0 %}
+    <div class="flash flash-info">
+      <p>
+        These sources are still private, so their footnotes will be withheld
+        from anyone but you. Publish them if the citation should be readable:
+      </p>
+      <ul>{% for title in privateCitations %}<li>{{ title }}</li>{% endfor %}</ul>
+    </div>
+  {% endif %}
+
+  {% if placements and placements.length > 0 %}
+    <p class="muted">
+      Part of
+      {% for placement in placements %}
+        <a href="/admin/manuscripts/{{ placement.manuscript.id }}/outline">{{ placement.manuscript.title }}</a>{{ ', ' if not loop.last }}
+      {% endfor %}
+    </p>
+  {% endif %}
+
+  <form method="post" action="{{ action }}" class="stacked-form editor-form">
+    <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+
+    <fieldset>
+      <legend>Identity</legend>
+      <p class="field">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" value="{{ values.title | default('') }}" required maxlength="500" />
+      </p>
+      {{ ui.field('titleOriginal', 'Title in original language', values) }}
+      {{ ui.field('language', 'Language', values, 'text', 'BCP-47 tag such as ro, en.') }}
+      {{ ui.area('summary', 'Summary', values, 'Shown in listings and as the abstract.', 3) }}
+      {{ ui.choose('status', 'Status', values, [
+        { value: 'draft', label: 'Draft' },
+        { value: 'in_review', label: 'In review' },
+        { value: 'final', label: 'Final' }
+      ]) }}
+    </fieldset>
+
+    <fieldset>
+      <legend>Body</legend>
+
+      {#
+        The editor: a plain textarea, a picker that inserts references at the
+        cursor, and a preview rendered by the server through the same pipeline
+        the published page uses.
+      #}
+      <div class="editor" id="essay-editor" data-csrf="{{ csrfToken }}">
+        <div class="editor-toolbar">
+          <label for="reference-kind" class="visually-hidden">Reference type</label>
+          <select id="reference-kind">
+            <option value="all">Anything</option>
+            <option value="person">People</option>
+            <option value="organization">Organizations</option>
+            <option value="place">Places</option>
+            <option value="event">Events</option>
+            <option value="artifact">Artifacts</option>
+            <option value="cite">Sources (cite)</option>
+            <option value="essay">Essays</option>
+          </select>
+
+          <label for="reference-search" class="visually-hidden">Find something to link</label>
+          <input
+            type="search"
+            id="reference-search"
+            placeholder="Find a person, place or source to insert…"
+            autocomplete="off"
+          />
+
+          <button type="button" id="editor-preview">Preview</button>
+        </div>
+
+        <ul id="reference-results" class="reference-results" hidden></ul>
+
+        <div class="editor-panes">
+          <p class="field">
+            <label for="bodyMarkdown" class="visually-hidden">Body</label>
+            <textarea id="bodyMarkdown" name="bodyMarkdown" rows="28" spellcheck="true">{{ values.bodyMarkdown | default('') }}</textarea>
+          </p>
+
+          <div id="editor-preview-pane" class="preview-pane" hidden>
+            <h3>Preview</h3>
+            <div id="preview-body" class="prose"></div>
+            <ol id="preview-footnotes" class="footnotes"></ol>
+          </div>
+        </div>
+      </div>
+
+      <p class="hint">
+        Markdown. Use the search above to insert a reference — it writes
+        something like <code>[[person:ion-antonescu|Antonescu]]</code> at the
+        cursor. A reference to a source becomes a footnote.
+      </p>
+    </fieldset>
+
+    {{ ui.visibilityFields(values) }}
+
+    <div class="form-actions">
+      <button type="submit">{{ 'Save changes' if mode == 'edit' else 'Create essay' }}</button>
+      <a href="/admin/essays">Cancel</a>
+      {% if mode == 'edit' %}<a href="{{ essay.href }}">View public page</a>{% endif %}
+    </div>
+  </form>
+
+  {% if mode == 'edit' %}
+    <form method="post" action="/admin/essays/{{ essay.id }}/delete" class="danger-form">
+      <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+      <h2>Delete</h2>
+      <p class="hint">Refused while other writing still refers to this essay.</p>
+      <button type="submit" class="danger">Delete this essay</button>
+    </form>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  <script nonce="{{ nonce }}" src="/assets/js/editor.js"></script>
+{% endblock %}

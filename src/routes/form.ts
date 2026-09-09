@@ -1,0 +1,118 @@
+/**
+ * Reading HTML form submissions.
+ *
+ * Request bodies arrive as `unknown`. Every field is read through these
+ * helpers, which narrow explicitly rather than casting, so a missing or
+ * hostile field becomes an empty string instead of `undefined` propagating
+ * into a query.
+ */
+import type { FastifyRequest } from 'fastify';
+import { notFound } from '../http/errors.js';
+
+export function readString(body: unknown, field: string): string {
+  const value = (body as Record<string, unknown> | undefined)?.[field];
+  return typeof value === 'string' ? value : '';
+}
+
+export function readCheckbox(body: unknown, field: string): boolean {
+  const value = (body as Record<string, unknown> | undefined)?.[field];
+  return value === 'on' || value === 'true' || value === '1';
+}
+
+export function readInteger(body: unknown, field: string, fallback: number): number {
+  const parsed = Number(readString(body, field));
+  return Number.isSafeInteger(parsed) ? parsed : fallback;
+}
+
+/** Reads a positive integer route parameter, 404ing on anything else. */
+export function parseId(request: FastifyRequest, parameter = 'id'): number {
+  const raw = (request.params as Record<string, string | undefined>)[parameter] ?? '';
+  const id = Number(raw);
+  if (!Number.isSafeInteger(id) || id <= 0) throw notFound(`invalid ${parameter} "${raw}"`);
+  return id;
+}
+
+/**
+ * Reads a slug route parameter.
+ *
+ * Slugs are produced by `slugify`, so anything outside that alphabet cannot
+ * name a real row and is refused before it reaches SQL.
+ */
+export function parseSlug(request: FastifyRequest, parameter = 'slug'): string {
+  const slug = (request.params as Record<string, string | undefined>)[parameter] ?? '';
+  if (!/^[a-z0-9-]{1,190}$/.test(slug)) throw notFound(`invalid slug "${slug}"`);
+  return slug;
+}
+
+export type Flash = { kind: 'success' | 'error' | 'info'; text: string };
+
+/**
+ * Messages addressed by code.
+ *
+ * Redirects carry a code, never text, so nothing from a query string is ever
+ * rendered into a page.
+ */
+export const FLASH_MESSAGES: Readonly<Record<string, Flash>> = Object.freeze({
+  source_created: { kind: 'success', text: 'Source created.' },
+  source_updated: { kind: 'success', text: 'Source updated.' },
+  source_deleted: { kind: 'success', text: 'Source deleted.' },
+  source_published: { kind: 'success', text: 'Source is now public.' },
+  source_unpublished: { kind: 'success', text: 'Source is now private.' },
+  source_cited: {
+    kind: 'error',
+    text: 'That source is still cited by other items, so it was not deleted. Remove the citations first.',
+  },
+  passkey_revoked: { kind: 'success', text: 'Passkey removed.' },
+  passkey_last: {
+    kind: 'error',
+    text: 'That is your only passkey. Register another before removing this one.',
+  },
+
+  entity_created: { kind: 'success', text: 'Created.' },
+  entity_updated: { kind: 'success', text: 'Saved.' },
+  entity_deleted: { kind: 'success', text: 'Deleted.' },
+  entity_published: { kind: 'success', text: 'Now public.' },
+  entity_unpublished: { kind: 'success', text: 'Now private.' },
+  entity_referenced: {
+    kind: 'error',
+    text: 'Your writing still refers to this, so it was not deleted. Remove those references first.',
+  },
+
+  relationship_added: { kind: 'success', text: 'Relationship added.' },
+  relationship_removed: { kind: 'success', text: 'Relationship removed.' },
+  relationship_duplicate: { kind: 'error', text: 'That relationship already exists.' },
+  relationship_invalid: { kind: 'error', text: 'Choose a different item and a relationship type.' },
+
+  essay_created: { kind: 'success', text: 'Essay created.' },
+  essay_updated: { kind: 'success', text: 'Essay saved.' },
+  essay_deleted: { kind: 'success', text: 'Essay deleted.' },
+
+  artifact_created: { kind: 'success', text: 'Artifact created.' },
+  artifact_updated: { kind: 'success', text: 'Artifact saved.' },
+  artifact_deleted: { kind: 'success', text: 'Artifact deleted.' },
+  file_uploaded: { kind: 'success', text: 'File uploaded. Derivatives are being generated.' },
+
+  manuscript_created: { kind: 'success', text: 'Manuscript created.' },
+  manuscript_updated: { kind: 'success', text: 'Manuscript saved.' },
+  manuscript_deleted: { kind: 'success', text: 'Manuscript deleted.' },
+  section_added: { kind: 'success', text: 'Added to the outline.' },
+  section_removed: { kind: 'success', text: 'Removed from the outline.' },
+  section_updated: { kind: 'success', text: 'Outline updated.' },
+  section_duplicate: { kind: 'error', text: 'That item is already in this manuscript.' },
+  section_unknown: { kind: 'error', text: 'No such item to add.' },
+  build_queued: {
+    kind: 'success',
+    text: 'Compilation queued. Refresh in a moment for the result.',
+  },
+});
+
+export function flashFor(request: FastifyRequest): Flash | null {
+  const code = (request.query as { msg?: unknown } | undefined)?.msg;
+  if (typeof code !== 'string') return null;
+  return FLASH_MESSAGES[code] ?? null;
+}
+
+/** The signed-in administrator's id, for audit entries. */
+export function actorId(request: FastifyRequest): string {
+  return request.viewer.kind === 'admin' ? String(request.viewer.userId) : 'unknown';
+}

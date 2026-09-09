@@ -5,7 +5,7 @@
  * The guard is a route-level hook rather than a check inside each handler, so
  * adding a handler cannot accidentally leave it unprotected.
  */
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import type { RowDataPacket } from 'mysql2/promise';
 import type { AppContext } from '../http/server.js';
 import { renderPage } from '../http/context.js';
@@ -41,49 +41,11 @@ import {
 } from '../auth/repository.js';
 import { generateRecoveryCodes, hashRecoveryCode } from '../auth/recovery.js';
 import { policyFromConfig } from '../auth/password.js';
-
-/** Fixed messages, addressed by code, so nothing from a query string is rendered. */
-const FLASH_MESSAGES: Record<string, { kind: 'success' | 'error' | 'info'; text: string }> = {
-  source_created: { kind: 'success', text: 'Source created.' },
-  source_updated: { kind: 'success', text: 'Source updated.' },
-  source_deleted: { kind: 'success', text: 'Source deleted.' },
-  source_published: { kind: 'success', text: 'Source is now public.' },
-  source_unpublished: { kind: 'success', text: 'Source is now private.' },
-  source_cited: {
-    kind: 'error',
-    text: 'That source is still cited by other items, so it was not deleted. Remove the citations first.',
-  },
-  passkey_revoked: { kind: 'success', text: 'Passkey removed.' },
-  passkey_last: {
-    kind: 'error',
-    text: 'That is your only passkey. Register another before removing this one.',
-  },
-};
-
-function flashFor(
-  request: FastifyRequest,
-): { kind: 'success' | 'error' | 'info'; text: string } | null {
-  const code = (request.query as { msg?: unknown } | undefined)?.msg;
-  if (typeof code !== 'string') return null;
-  return FLASH_MESSAGES[code] ?? null;
-}
-
-function readString(body: unknown, field: string): string {
-  const value = (body as Record<string, unknown> | undefined)?.[field];
-  return typeof value === 'string' ? value : '';
-}
-
-function readCheckbox(body: unknown, field: string): boolean {
-  const value = (body as Record<string, unknown> | undefined)?.[field];
-  return value === 'on' || value === 'true' || value === '1';
-}
-
-function parseId(request: FastifyRequest): number {
-  const raw = (request.params as { id?: string }).id ?? '';
-  const id = Number(raw);
-  if (!Number.isSafeInteger(id) || id <= 0) throw notFound(`invalid id "${raw}"`);
-  return id;
-}
+import { actorId, flashFor, parseId, readCheckbox, readString } from './form.js';
+import { registerAdminEntityRoutes } from './admin-entities.js';
+import { registerAdminEssayRoutes } from './admin-essays.js';
+import { registerAdminArtifactRoutes } from './admin-artifacts.js';
+import { registerAdminManuscriptRoutes } from './admin-manuscripts.js';
 
 /** Collects the source form into the repository's input shape. */
 function readSourceForm(body: unknown): { input: SourceInput; errors: string[] } {
@@ -183,6 +145,8 @@ export async function registerAdminRoutes(
     // hook below applies to the routes registered here and to nothing else.
     // eslint-disable-next-line @typescript-eslint/require-await
     async (admin) => {
+      // Every area registered inside this scope inherits the guard below, so
+      // adding a handler cannot accidentally leave it unprotected.
       // Callback style: see the note on the preHandler hook in http/server.ts.
       // A hook with fewer than three parameters must return a promise, so a
       // synchronous guard written that way would hang every admin request.
@@ -199,6 +163,11 @@ export async function registerAdminRoutes(
         // called, or Fastify would continue into the route handler.
         void reply.redirect(target);
       });
+
+      registerAdminEntityRoutes(admin, context);
+      registerAdminEssayRoutes(admin, context);
+      registerAdminArtifactRoutes(admin, context);
+      registerAdminManuscriptRoutes(admin, context);
 
       admin.get('/admin', async (request, reply) => {
         const counts = await queryOne<
@@ -302,7 +271,7 @@ export async function registerAdminRoutes(
         await recordAudit(
           pool,
           {
-            actor: String(request.viewer.kind === 'admin' ? request.viewer.userId : 0),
+            actor: actorId(request),
             action: 'source.create',
             itemId: id,
             detail: { title: input.title, visibility: input.visibility },
@@ -370,7 +339,7 @@ export async function registerAdminRoutes(
         await recordAudit(
           pool,
           {
-            actor: String(request.viewer.kind === 'admin' ? request.viewer.userId : 0),
+            actor: actorId(request),
             action: 'source.update',
             itemId: id,
             detail: { title: input.title, visibility: input.visibility },
@@ -393,7 +362,7 @@ export async function registerAdminRoutes(
         await recordAudit(
           pool,
           {
-            actor: String(request.viewer.kind === 'admin' ? request.viewer.userId : 0),
+            actor: actorId(request),
             action: requested === 'public' ? 'source.publish' : 'source.unpublish',
             itemId: id,
             ip: request.ip,
@@ -415,7 +384,7 @@ export async function registerAdminRoutes(
         await recordAudit(
           pool,
           {
-            actor: String(request.viewer.kind === 'admin' ? request.viewer.userId : 0),
+            actor: actorId(request),
             action: 'source.delete',
             itemId: id,
             ip: request.ip,
@@ -465,7 +434,7 @@ export async function registerAdminRoutes(
         await recordAudit(
           pool,
           {
-            actor: String(request.viewer.userId),
+            actor: actorId(request),
             action: 'auth.passkey.revoked',
             itemId: credentialId,
             ip: request.ip,

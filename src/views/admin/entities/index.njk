@@ -1,0 +1,54 @@
+{% extends "layouts/admin.njk" %}
+{% import "partials/macros.njk" as ui %}
+
+{% block adminTitle %}{{ labels.plural }}{% endblock %}
+
+{% block adminContent %}
+  <div class="page-heading">
+    <h1>{{ labels.plural }}</h1>
+    <a class="button" href="/admin/{{ path }}/new">Add {{ labels.singular | lower }}</a>
+  </div>
+
+  <form method="get" action="/admin/{{ path }}" class="filter-form" role="search">
+    <label for="q">Search</label>
+    <input type="search" id="q" name="q" value="{{ search }}" />
+
+    <label for="visibility">Visibility</label>
+    <select id="visibility" name="visibility">
+      <option value=""{% if visibilityFilter == '' %} selected{% endif %}>All</option>
+      <option value="public"{% if visibilityFilter == 'public' %} selected{% endif %}>Public</option>
+      <option value="private"{% if visibilityFilter == 'private' %} selected{% endif %}>Private</option>
+    </select>
+
+    <button type="submit">Filter</button>
+  </form>
+
+  {% if items.length == 0 %}
+    <p class="empty">Nothing here yet.</p>
+  {% else %}
+    <p class="muted">{{ total }} record{{ 's' if total != 1 }}</p>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Visibility</th>
+          <th scope="col"><span class="visually-hidden">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+          <tr>
+            <td>
+              <a href="/admin/{{ path }}/{{ item.id }}/edit">{{ item.title }}</a>
+              {% if item.summary %}<div class="muted small">{{ item.summary | truncate(90) }}</div>{% endif %}
+            </td>
+            <td>{{ ui.badge(item.visibility) }}</td>
+            <td class="row-actions">{{ ui.rowActions('/admin/' + path, item, csrfToken) }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {{ ui.pagination('/admin/' + path, page, pageCount, search) }}
+  {% endif %}
+{% endblock %}

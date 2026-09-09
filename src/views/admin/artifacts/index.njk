@@ -1,0 +1,55 @@
+{% extends "layouts/admin.njk" %}
+{% import "partials/macros.njk" as ui %}
+
+{% block adminTitle %}Artifacts{% endblock %}
+
+{% block adminContent %}
+  <div class="page-heading">
+    <h1>Artifacts</h1>
+    <a class="button" href="/admin/artifacts/new">Add artifact</a>
+  </div>
+
+  <form method="get" action="/admin/artifacts" class="filter-form" role="search">
+    <label for="q">Search</label>
+    <input type="search" id="q" name="q" value="{{ search }}" placeholder="Title, repository, location" />
+
+    <label for="visibility">Visibility</label>
+    <select id="visibility" name="visibility">
+      <option value=""{% if visibilityFilter == '' %} selected{% endif %}>All</option>
+      <option value="public"{% if visibilityFilter == 'public' %} selected{% endif %}>Public</option>
+      <option value="private"{% if visibilityFilter == 'private' %} selected{% endif %}>Private</option>
+    </select>
+
+    <button type="submit">Filter</button>
+  </form>
+
+  {% if artifacts.length == 0 %}
+    <p class="empty">No artifacts yet.</p>
+  {% else %}
+    <p class="muted">{{ total }} artifact{{ 's' if total != 1 }}</p>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th scope="col">Title</th>
+          <th scope="col">File</th>
+          <th scope="col">Repository</th>
+          <th scope="col">Visibility</th>
+          <th scope="col"><span class="visually-hidden">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for artifact in artifacts %}
+          <tr>
+            <td><a href="/admin/artifacts/{{ artifact.id }}/edit">{{ artifact.title }}</a></td>
+            <td class="muted small">{{ artifact.mimeType if artifact.mimeType else '—' }}</td>
+            <td class="muted small">{{ artifact.repositoryName if artifact.repositoryName else '—' }}</td>
+            <td>{{ ui.badge(artifact.visibility) }}</td>
+            <td class="row-actions">{{ ui.rowActions('/admin/artifacts', artifact, csrfToken) }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {{ ui.pagination('/admin/artifacts', page, pageCount, search) }}
+  {% endif %}
+{% endblock %}

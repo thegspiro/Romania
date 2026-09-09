@@ -1,0 +1,55 @@
+{% extends "layouts/admin.njk" %}
+{% import "partials/macros.njk" as ui %}
+
+{% block adminTitle %}Essays{% endblock %}
+
+{% block adminContent %}
+  <div class="page-heading">
+    <h1>Essays</h1>
+    <a class="button" href="/admin/essays/new">New essay</a>
+  </div>
+
+  <form method="get" action="/admin/essays" class="filter-form" role="search">
+    <label for="q">Search</label>
+    <input type="search" id="q" name="q" value="{{ search }}" placeholder="Title or body text" />
+
+    <label for="visibility">Visibility</label>
+    <select id="visibility" name="visibility">
+      <option value=""{% if visibilityFilter == '' %} selected{% endif %}>All</option>
+      <option value="public"{% if visibilityFilter == 'public' %} selected{% endif %}>Public</option>
+      <option value="private"{% if visibilityFilter == 'private' %} selected{% endif %}>Private</option>
+    </select>
+
+    <button type="submit">Filter</button>
+  </form>
+
+  {% if essays.length == 0 %}
+    <p class="empty">No essays yet.</p>
+  {% else %}
+    <p class="muted">{{ total }} essay{{ 's' if total != 1 }}</p>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th scope="col">Title</th>
+          <th scope="col">Status</th>
+          <th scope="col">Words</th>
+          <th scope="col">Visibility</th>
+          <th scope="col"><span class="visually-hidden">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for essay in essays %}
+          <tr>
+            <td><a href="/admin/essays/{{ essay.id }}/edit">{{ essay.title }}</a></td>
+            <td>{{ essay.status | replace('_', ' ') }}</td>
+            <td>{{ essay.wordCount }}</td>
+            <td>{{ ui.badge(essay.visibility) }}</td>
+            <td class="row-actions">{{ ui.rowActions('/admin/essays', essay, csrfToken) }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {{ ui.pagination('/admin/essays', page, pageCount, search) }}
+  {% endif %}
+{% endblock %}
