@@ -1,0 +1,46 @@
+{% extends "layouts/admin.njk" %}
+{% import "partials/macros.njk" as ui %}
+
+{% block adminTitle %}Manuscripts{% endblock %}
+
+{% block adminContent %}
+  <div class="page-heading">
+    <h1>Manuscripts</h1>
+    <a class="button" href="/admin/manuscripts/new">New manuscript</a>
+  </div>
+
+  <p class="lede">
+    A manuscript arranges essays into a single document. The essays stay
+    separate pages; the manuscript records how they fit together.
+  </p>
+
+  {% if manuscripts.length == 0 %}
+    <p class="empty">No manuscripts yet.</p>
+  {% else %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th scope="col">Title</th>
+          <th scope="col">Visibility</th>
+          <th scope="col"><span class="visually-hidden">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for manuscript in manuscripts %}
+          <tr>
+            <td>
+              <a href="/admin/manuscripts/{{ manuscript.id }}/outline">{{ manuscript.title }}</a>
+              {% if manuscript.subtitle %}<div class="muted small">{{ manuscript.subtitle }}</div>{% endif %}
+            </td>
+            <td>{{ ui.badge(manuscript.visibility) }}</td>
+            <td class="row-actions">
+              <a href="/admin/manuscripts/{{ manuscript.id }}/outline">Outline</a>
+              <a href="/admin/manuscripts/{{ manuscript.id }}/edit">Settings</a>
+              <a href="{{ manuscript.href }}">View</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endblock %}

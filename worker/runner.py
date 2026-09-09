@@ -34,7 +34,7 @@ import pymysql
 
 from worker.config import Config, ConfigError, load_config
 from worker.db import connect, transaction
-from worker.jobs import backup, bibliography_import, derivatives, geocode
+from worker.jobs import backup, bibliography_import, derivatives, geocode, manuscript_compile
 
 LOGGER = logging.getLogger("worker")
 
@@ -46,6 +46,7 @@ HANDLERS: dict[str, JobHandler] = {
     "bibliography.import": bibliography_import.run,
     "place.geocode": geocode.run,
     "backup.run": backup.run,
+    "manuscript.compile": manuscript_compile.run,
 }
 
 MAX_BACKOFF_SECONDS = 3600

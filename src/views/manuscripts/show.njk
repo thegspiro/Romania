@@ -1,0 +1,61 @@
+{% extends "layouts/base.njk" %}
+{% import "partials/macros.njk" as ui %}
+
+{% block title %}{{ manuscript.title }} — Dissertation Research{% endblock %}
+
+{% block head %}<link rel="canonical" href="{{ canonicalUrl }}" />{% endblock %}
+
+{% block content %}
+  <article class="manuscript">
+    <header>
+      <h1>{{ manuscript.title }}</h1>
+      {% if manuscript.subtitle %}<p class="lede">{{ manuscript.subtitle }}</p>{% endif %}
+      <p class="muted small">
+        {% if manuscript.authorName %}{{ manuscript.authorName }} · {% endif %}
+        {% if manuscript.institution %}{{ manuscript.institution }} · {% endif %}
+        {{ sections.length }} section{{ 's' if sections.length != 1 }} · {{ wordCount }} words
+      </p>
+      {% if manuscript.visibility != 'public' %}
+        <p class="badge badge-private">Private — visible to you because you are signed in.</p>
+      {% endif %}
+    </header>
+
+    {% if abstractHtml %}
+      <section>
+        <h2>Abstract</h2>
+        <div class="prose">{{ abstractHtml | safe }}</div>
+      </section>
+    {% endif %}
+
+    <section>
+      <h2>Contents</h2>
+
+      {#
+        Private sections are absent entirely — no placeholder and no gap in the
+        numbering. A "section withheld" marker would disclose that it exists.
+      #}
+      {% if sections.length == 0 %}
+        <p class="empty">Nothing published from this manuscript yet.</p>
+      {% else %}
+        <ol class="contents">
+          {% for section in sections %}
+            <li class="contents-depth-{{ section.depth }}">
+              <a href="{{ section.href }}?manuscript={{ manuscript.slug }}">{{ section.title }}</a>
+              {% if section.visibility != 'public' %}{{ ui.badge(section.visibility) }}{% endif %}
+              {% if section.role != 'body' %}
+                <span class="muted small">{{ section.role | replace('_', ' ') }}</span>
+              {% endif %}
+              <span class="muted small">{{ section.wordCount }} words</span>
+            </li>
+          {% endfor %}
+        </ol>
+      {% endif %}
+    </section>
+
+    {% if isAdmin %}
+      <p class="admin-actions">
+        <a href="/admin/manuscripts/{{ manuscript.id }}/outline">Edit the outline or compile</a>
+      </p>
+    {% endif %}
+  </article>
+{% endblock %}
