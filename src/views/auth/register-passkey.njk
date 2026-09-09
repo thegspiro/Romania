@@ -1,0 +1,58 @@
+{% extends "layouts/base.njk" %}
+
+{% block title %}Register a passkey — Dissertation Research{% endblock %}
+
+{% block content %}
+  <div class="narrow">
+    <h1>Register a passkey</h1>
+
+    {% if firstTime %}
+      <p>
+        This account has no passkey yet, so there is no second factor to present.
+        Register one now to finish signing in.
+      </p>
+      <p class="muted">
+        Any authenticator works: a password manager such as Bitwarden, the
+        passkey support built into your phone or laptop, or a hardware security
+        key. Registering at least one that is <em>not</em> in the same vault as
+        your password keeps the two factors genuinely independent.
+      </p>
+    {% else %}
+      <p>Add another authenticator to this account.</p>
+    {% endif %}
+
+    <p id="passkey-error" class="flash flash-error" role="alert" hidden></p>
+
+    <div
+      id="passkey-register"
+      data-csrf="{{ csrfToken }}"
+      data-options-url="/auth/passkey/register/options"
+      data-verify-url="/auth/passkey/register/verify"
+    >
+      <label for="passkey-label">Name for this passkey</label>
+      <input
+        type="text"
+        id="passkey-label"
+        maxlength="190"
+        placeholder="Bitwarden, iPhone, YubiKey…"
+        autocomplete="off"
+      />
+      <button type="button" id="passkey-button">Register passkey</button>
+    </div>
+
+    <noscript>
+      <p class="flash flash-error">Registering a passkey needs JavaScript.</p>
+    </noscript>
+
+    {% if firstTime %}
+      <p class="muted">
+        Cannot register right now? <a href="/login/recovery">Use a recovery code</a>.
+      </p>
+    {% endif %}
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script nonce="{{ nonce }}" src="/assets/vendor/simplewebauthn/browser.umd.min.js"></script>
+  <script nonce="{{ nonce }}" src="/assets/js/passkey.js"></script>
+{% endblock %}

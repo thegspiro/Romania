@@ -1,0 +1,31 @@
+{% extends "layouts/base.njk" %}
+
+{% block title %}Dissertation Research{% endblock %}
+
+{% block content %}
+  <h1>Dissertation Research</h1>
+  <p class="lede">
+    Sources, artifacts and writing from an ongoing doctoral project. Everything
+    published here carries a full Chicago-style citation.
+  </p>
+
+  <section>
+    <h2>Recently added sources</h2>
+    {% if recentSources.length == 0 %}
+      <p class="empty">No sources have been published yet.</p>
+    {% else %}
+      <ul class="item-list">
+        {% for source in recentSources %}
+          <li>
+            <a href="/sources/{{ source.slug }}">{{ source.title }}</a>
+            {% if source.issuedYear %}<span class="muted">({{ source.issuedYear }})</span>{% endif %}
+            {% if source.visibility != 'public' %}
+              <span class="badge badge-private">Private</span>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+      <p><a href="/sources">All {{ totalSources }} sources</a></p>
+    {% endif %}
+  </section>
+{% endblock %}

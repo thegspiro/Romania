@@ -1,0 +1,16 @@
+{% extends "layouts/base.njk" %}
+
+{% block title %}{% block adminTitle %}Admin{% endblock %} — Dissertation Research{% endblock %}
+
+{% block content %}
+  <div class="admin-shell">
+    <nav class="admin-nav" aria-label="Administration">
+      <a href="/admin"{% if currentPath == '/admin' %} aria-current="page"{% endif %}>Dashboard</a>
+      <a href="/admin/sources"{% if currentPath.startsWith('/admin/sources') %} aria-current="page"{% endif %}>Sources</a>
+      <a href="/admin/security"{% if currentPath.startsWith('/admin/security') %} aria-current="page"{% endif %}>Security</a>
+    </nav>
+    <div class="admin-body">
+      {% block adminContent %}{% endblock %}
+    </div>
+  </div>
+{% endblock %}

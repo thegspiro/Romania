@@ -1,0 +1,156 @@
+{% extends "layouts/admin.njk" %}
+
+{% block adminTitle %}{{ 'Edit source' if mode == 'edit' else 'New source' }}{% endblock %}
+
+{% macro field(name, label, values, type='text', hint='') %}
+  <p class="field">
+    <label for="{{ name }}">{{ label }}</label>
+    <input type="{{ type }}" id="{{ name }}" name="{{ name }}" value="{{ values[name] | default('') }}" />
+    {% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
+  </p>
+{% endmacro %}
+
+{% macro area(name, label, values, hint='', rows=3) %}
+  <p class="field">
+    <label for="{{ name }}">{{ label }}</label>
+    <textarea id="{{ name }}" name="{{ name }}" rows="{{ rows }}">{{ values[name] | default('') }}</textarea>
+    {% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
+  </p>
+{% endmacro %}
+
+{% block adminContent %}
+  <h1>{{ 'Edit source' if mode == 'edit' else 'New source' }}</h1>
+
+  {% if errors.length > 0 %}
+    <div class="flash flash-error" role="alert">
+      <p>Please correct the following:</p>
+      <ul>
+        {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  {% if preview %}
+    <section class="citation-block">
+      <h2>Preview</h2>
+      {# citeproc output, sanitised in src/citations/render.ts #}
+      <p class="csl-entry">{{ preview.bibliography | safe }}</p>
+      <p class="csl-note">{{ preview.note | safe }}</p>
+    </section>
+  {% endif %}
+
+  <form method="post" action="{{ action }}" class="stacked-form">
+    <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+
+    <fieldset>
+      <legend>Identity</legend>
+
+      <p class="field">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" value="{{ values.title | default('') }}" required maxlength="500" />
+      </p>
+
+      {{ field('titleOriginal', 'Title in original language', values, 'text',
+               'Use when the title above is a translation or transliteration.') }}
+
+      <p class="field">
+        <label for="cslType">Type</label>
+        <select id="cslType" name="cslType" required>
+          {% for type in sourceTypes %}
+            <option value="{{ type.value }}"{% if values.cslType == type.value %} selected{% endif %}>
+              {{ type.label }}
+            </option>
+          {% endfor %}
+        </select>
+      </p>
+
+      {{ field('language', 'Language', values, 'text', 'BCP-47 tag such as ro, en, de, hu.') }}
+      {{ area('summary', 'Summary', values, 'Shown on the public page. Plain text.', 4) }}
+    </fieldset>
+
+    <fieldset>
+      <legend>Creators</legend>
+      <p class="hint">
+        One per line, as <code>Family, Given</code>. A line with no comma is
+        treated as a single literal name, which is what you want for
+        organizations (<code>Ministry of the Interior</code>).
+      </p>
+      {{ area('authors', 'Authors', values, '', 4) }}
+      {{ area('editors', 'Editors', values, '', 2) }}
+      {{ area('translators', 'Translators', values, '', 2) }}
+    </fieldset>
+
+    <fieldset>
+      <legend>Publication</legend>
+      {{ field('containerTitle', 'Journal, newspaper or book title', values) }}
+      {{ field('collectionTitle', 'Series', values) }}
+      {{ field('publisher', 'Publisher', values) }}
+      {{ field('publisherPlace', 'Place of publication', values) }}
+      {{ field('volume', 'Volume', values) }}
+      {{ field('issue', 'Issue', values) }}
+      {{ field('page', 'Pages', values, 'text', 'For example 512-534.') }}
+      {{ field('edition', 'Edition', values) }}
+      {{ field('issued', 'Date issued', values, 'text',
+               'YYYY, YYYY-MM or YYYY-MM-DD. Anything else is kept verbatim, so "c. 1943" and "n.d." are fine.') }}
+      {{ field('genre', 'Genre', values, 'text', 'For theses and reports, e.g. "PhD dissertation".') }}
+      {{ field('medium', 'Medium', values) }}
+    </fieldset>
+
+    <fieldset>
+      <legend>Archival provenance</legend>
+      {{ field('archive', 'Archive', values, 'text', 'For example Arhivele Nationale ale Romaniei.') }}
+      {{ field('archiveLocation', 'Location within the archive', values, 'text', 'Fond, dosar, file.') }}
+      {{ field('callNumber', 'Call number', values) }}
+    </fieldset>
+
+    <fieldset>
+      <legend>Online and identifiers</legend>
+      {{ field('url', 'URL', values, 'url') }}
+      {{ field('accessed', 'Date accessed', values, 'text', 'YYYY-MM-DD.') }}
+      {{ field('doi', 'DOI', values) }}
+      {{ field('isbn', 'ISBN', values) }}
+      {{ area('note', 'Private notes', values, 'Never shown publicly.', 4) }}
+    </fieldset>
+
+    <fieldset>
+      <legend>Publication status</legend>
+      <p class="field">
+        <label for="visibility">Visibility</label>
+        <select id="visibility" name="visibility">
+          <option value="private"{% if values.visibility != 'public' %} selected{% endif %}>
+            Private — only visible to you
+          </option>
+          <option value="public"{% if values.visibility == 'public' %} selected{% endif %}>
+            Public — visible to anyone
+          </option>
+        </select>
+      </p>
+      <p class="field checkbox">
+        <label>
+          <input type="checkbox" name="noindex" {% if values.noindex %}checked{% endif %} />
+          Keep out of search engines even when public
+        </label>
+      </p>
+    </fieldset>
+
+    <div class="form-actions">
+      <button type="submit">{{ 'Save changes' if mode == 'edit' else 'Create source' }}</button>
+      <a href="/admin/sources">Cancel</a>
+    </div>
+  </form>
+
+  {% if mode == 'edit' %}
+    <form
+      method="post"
+      action="/admin/sources/{{ source.id }}/delete"
+      class="danger-form"
+    >
+      <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+      <h2>Delete</h2>
+      <p class="hint">
+        A source that is still cited cannot be deleted; remove the citations first.
+      </p>
+      <button type="submit" class="danger">Delete this source</button>
+    </form>
+  {% endif %}
+{% endblock %}

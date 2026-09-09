@@ -1,0 +1,86 @@
+{% extends "layouts/admin.njk" %}
+
+{% block adminTitle %}Sources{% endblock %}
+
+{% block adminContent %}
+  <div class="page-heading">
+    <h1>Sources</h1>
+    <a class="button" href="/admin/sources/new">Add source</a>
+  </div>
+
+  <form method="get" action="/admin/sources" class="filter-form" role="search">
+    <label for="q">Search</label>
+    <input type="search" id="q" name="q" value="{{ search }}" placeholder="Title, archive, call number" />
+
+    <label for="visibility">Visibility</label>
+    <select id="visibility" name="visibility">
+      <option value=""{% if visibilityFilter == '' %} selected{% endif %}>All</option>
+      <option value="public"{% if visibilityFilter == 'public' %} selected{% endif %}>Public</option>
+      <option value="private"{% if visibilityFilter == 'private' %} selected{% endif %}>Private</option>
+    </select>
+
+    <button type="submit">Filter</button>
+  </form>
+
+  {% if sources.length == 0 %}
+    <p class="empty">No sources match.</p>
+  {% else %}
+    <p class="muted">{{ total }} source{{ 's' if total != 1 }}</p>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th scope="col">Title</th>
+          <th scope="col">Type</th>
+          <th scope="col">Year</th>
+          <th scope="col">Visibility</th>
+          <th scope="col"><span class="visually-hidden">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for source in sources %}
+          <tr>
+            <td>
+              <a href="/admin/sources/{{ source.id }}/edit">{{ source.title }}</a>
+              {% if source.archive %}<div class="muted small">{{ source.archive }}</div>{% endif %}
+            </td>
+            <td>{{ source.cslType }}</td>
+            <td>{{ source.issuedYear if source.issuedYear else '—' }}</td>
+            <td>
+              {% if source.visibility == 'public' %}
+                <span class="badge badge-public">Public</span>
+              {% else %}
+                <span class="badge badge-private">Private</span>
+              {% endif %}
+            </td>
+            <td class="row-actions">
+              <form method="post" action="/admin/sources/{{ source.id }}/visibility" class="inline-form">
+                <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+                <input
+                  type="hidden"
+                  name="visibility"
+                  value="{{ 'private' if source.visibility == 'public' else 'public' }}"
+                />
+                <button type="submit" class="link-button">
+                  {{ 'Unpublish' if source.visibility == 'public' else 'Publish' }}
+                </button>
+              </form>
+              <a href="/sources/{{ source.slug }}">View</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% if pageCount > 1 %}
+      <nav class="pagination" aria-label="Pagination">
+        {% if page > 1 %}
+          <a href="/admin/sources?page={{ page - 1 }}{% if search %}&amp;q={{ search | urlencode }}{% endif %}">Previous</a>
+        {% endif %}
+        <span>Page {{ page }} of {{ pageCount }}</span>
+        {% if page < pageCount %}
+          <a href="/admin/sources?page={{ page + 1 }}{% if search %}&amp;q={{ search | urlencode }}{% endif %}">Next</a>
+        {% endif %}
+      </nav>
+    {% endif %}
+  {% endif %}
+{% endblock %}

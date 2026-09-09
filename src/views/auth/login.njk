@@ -1,0 +1,38 @@
+{% extends "layouts/base.njk" %}
+
+{% block title %}Sign in — Dissertation Research{% endblock %}
+
+{% block content %}
+  <div class="narrow">
+    <h1>Sign in</h1>
+    <p class="muted">Step 1 of 2: password. A passkey is required afterwards.</p>
+
+    <form method="post" action="/login" class="stacked-form">
+      <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+
+      <label for="username">Username</label>
+      <input
+        type="text"
+        id="username"
+        name="username"
+        value="{{ username | default('') }}"
+        autocomplete="username"
+        autocapitalize="none"
+        spellcheck="false"
+        required
+        autofocus
+      />
+
+      <label for="password">Password</label>
+      <input
+        type="password"
+        id="password"
+        name="password"
+        autocomplete="current-password"
+        required
+      />
+
+      <button type="submit">Continue</button>
+    </form>
+  </div>
+{% endblock %}

@@ -1,0 +1,29 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+
+# Vendored browser assets are copied out of node_modules at build time.
+public/vendor/
+
+# Local runtime data (uploads, derivatives, backups)
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Editors / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Python packaging metadata from an editable install
+*.egg-info/

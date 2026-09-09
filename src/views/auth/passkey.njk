@@ -1,0 +1,39 @@
+{% extends "layouts/base.njk" %}
+
+{% block title %}Passkey — Dissertation Research{% endblock %}
+
+{% block content %}
+  <div class="narrow">
+    <h1>Confirm with your passkey</h1>
+    <p class="muted">
+      Step 2 of 2. Your browser will offer any passkey registered for this site,
+      including one stored in a password manager such as Bitwarden.
+    </p>
+
+    <p id="passkey-error" class="flash flash-error" role="alert" hidden></p>
+
+    <div
+      id="passkey-authenticate"
+      data-csrf="{{ csrfToken }}"
+      data-options-url="/auth/passkey/authenticate/options"
+      data-verify-url="/auth/passkey/authenticate/verify"
+    >
+      <button type="button" id="passkey-button">Use a passkey</button>
+    </div>
+
+    <noscript>
+      <p class="flash flash-error">
+        Passkeys need JavaScript. Use a recovery code instead.
+      </p>
+    </noscript>
+
+    <p class="muted">
+      Lost access to every passkey? <a href="/login/recovery">Use a recovery code</a>.
+    </p>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script nonce="{{ nonce }}" src="/assets/vendor/simplewebauthn/browser.umd.min.js"></script>
+  <script nonce="{{ nonce }}" src="/assets/js/passkey.js"></script>
+{% endblock %}

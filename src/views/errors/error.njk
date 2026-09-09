@@ -1,0 +1,11 @@
+{% extends "layouts/base.njk" %}
+
+{% block title %}Error {{ statusCode }} — Dissertation Research{% endblock %}
+
+{% block content %}
+  <div class="narrow">
+    <h1>Error {{ statusCode }}</h1>
+    <p>{{ message }}</p>
+    <p><a href="/">Return to the front page</a></p>
+  </div>
+{% endblock %}

@@ -1,0 +1,8 @@
+dist/
+node_modules/
+coverage/
+public/vendor/
+src/citations/styles/
+*.njk
+*.sql
+LICENSE

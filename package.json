@@ -1,0 +1,57 @@
+{
+  "name": "dissertation-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Research and publication platform for a PhD dissertation: sources, artifacts, essays and entities with per-item public/private visibility and Chicago Manual of Style citations.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "vendor": "node scripts/vendor-assets.mjs",
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs && npm run vendor",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "migrate": "node dist/db/migrate.js",
+    "migrate:dev": "tsx src/db/migrate.ts",
+    "admin": "node dist/cli/admin.js",
+    "admin:dev": "tsx src/cli/admin.ts",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@fastify/cookie": "11.1.2",
+    "@fastify/formbody": "9.0.0",
+    "@fastify/static": "10.1.3",
+    "@fastify/view": "12.0.0",
+    "@node-rs/argon2": "2.2.0",
+    "@simplewebauthn/browser": "14.0.0",
+    "@simplewebauthn/server": "14.0.1",
+    "citeproc": "2.4.63",
+    "cytoscape": "3.34.3",
+    "fastify": "5.12.3",
+    "leaflet": "1.9.4",
+    "mysql2": "3.24.4",
+    "nunjucks": "3.2.4",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.0",
+    "@types/node": "22.19.1",
+    "@types/nunjucks": "3.2.6",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "^16.5.0",
+    "prettier": "3.9.6",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.70.0",
+    "vitest": "3.2.7"
+  }
+}

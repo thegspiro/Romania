@@ -1,0 +1,20 @@
+{% extends "layouts/admin.njk" %}
+
+{% block adminTitle %}Dashboard{% endblock %}
+
+{% block adminContent %}
+  <h1>Dashboard</h1>
+
+  <ul class="stat-grid">
+    <li><span class="stat-value">{{ counts.sources }}</span><span class="stat-label">Sources</span></li>
+    <li><span class="stat-value">{{ counts.publicSources }}</span><span class="stat-label">Public sources</span></li>
+    <li><span class="stat-value">{{ counts.essays }}</span><span class="stat-label">Essays</span></li>
+  </ul>
+
+  <h2>Next steps</h2>
+  <ul class="item-list">
+    <li><a href="/admin/sources/new">Add a source</a></li>
+    <li><a href="/admin/sources">Review the bibliography</a></li>
+    <li><a href="/admin/security">Manage passkeys and recovery codes</a></li>
+  </ul>
+{% endblock %}

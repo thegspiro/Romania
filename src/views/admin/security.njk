@@ -1,0 +1,93 @@
+{% extends "layouts/admin.njk" %}
+
+{% block adminTitle %}Security{% endblock %}
+
+{% block adminContent %}
+  <h1>Security</h1>
+  <p class="muted">Signed in as {{ user.displayName }} ({{ user.username }}).</p>
+
+  {% if newRecoveryCodes %}
+    <section class="recovery-codes flash flash-success">
+      <h2>Your new recovery codes</h2>
+      <p>
+        <strong>This is the only time these will be shown.</strong> Print them or
+        store them somewhere that is not your password manager — if the vault
+        holding your passkey is what you have lost, a code stored inside it is
+        no help. Any previous codes have stopped working.
+      </p>
+      <ol class="code-list">
+        {% for code in newRecoveryCodes %}<li><code>{{ code }}</code></li>{% endfor %}
+      </ol>
+    </section>
+  {% endif %}
+
+  <section>
+    <h2>Passkeys</h2>
+    {% if credentials.length == 0 %}
+      <p class="empty">No passkeys registered.</p>
+    {% else %}
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Type</th>
+            <th scope="col">Added</th>
+            <th scope="col">Last used</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for credential in credentials %}
+            <tr>
+              <td>{{ credential.label }}</td>
+              <td>{{ 'Synced' if credential.backedUp else 'Single device' }}</td>
+              <td>{{ credential.createdAt.toISOString().slice(0, 10) }}</td>
+              <td>
+                {{ credential.lastUsedAt.toISOString().slice(0, 10) if credential.lastUsedAt else 'Never' }}
+              </td>
+              <td class="row-actions">
+                <form method="post" action="/admin/security/passkeys/{{ credential.id }}/delete" class="inline-form">
+                  <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+                  <button type="submit" class="link-button danger">Remove</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+
+    <p id="passkey-error" class="flash flash-error" role="alert" hidden></p>
+
+    <div
+      id="passkey-register"
+      data-csrf="{{ csrfToken }}"
+      data-options-url="/auth/passkey/register/options"
+      data-verify-url="/auth/passkey/register/verify"
+    >
+      <label for="passkey-label">Name for a new passkey</label>
+      <input type="text" id="passkey-label" maxlength="190" placeholder="Bitwarden, iPhone, YubiKey…" autocomplete="off" />
+      <button type="button" id="passkey-button">Register another passkey</button>
+    </div>
+
+    <p class="hint">
+      Keeping at least one passkey outside the vault that stores your password
+      is what makes this a genuine second factor.
+    </p>
+  </section>
+
+  <section>
+    <h2>Recovery codes</h2>
+    <p>{{ recoveryCodesRemaining }} unused code{{ 's' if recoveryCodesRemaining != 1 }} remaining.</p>
+    <form method="post" action="/admin/security/recovery-codes">
+      <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+      <button type="submit">Generate new codes</button>
+      <span class="hint">Generating new codes immediately invalidates the old ones.</span>
+    </form>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  <script nonce="{{ nonce }}" src="/assets/vendor/simplewebauthn/browser.umd.min.js"></script>
+  <script nonce="{{ nonce }}" src="/assets/js/passkey.js"></script>
+{% endblock %}
