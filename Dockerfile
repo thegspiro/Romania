@@ -40,16 +40,17 @@ ENV NODE_ENV=production \
 
 # - python3 + venv: the background worker
 # - default-mysql-client: mysqldump, used by the backup job
-# - pandoc + tectonic: document export (PDF, DOCX, HTML, LaTeX)
 # - libjpeg/zlib/freetype: Pillow's image codecs
 # - tini: PID 1 that reaps zombies and forwards signals
 # - ca-certificates: outbound HTTPS for geocoding and Tectonic's package fetch
+#
+# pandoc and tectonic are NOT installed here -- both are pinned downloads
+# below, for reasons recorded there.
 RUN apt-get update && apt-get install --no-install-recommends -y \
       python3 \
       python3-venv \
       python3-pip \
       default-mysql-client \
-      pandoc \
       ca-certificates \
       tini \
       curl \
@@ -60,19 +61,49 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
       libtiff6 \
     && rm -rf /var/lib/apt/lists/*
 
-# Tectonic is not packaged for Debian; install the released binary. Pinned by
-# version and checked for the expected binary rather than trusting the tarball
-# blindly.
-ARG TECTONIC_VERSION=0.15.0
+# Pandoc renders every compiled manuscript, so its version decides what the
+# citations in a finished dissertation look like. Debian bookworm ships 2.17;
+# the test suite has only ever been green against 3.1.3. Taking the unpinned
+# distribution package meant CI and production could validate and render with
+# different binaries, which is the one place a silent difference would show up
+# in a submitted document.
+#
+# Pinned and verified against a recorded digest. .github/scripts/install-pandoc.sh
+# installs the same artifact in CI -- change the version in both together.
+ARG PANDOC_VERSION=3.1.3
+ARG PANDOC_SHA256_AMD64=caa7e0410f9e2cb1da2eb8db13cc97b5548fe455985e2c944e3929d22f99bcdc
+ARG PANDOC_SHA256_ARM64=b93cc370f2bf5e360aa2aa72019eda8aaf374dfff125bebf950470b22f7ac7e4
 RUN set -eu; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
-      amd64) target="x86_64-unknown-linux-musl" ;; \
-      arm64) target="aarch64-unknown-linux-musl" ;; \
+      amd64) sha256="$PANDOC_SHA256_AMD64" ;; \
+      arm64) sha256="$PANDOC_SHA256_ARM64" ;; \
+      *) echo "unsupported architecture: $arch" >&2; exit 1 ;; \
+    esac; \
+    url="https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-${arch}.deb"; \
+    curl -fsSL --retry 3 --retry-delay 2 "$url" -o /tmp/pandoc.deb; \
+    echo "${sha256}  /tmp/pandoc.deb" | sha256sum -c -; \
+    dpkg --install /tmp/pandoc.deb; \
+    rm -f /tmp/pandoc.deb; \
+    pandoc --version | head -n 1
+
+# Tectonic is not packaged for Debian; install the released binary. Verified
+# against a recorded digest for the same reason as pandoc: `tectonic --version`
+# proves the file runs, which is not the same as proving it is the file that
+# was published.
+ARG TECTONIC_VERSION=0.15.0
+ARG TECTONIC_SHA256_AMD64=dfb82876f2986862996e564fa507a9e576e0c1e3bee63c2c1bd677c2543e6407
+ARG TECTONIC_SHA256_ARM64=1f59f9fb8eb65e8ba18658fc9016767e7d3e12488ded8b8fffa34254e51ce42c
+RUN set -eu; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) target="x86_64-unknown-linux-musl"; sha256="$TECTONIC_SHA256_AMD64" ;; \
+      arm64) target="aarch64-unknown-linux-musl"; sha256="$TECTONIC_SHA256_ARM64" ;; \
       *) echo "unsupported architecture: $arch" >&2; exit 1 ;; \
     esac; \
     url="https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%40${TECTONIC_VERSION}/tectonic-${TECTONIC_VERSION}-${target}.tar.gz"; \
-    curl -fsSL "$url" -o /tmp/tectonic.tar.gz; \
+    curl -fsSL --retry 3 --retry-delay 2 "$url" -o /tmp/tectonic.tar.gz; \
+    echo "${sha256}  /tmp/tectonic.tar.gz" | sha256sum -c -; \
     tar -xzf /tmp/tectonic.tar.gz -C /usr/local/bin tectonic; \
     rm -f /tmp/tectonic.tar.gz; \
     tectonic --version
