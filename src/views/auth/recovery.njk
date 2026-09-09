@@ -1,0 +1,34 @@
+{% extends "layouts/base.njk" %}
+
+{% block title %}Recovery code — Dissertation Research{% endblock %}
+
+{% block content %}
+  <div class="narrow">
+    <h1>Use a recovery code</h1>
+    <p class="muted">
+      Each code works once. After signing in, register a new passkey and
+      regenerate your codes from the Security page.
+    </p>
+
+    <form method="post" action="/login/recovery" class="stacked-form">
+      <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+
+      <label for="code">Recovery code</label>
+      <input
+        type="text"
+        id="code"
+        name="code"
+        autocomplete="one-time-code"
+        autocapitalize="characters"
+        spellcheck="false"
+        placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
+        required
+        autofocus
+      />
+
+      <button type="submit">Sign in</button>
+    </form>
+
+    <p class="muted"><a href="/login/second-factor">Back to passkey sign-in</a></p>
+  </div>
+{% endblock %}

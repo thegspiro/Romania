@@ -1,0 +1,92 @@
+{% extends "layouts/admin.njk" %}
+{% import "partials/macros.njk" as ui %}
+
+{% block adminTitle %}{{ 'Edit artifact' if mode == 'edit' else 'New artifact' }}{% endblock %}
+
+{% block adminContent %}
+  <h1>{{ 'Edit artifact' if mode == 'edit' else 'New artifact' }}</h1>
+
+  {{ ui.errorList(errors) }}
+
+  <form method="post" action="{{ action }}" class="stacked-form">
+    <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+
+    <fieldset>
+      <legend>Identity</legend>
+      <p class="field">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" value="{{ values.title | default('') }}" required maxlength="500" />
+      </p>
+      {{ ui.field('titleOriginal', 'Title in original language', values) }}
+      {{ ui.field('language', 'Language', values) }}
+      {{ ui.area('summary', 'Description', values, 'Markdown.', 4) }}
+    </fieldset>
+
+    <fieldset>
+      <legend>Provenance</legend>
+      {{ ui.area('provenance', 'Provenance', values, 'How this came to be where it is.', 3) }}
+      {{ ui.field('repositoryName', 'Repository', values, 'text', 'For example Arhivele Naționale ale României.') }}
+      {{ ui.field('physicalLocation', 'Location within the repository', values, 'text', 'Fond, dosar, file.') }}
+      {{ ui.field('dateCreated', 'Date created', values, 'text', 'Free text: "c. 1943", "n.d." are fine.') }}
+      {{ ui.field('creditLine', 'Credit line', values) }}
+      {{ ui.field('rightsStatement', 'Rights', values) }}
+    </fieldset>
+
+    {{ ui.visibilityFields(values) }}
+
+    <div class="form-actions">
+      <button type="submit">{{ 'Save changes' if mode == 'edit' else 'Create artifact' }}</button>
+      <a href="/admin/artifacts">Cancel</a>
+    </div>
+  </form>
+
+  {% if mode == 'edit' %}
+    <section class="upload-section">
+      <h2>File</h2>
+
+      {% if artifact.fileObjectId %}
+        <dl class="details">
+          <dt>Type</dt><dd>{{ artifact.mimeType }}</dd>
+          <dt>Size</dt><dd>{{ (artifact.byteSize / 1024) | round | int }} KB</dd>
+          <dt>Original name</dt><dd>{{ artifact.originalFilename }}</dd>
+          <dt>Renditions</dt>
+          <dd>
+            {% if artifact.variants.length > 0 %}
+              {% for variant in artifact.variants %}
+                <a href="/files/{{ artifact.fileObjectId }}/{{ variant }}">{{ variant }}</a>{{ ', ' if not loop.last }}
+              {% endfor %}
+            {% else %}
+              <span class="muted">Being generated…</span>
+            {% endif %}
+          </dd>
+        </dl>
+        <p><a href="/files/{{ artifact.fileObjectId }}/original">Download the original</a></p>
+      {% else %}
+        <p class="empty">No file attached.</p>
+      {% endif %}
+
+      <form method="post" action="/admin/artifacts/{{ artifact.id }}/file" enctype="multipart/form-data">
+        <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+        <p class="field">
+          <label for="file">{{ 'Replace file' if artifact.fileObjectId else 'Attach a file' }}</label>
+          <input type="file" id="file" name="file" required />
+          <span class="hint">
+            JPEG, PNG, GIF, TIFF, WebP, PDF, MP3, WAV or MP4, up to
+            {{ (maxUploadBytes / 1048576) | round | int }} MB. The type is read
+            from the file's contents, not its name.
+          </span>
+        </p>
+        <button type="submit">Upload</button>
+      </form>
+    </section>
+
+    {% include "partials/mentions.njk" %}
+
+    <form method="post" action="/admin/artifacts/{{ artifact.id }}/delete" class="danger-form">
+      <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+      <h2>Delete</h2>
+      <p class="hint">Refused while your writing still refers to this artifact.</p>
+      <button type="submit" class="danger">Delete this artifact</button>
+    </form>
+  {% endif %}
+{% endblock %}

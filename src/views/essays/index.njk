@@ -1,0 +1,34 @@
+{% extends "layouts/base.njk" %}
+{% import "partials/macros.njk" as ui %}
+
+{% block title %}Essays — Dissertation Research{% endblock %}
+
+{% block content %}
+  <h1>Essays</h1>
+
+  <form method="get" action="/essays" class="search-form" role="search">
+    <label for="q">Search essays</label>
+    <input type="search" id="q" name="q" value="{{ search }}" />
+    <button type="submit">Search</button>
+  </form>
+
+  {% if essays.length == 0 %}
+    <p class="empty">
+      {% if search %}Nothing matches that search.{% else %}Nothing published yet.{% endif %}
+    </p>
+  {% else %}
+    <p class="muted">{{ total }} essay{{ 's' if total != 1 }}</p>
+    <ul class="item-list">
+      {% for essay in essays %}
+        <li>
+          <a href="{{ essay.href }}">{{ essay.title }}</a>
+          {% if essay.visibility != 'public' %}{{ ui.badge(essay.visibility) }}{% endif %}
+          <span class="muted small">{{ essay.wordCount }} words</span>
+          {% if essay.summary %}<div class="muted small">{{ essay.summary | truncate(160) }}</div>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+
+    {{ ui.pagination('/essays', page, pageCount, search) }}
+  {% endif %}
+{% endblock %}

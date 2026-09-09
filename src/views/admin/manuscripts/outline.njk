@@ -1,0 +1,199 @@
+{% extends "layouts/admin.njk" %}
+{% import "partials/macros.njk" as ui %}
+
+{% block adminTitle %}{{ manuscript.title }} — outline{% endblock %}
+
+{% block adminContent %}
+  <div class="page-heading">
+    <h1>{{ manuscript.title }}</h1>
+    <a class="button" href="/admin/manuscripts/{{ manuscript.id }}/edit">Settings</a>
+  </div>
+
+  <p class="muted">
+    {{ sections.length }} section{{ 's' if sections.length != 1 }} ·
+    {{ wordCount }} words · {{ ui.badge(manuscript.visibility) }}
+  </p>
+
+  <section>
+    <h2>Outline</h2>
+
+    {% if sections.length == 0 %}
+      <p class="empty">Nothing in this manuscript yet. Add an essay below.</p>
+    {% else %}
+      <table class="data-table outline-table">
+        <thead>
+          <tr>
+            <th scope="col">Section</th>
+            <th scope="col">Depth</th>
+            <th scope="col">Role</th>
+            <th scope="col">Words</th>
+            <th scope="col"><span class="visually-hidden">Order</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for section in sections %}
+            <tr>
+              <td>
+                <form method="post" action="/admin/manuscripts/{{ manuscript.id }}/sections/{{ section.id }}" class="outline-form">
+                  <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+
+                  <span class="outline-indent outline-depth-{{ section.depth }}">
+                    <a href="{{ section.href }}?manuscript={{ manuscript.slug }}">{{ section.title }}</a>
+                    {% if section.visibility != 'public' %}
+                      <span class="badge badge-private">Private</span>
+                    {% endif %}
+                  </span>
+
+                  <label class="visually-hidden" for="title-{{ section.id }}">Title in this manuscript</label>
+                  <input
+                    type="text"
+                    id="title-{{ section.id }}"
+                    name="titleOverride"
+                    value="{{ section.title if section.title != section.ownTitle else '' }}"
+                    placeholder="{{ section.ownTitle }}"
+                  />
+              </td>
+              <td>
+                <label class="visually-hidden" for="depth-{{ section.id }}">Depth</label>
+                <select id="depth-{{ section.id }}" name="depth">
+                  {% for level in range(0, maxDepth + 1) %}
+                    <option value="{{ level }}"{% if section.depth == level %} selected{% endif %}>{{ level }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td>
+                <label class="visually-hidden" for="role-{{ section.id }}">Role</label>
+                <select id="role-{{ section.id }}" name="role">
+                  {% for role in roles %}
+                    <option value="{{ role }}"{% if section.role == role %} selected{% endif %}>
+                      {{ role | replace('_', ' ') }}
+                    </option>
+                  {% endfor %}
+                </select>
+                <button type="submit" class="link-button">Save</button>
+                </form>
+              </td>
+              <td>{{ section.wordCount }}</td>
+              <td class="row-actions">
+                <form method="post" action="/admin/manuscripts/{{ manuscript.id }}/sections/{{ section.id }}/move" class="inline-form">
+                  <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+                  <input type="hidden" name="direction" value="up" />
+                  <button type="submit" class="link-button" aria-label="Move {{ section.title }} earlier">↑</button>
+                </form>
+                <form method="post" action="/admin/manuscripts/{{ manuscript.id }}/sections/{{ section.id }}/move" class="inline-form">
+                  <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+                  <input type="hidden" name="direction" value="down" />
+                  <button type="submit" class="link-button" aria-label="Move {{ section.title }} later">↓</button>
+                </form>
+                <form method="post" action="/admin/manuscripts/{{ manuscript.id }}/sections/{{ section.id }}/delete" class="inline-form">
+                  <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+                  <button type="submit" class="link-button danger">Remove</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>Add a section</h2>
+    {% if available.length == 0 %}
+      <p class="empty">Every essay is already in this manuscript.</p>
+    {% else %}
+      <form method="post" action="/admin/manuscripts/{{ manuscript.id }}/sections" class="filter-form">
+        <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+
+        <label for="itemId">Essay</label>
+        <select id="itemId" name="itemId" required>
+          {% for essay in available %}
+            <option value="{{ essay.id }}">{{ essay.title }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="depth">Depth</label>
+        <select id="depth" name="depth">
+          {% for level in range(0, maxDepth + 1) %}
+            <option value="{{ level }}">{{ level }}</option>
+          {% endfor %}
+        </select>
+
+        <label for="role">Role</label>
+        <select id="role" name="role">
+          {% for role in roles %}
+            <option value="{{ role }}">{{ role | replace('_', ' ') }}</option>
+          {% endfor %}
+        </select>
+
+        <button type="submit">Add</button>
+      </form>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>Compile</h2>
+    <p class="hint">
+      Assembles every section into one document. A <strong>public</strong>
+      build contains only what a visitor could already read; an
+      <strong>administrator</strong> build contains everything, and is never
+      downloadable by anyone else.
+    </p>
+
+    <form method="post" action="/admin/manuscripts/{{ manuscript.id }}/build" class="filter-form">
+      <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+
+      <label for="format">Format</label>
+      <select id="format" name="format">
+        {% for format in formats %}<option value="{{ format }}">{{ format }}</option>{% endfor %}
+      </select>
+
+      <label for="audience">Audience</label>
+      <select id="audience" name="audience">
+        <option value="admin">Administrator — everything</option>
+        <option value="public">Public — published sections only</option>
+      </select>
+
+      <button type="submit">Compile</button>
+    </form>
+
+    {% if builds.length > 0 %}
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th scope="col">Requested</th>
+            <th scope="col">Format</th>
+            <th scope="col">Audience</th>
+            <th scope="col">Sections</th>
+            <th scope="col">State</th>
+            <th scope="col"><span class="visually-hidden">Download</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for build in builds %}
+            <tr>
+              <td class="muted small">{{ build.createdAt.toISOString().slice(0, 16) | replace('T', ' ') }}</td>
+              <td>{{ build.format }}</td>
+              <td>{{ build.audience }}</td>
+              <td>{{ build.sectionCount }}</td>
+              <td>
+                {{ build.state }}
+                {% if build.state == 'failed' and build.log %}
+                  <details>
+                    <summary class="muted small">Why</summary>
+                    <pre class="build-log">{{ build.log }}</pre>
+                  </details>
+                {% endif %}
+              </td>
+              <td>
+                {% if build.state == 'succeeded' %}
+                  <a href="/admin/manuscripts/{{ manuscript.id }}/builds/{{ build.id }}/download">Download</a>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </section>
+{% endblock %}

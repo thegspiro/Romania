@@ -1,0 +1,33 @@
+# Development overrides.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# Differences from production: the database port is published so a local
+# client can reach it, logs are verbose, and the web port is bound on all
+# interfaces so the app is reachable from another machine on the LAN while
+# testing.
+
+services:
+  web:
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+      # Browsers treat http://localhost as a secure context, so passkeys work
+      # over plain HTTP there -- but only for the exact host "localhost".
+      SESSION_SECURE_COOKIES: 'false'
+      WEBAUTHN_RP_ID: localhost
+      WEBAUTHN_ORIGIN: http://localhost:8080
+      PUBLIC_BASE_URL: http://localhost:8080
+      ALLOW_SEARCH_INDEXING: 'false'
+    ports:
+      - '8080:8080'
+
+  worker:
+    environment:
+      LOG_LEVEL: debug
+      WORKER_POLL_INTERVAL_SECONDS: '2'
+
+  db:
+    ports:
+      # Exposed for a local MySQL client. Not published in production.
+      - '127.0.0.1:3306:3306'

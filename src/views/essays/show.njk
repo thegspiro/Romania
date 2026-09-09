@@ -1,0 +1,106 @@
+{% extends "layouts/base.njk" %}
+
+{% block title %}{{ essay.title }} — Dissertation Research{% endblock %}
+
+{% block head %}<link rel="canonical" href="{{ canonicalUrl }}" />{% endblock %}
+
+{% block content %}
+  <article class="essay">
+    <header>
+      {% if navigation %}
+        {# Where this piece sits in the whole. The index counts only sections
+           the reader may see, so nothing reveals a skipped one. #}
+        <nav class="manuscript-crumbs" aria-label="Manuscript">
+          <a href="{{ navigation.manuscript.href }}">{{ navigation.manuscript.title }}</a>
+          <span class="muted">· {{ navigation.index + 1 }} of {{ navigation.total }}</span>
+        </nav>
+      {% endif %}
+
+      <h1>{{ essay.title }}</h1>
+      {% if essay.titleOriginal %}
+        <p class="title-original"{% if essay.language %} lang="{{ essay.language }}"{% endif %}>
+          {{ essay.titleOriginal }}
+        </p>
+      {% endif %}
+
+      <p class="muted small">
+        {{ essay.wordCount }} words
+        {% if essay.status != 'final' %} · {{ essay.status | replace('_', ' ') }}{% endif %}
+      </p>
+
+      {% if essay.visibility != 'public' %}
+        <p class="badge badge-private">Private — visible to you because you are signed in.</p>
+      {% endif %}
+    </header>
+
+    {#
+      Rendered by src/content/markdown.ts with `html: false`, so every tag in
+      here was produced by that module. References to items the reader may not
+      see have already been reduced to plain text.
+    #}
+    <div class="prose">{{ rendered.html | safe }}</div>
+
+    {% if rendered.footnotes.length > 0 %}
+      <section class="footnotes-section">
+        <h2>Notes</h2>
+        <ol class="footnotes">
+          {% for note in rendered.footnotes %}
+            <li id="fn-{{ note.number }}">
+              {# citeproc output, already through sanitizeCitationHtml. #}
+              {{ note.html | safe }}
+              <a href="#fnref-{{ note.number }}" class="footnote-back" aria-label="Back to text">↩</a>
+            </li>
+          {% endfor %}
+        </ol>
+      </section>
+    {% endif %}
+
+    {% if rendered.bibliography.length > 0 %}
+      <section>
+        <h2>Bibliography</h2>
+        <ol class="bibliography">
+          {% for entry in rendered.bibliography %}
+            <li><span class="csl-entry">{{ entry | safe }}</span></li>
+          {% endfor %}
+        </ol>
+      </section>
+    {% endif %}
+
+    {% if navigation %}
+      <nav class="section-nav" aria-label="Manuscript navigation">
+        {% if navigation.previous %}
+          <a class="section-nav-previous" href="{{ navigation.previous.href }}?manuscript={{ navigation.manuscript.slug }}">
+            ← {{ navigation.previous.title }}
+          </a>
+        {% endif %}
+        <a href="{{ navigation.manuscript.href }}">Contents</a>
+        {% if navigation.next %}
+          <a class="section-nav-next" href="{{ navigation.next.href }}?manuscript={{ navigation.manuscript.slug }}">
+            {{ navigation.next.title }} →
+          </a>
+        {% endif %}
+      </nav>
+    {% endif %}
+
+    {% if mentions.length > 0 %}
+      <section class="mentions">
+        <h2>Discussed here</h2>
+        <ul class="mention-list">
+          {% for mention in mentions %}
+            <li>
+              <a href="{{ mention.href }}">{{ mention.title }}</a>
+              <span class="muted small">{{ mention.kind }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endif %}
+
+    {% set mentions = mentionedIn %}
+    {% include "partials/mentions.njk" %}
+
+    {% if isAdmin %}
+      <p class="admin-actions"><a href="/admin/essays/{{ essay.id }}/edit">Edit this essay</a></p>
+    {% endif %}
+  </article>
+{% endblock %}

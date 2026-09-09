@@ -1,0 +1,90 @@
+{% extends "layouts/base.njk" %}
+
+{% block title %}{{ record.title }} — Dissertation Research{% endblock %}
+
+{% block head %}<link rel="canonical" href="{{ canonicalUrl }}" />{% endblock %}
+
+{% block content %}
+  <article class="entity">
+    <header>
+      <p class="kicker">{{ labels.singular }}</p>
+      <h1>{{ record.title }}</h1>
+      {% if record.titleOriginal %}
+        <p class="title-original"{% if record.language %} lang="{{ record.language }}"{% endif %}>
+          {{ record.titleOriginal }}
+        </p>
+      {% endif %}
+      {% if record.visibility != 'public' %}
+        <p class="badge badge-private">Private — visible to you because you are signed in.</p>
+      {% endif %}
+    </header>
+
+    {% if summaryHtml %}
+      {# Rendered by renderFragment with html:false, so it carries no markup
+         the author did not write in Markdown. #}
+      <div class="prose">{{ summaryHtml | safe }}</div>
+    {% endif %}
+
+    <section>
+      <h2>Details</h2>
+      <dl class="details">
+        {% if kind == 'person' %}
+          {% if record.detail.familyName or record.detail.givenName %}
+            <dt>Name</dt><dd>{{ record.detail.givenName }} {{ record.detail.familyName }}</dd>
+          {% endif %}
+          {% if record.detail.birthDate %}<dt>Born</dt><dd>{{ record.detail.birthDate }}</dd>{% endif %}
+          {% if record.detail.deathDate %}<dt>Died</dt><dd>{{ record.detail.deathDate }}</dd>{% endif %}
+          {% if record.detail.occupation %}<dt>Role</dt><dd>{{ record.detail.occupation }}</dd>{% endif %}
+        {% elif kind == 'organization' %}
+          {% if record.detail.foundedDate %}<dt>Founded</dt><dd>{{ record.detail.foundedDate }}</dd>{% endif %}
+          {% if record.detail.dissolvedDate %}<dt>Dissolved</dt><dd>{{ record.detail.dissolvedDate }}</dd>{% endif %}
+          {% if record.detail.occupation %}<dt>Type</dt><dd>{{ record.detail.occupation }}</dd>{% endif %}
+        {% elif kind == 'place' %}
+          {% if record.detail.latitude is not none %}
+            <dt>Coordinates</dt>
+            <dd>
+              {{ record.detail.latitude }}, {{ record.detail.longitude }}
+              <span class="muted small">({{ record.detail.geocodePrecision }})</span>
+            </dd>
+          {% endif %}
+          {% if record.detail.adminArea %}<dt>Region</dt><dd>{{ record.detail.adminArea }}</dd>{% endif %}
+          {% if record.detail.countryCode %}<dt>Country</dt><dd>{{ record.detail.countryCode }}</dd>{% endif %}
+          {% if record.detail.historicalNames %}
+            <dt>Also known as</dt><dd>{{ record.detail.historicalNames }}</dd>
+          {% endif %}
+        {% elif kind == 'event' %}
+          {% if record.detail.startDate %}<dt>Started</dt><dd>{{ record.detail.startDate }}</dd>{% endif %}
+          {% if record.detail.endDate %}<dt>Ended</dt><dd>{{ record.detail.endDate }}</dd>{% endif %}
+          <dt>Date precision</dt><dd>{{ record.detail.datePrecision }}</dd>
+        {% endif %}
+
+        {% if record.detail.alternateNames %}
+          <dt>Other names</dt><dd>{{ record.detail.alternateNames }}</dd>
+        {% endif %}
+      </dl>
+    </section>
+
+    {% if biographyHtml %}
+      <section>
+        <h2>{{ 'Biography' if kind == 'person' else 'Description' }}</h2>
+        <div class="prose">{{ biographyHtml | safe }}</div>
+      </section>
+    {% endif %}
+
+    {% set editable = false %}
+    {% include "partials/relationships.njk" %}
+    {% include "partials/mentions.njk" %}
+    {% include "partials/graph.njk" %}
+
+    {% if isAdmin %}
+      <p class="admin-actions">
+        <a href="/admin/{{ path }}/{{ record.id }}/edit">Edit this {{ labels.singular | lower }}</a>
+      </p>
+    {% endif %}
+  </article>
+{% endblock %}
+
+{% block scripts %}
+  <script nonce="{{ nonce }}" src="/assets/vendor/cytoscape/cytoscape.min.js"></script>
+  <script nonce="{{ nonce }}" src="/assets/js/graph.js"></script>
+{% endblock %}

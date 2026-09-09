@@ -1,0 +1,61 @@
+{#
+  Base layout for the public side.
+
+  Autoescaping is on. Any value printed with `| safe` must be HTML this
+  application generated -- currently only citeproc output, which passes through
+  sanitizeCitationHtml() first. Never mark user-supplied text safe.
+#}<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}{{ siteName | default('Dissertation Platform') }}{% endblock %}</title>
+    {% if not allowIndexing %}
+      <meta name="robots" content="noindex, nofollow, noarchive" />
+    {% endif %}
+    {% block head %}{% endblock %}
+    <link rel="stylesheet" href="/assets/css/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <div class="wrap">
+        <a class="site-title" href="/">Dissertation Research</a>
+        <nav aria-label="Main">
+          <a href="/essays"{% if currentPath.startsWith('/essays') %} aria-current="page"{% endif %}>Essays</a>
+          <a href="/manuscripts"{% if currentPath.startsWith('/manuscripts') %} aria-current="page"{% endif %}>Manuscripts</a>
+          <a href="/people"{% if currentPath.startsWith('/people') %} aria-current="page"{% endif %}>People</a>
+          <a href="/places"{% if currentPath.startsWith('/places') %} aria-current="page"{% endif %}>Places</a>
+          <a href="/artifacts"{% if currentPath.startsWith('/artifacts') %} aria-current="page"{% endif %}>Artifacts</a>
+          <a href="/sources"{% if currentPath.startsWith('/sources') %} aria-current="page"{% endif %}>Sources</a>
+          {% if isAdmin %}
+            <a href="/admin">Admin</a>
+            <form method="post" action="/logout" class="inline-form">
+              <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+              <button type="submit" class="link-button">Sign out</button>
+            </form>
+          {% endif %}
+        </nav>
+      </div>
+    </header>
+
+    {% if flash %}
+      <div class="wrap">
+        <p class="flash flash-{{ flash.kind }}" role="status">{{ flash.text }}</p>
+      </div>
+    {% endif %}
+
+    <main id="main" class="wrap">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <p>Citations follow the Chicago Manual of Style, notes and bibliography.</p>
+      </div>
+    </footer>
+
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

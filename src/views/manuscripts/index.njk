@@ -1,0 +1,26 @@
+{% extends "layouts/base.njk" %}
+{% import "partials/macros.njk" as ui %}
+
+{% block title %}Manuscripts — Dissertation Research{% endblock %}
+
+{% block content %}
+  <h1>Manuscripts</h1>
+  <p class="lede">
+    Longer works assembled from the essays on this site. Each section is also a
+    page of its own.
+  </p>
+
+  {% if manuscripts.length == 0 %}
+    <p class="empty">Nothing published yet.</p>
+  {% else %}
+    <ul class="item-list">
+      {% for manuscript in manuscripts %}
+        <li>
+          <a href="{{ manuscript.href }}">{{ manuscript.title }}</a>
+          {% if manuscript.subtitle %}<span class="muted">— {{ manuscript.subtitle }}</span>{% endif %}
+          {% if manuscript.visibility != 'public' %}{{ ui.badge(manuscript.visibility) }}{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+{% endblock %}

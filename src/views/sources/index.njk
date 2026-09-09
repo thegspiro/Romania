@@ -1,0 +1,50 @@
+{% extends "layouts/base.njk" %}
+
+{% block title %}Sources — Dissertation Research{% endblock %}
+
+{% block content %}
+  <h1>Sources</h1>
+
+  <form method="get" action="/sources" class="search-form" role="search">
+    <label for="q">Search sources</label>
+    <input type="search" id="q" name="q" value="{{ search }}" placeholder="Title, archive, call number" />
+    <button type="submit">Search</button>
+  </form>
+
+  {% if sources.length == 0 %}
+    <p class="empty">
+      {% if search %}No sources match that search.{% else %}No sources have been published yet.{% endif %}
+    </p>
+  {% else %}
+    <p class="muted">{{ total }} source{{ 's' if total != 1 }}</p>
+    <ol class="bibliography">
+      {% for source in sources %}
+        <li>
+          {#
+            `entry` is citeproc output that has already been through
+            sanitizeCitationHtml(); see src/citations/render.ts.
+          #}
+          <span class="csl-entry">{{ source.entry | safe }}</span>
+          <span class="entry-meta">
+            <a href="/sources/{{ source.slug }}">{{ source.typeLabel }}</a>
+            {% if source.visibility != 'public' %}
+              <span class="badge badge-private">Private</span>
+            {% endif %}
+          </span>
+        </li>
+      {% endfor %}
+    </ol>
+
+    {% if pageCount > 1 %}
+      <nav class="pagination" aria-label="Pagination">
+        {% if page > 1 %}
+          <a href="/sources?page={{ page - 1 }}{% if search %}&amp;q={{ search | urlencode }}{% endif %}">Previous</a>
+        {% endif %}
+        <span>Page {{ page }} of {{ pageCount }}</span>
+        {% if page < pageCount %}
+          <a href="/sources?page={{ page + 1 }}{% if search %}&amp;q={{ search | urlencode }}{% endif %}">Next</a>
+        {% endif %}
+      </nav>
+    {% endif %}
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,96 @@
+{% extends "layouts/base.njk" %}
+
+{% block title %}{{ source.title }} — Dissertation Research{% endblock %}
+
+{% block head %}
+  <link rel="canonical" href="{{ canonicalUrl }}" />
+{% endblock %}
+
+{% block content %}
+  <article class="source">
+    <header>
+      <p class="kicker">{{ typeLabel }}</p>
+      <h1>{{ source.title }}</h1>
+      {% if source.titleOriginal %}
+        <p class="title-original" {% if source.language %}lang="{{ source.language }}"{% endif %}>
+          {{ source.titleOriginal }}
+        </p>
+      {% endif %}
+      {% if source.visibility != 'public' %}
+        <p class="badge badge-private">
+          Private — visible to you because you are signed in.
+        </p>
+      {% endif %}
+    </header>
+
+    {% if source.summary %}
+      <section>
+        <h2>Summary</h2>
+        <p>{{ source.summary }}</p>
+      </section>
+    {% endif %}
+
+    {#
+      Both blocks below print citeproc output, already sanitised in
+      src/citations/render.ts. Nothing else on this page uses `| safe`.
+    #}
+    <section class="citation-block">
+      <h2>Bibliography entry</h2>
+      <p class="csl-entry">{{ bibliographyEntry | safe }}</p>
+
+      <h2>Footnote</h2>
+      <p class="csl-note">{{ note | safe }}</p>
+    </section>
+
+    <section>
+      <h2>Details</h2>
+      <dl class="details">
+        {% if source.csl.publisher %}
+          <dt>Publisher</dt><dd>{{ source.csl.publisher }}</dd>
+        {% endif %}
+        {% if source.containerTitle %}
+          <dt>In</dt><dd>{{ source.containerTitle }}</dd>
+        {% endif %}
+        {% if source.issuedYear %}
+          <dt>Year</dt><dd>{{ source.issuedYear }}</dd>
+        {% endif %}
+        {% if source.language %}
+          <dt>Language</dt><dd>{{ source.language }}</dd>
+        {% endif %}
+        {% if source.archive %}
+          <dt>Archive</dt><dd>{{ source.archive }}</dd>
+        {% endif %}
+        {% if source.archiveLocation %}
+          <dt>Location</dt><dd>{{ source.archiveLocation }}</dd>
+        {% endif %}
+        {% if source.callNumber %}
+          <dt>Call number</dt><dd>{{ source.callNumber }}</dd>
+        {% endif %}
+        {% if source.url %}
+          <dt>Online</dt>
+          <dd><a href="{{ source.url }}" rel="noopener noreferrer nofollow">{{ source.url }}</a></dd>
+        {% endif %}
+      </dl>
+    </section>
+
+    {% if citedBy.length > 0 %}
+      <section>
+        <h2>Cited by</h2>
+        <ul class="item-list">
+          {% for item in citedBy %}
+            <li>
+              <a href="/{{ item.kind }}s/{{ item.slug }}">{{ item.title }}</a>
+              {% if item.locator %}<span class="muted">({{ item.locator }})</span>{% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endif %}
+
+    {% if isAdmin %}
+      <p class="admin-actions">
+        <a href="/admin/sources/{{ source.id }}/edit">Edit this source</a>
+      </p>
+    {% endif %}
+  </article>
+{% endblock %}

@@ -1,0 +1,109 @@
+# Production-shaped composition: web, worker, database.
+#
+# On Unraid, replace the named volumes with paths under /mnt/user/appdata and
+# your array shares (see README.md). On a cloud host, point DB_HOST at the
+# managed database and remove the `db` service entirely -- nothing else changes.
+
+name: dissertation
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dissertation-platform:latest
+    restart: unless-stopped
+    command: ['web']
+    env_file: [.env]
+    environment:
+      # Inside the compose network the database is reachable by service name,
+      # whatever .env says for a host-based deployment.
+      DB_HOST: db
+      HTTP_HOST: 0.0.0.0
+      HTTP_PORT: '8080'
+      STORAGE_ROOT: /data/files
+      BACKUP_ROOT: /data/backups
+    ports:
+      # Bound to loopback: this is meant to sit behind a reverse proxy that
+      # terminates TLS. Publishing it on 0.0.0.0 would expose the app directly
+      # over plain HTTP, where the session cookie is readable in transit.
+      - '127.0.0.1:8080:8080'
+    volumes:
+      - files:/data/files
+      - backups:/data/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', '/app/scripts/healthcheck.sh']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '5' }
+
+  worker:
+    image: dissertation-platform:latest
+    restart: unless-stopped
+    command: ['worker']
+    env_file: [.env]
+    environment:
+      DB_HOST: db
+      STORAGE_ROOT: /data/files
+      BACKUP_ROOT: /data/backups
+      # Migrations belong to the web role; see scripts/entrypoint.sh.
+      RUN_MIGRATIONS: 'false'
+    volumes:
+      - files:/data/files
+      - backups:/data/backups
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_started
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '5' }
+
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      # Binary logging is only needed for replication and point-in-time
+      # recovery; neither applies here, and it doubles the write volume.
+      - --skip-log-bin
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-dissertation}
+      MYSQL_USER: ${DB_USER:-dissertation}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env}
+      # The application never uses root; it exists only for maintenance.
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD must be set in .env}
+    volumes:
+      - database:/var/lib/mysql
+    healthcheck:
+      # `mysqladmin ping` succeeds before the server finishes initialising on
+      # a first run, so the query below is used instead.
+      test:
+        ['CMD', 'mysql', '-h', '127.0.0.1', '-u', 'root', '-p${DB_ROOT_PASSWORD}', '-e', 'SELECT 1']
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
+
+volumes:
+  database:
+  files:
+  backups:

@@ -1,0 +1,38 @@
+[project]
+name = "dissertation-worker"
+version = "0.1.0"
+description = "Background job worker for the dissertation platform: media derivatives, bibliography import, geocoding and backups."
+requires-python = ">=3.11"
+dependencies = [
+  "PyMySQL>=1.1.1,<2",
+  "Pillow>=11.0.0,<12",
+  "pypdfium2>=4.30.0,<5",
+  "bibtexparser>=1.4.1,<2",
+  "rispy>=0.9.0,<1",
+  "requests>=2.32.3,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0,<9",
+  "ruff>=0.8.0,<1",
+]
+
+[tool.setuptools]
+packages = ["worker", "worker.jobs"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [".venv", "venv", "node_modules", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "C4", "SIM"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"worker/tests/*" = ["S105", "S106"]
+
+[tool.pytest.ini_options]
+testpaths = ["worker/tests"]
+pythonpath = ["."]

@@ -1,0 +1,36 @@
+{% extends "layouts/base.njk" %}
+{% import "partials/macros.njk" as ui %}
+
+{% block title %}{{ labels.plural }} — Dissertation Research{% endblock %}
+
+{% block content %}
+  <h1>{{ labels.plural }}</h1>
+
+  <form method="get" action="/{{ path }}" class="search-form" role="search">
+    <label for="q">Search {{ labels.plural | lower }}</label>
+    <input type="search" id="q" name="q" value="{{ search }}" />
+    <button type="submit">Search</button>
+  </form>
+
+  {% if items.length == 0 %}
+    <p class="empty">
+      {% if search %}Nothing matches that search.{% else %}Nothing published yet.{% endif %}
+    </p>
+  {% else %}
+    <p class="muted">{{ total }} record{{ 's' if total != 1 }}</p>
+    <ul class="item-list">
+      {% for item in items %}
+        <li>
+          <a href="{{ item.href }}">{{ item.title }}</a>
+          {% if item.titleOriginal %}
+            <span class="muted">({{ item.titleOriginal }})</span>
+          {% endif %}
+          {% if item.visibility != 'public' %}{{ ui.badge(item.visibility) }}{% endif %}
+          {% if item.summary %}<div class="muted small">{{ item.summary | truncate(140) }}</div>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+
+    {{ ui.pagination('/' + path, page, pageCount, search) }}
+  {% endif %}
+{% endblock %}
