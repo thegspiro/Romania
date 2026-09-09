@@ -10,9 +10,12 @@
  *   TEST_DB_HOST=127.0.0.1 TEST_DB_PORT=3306 TEST_DB_NAME=dissertation_test \
  *   TEST_DB_USER=dissertation TEST_DB_PASSWORD=... npm test
  *
- * When no database is reachable the integration suites skip with a message
- * rather than failing, so `npm test` still runs the unit suites on a machine
- * that has no MySQL.
+ * When no database is reachable the integration suites skip rather than fail,
+ * so `npm test` still runs the unit suites on a machine that has no MySQL.
+ * That skip is a convenience for local work and a hazard everywhere else: a
+ * run that skipped every visibility test is green and proves nothing. Set
+ * REQUIRE_TEST_DB -- as CI does -- to turn an unreachable database into a
+ * failure.
  *
  * WARNING: the harness drops every table in the target database. Never point
  * it at anything but a disposable test database.
@@ -54,17 +57,50 @@ export function testConfig(overrides: Record<string, string> = {}): Config {
   });
 }
 
-/** True when a MySQL server is reachable with the test credentials. */
+/**
+ * Whether an unreachable database is an error rather than a reason to skip.
+ *
+ * Read leniently on purpose. A workflow that sets this at all means it, and
+ * `REQUIRE_TEST_DB=false` quietly reading as true is the kind of thing nobody
+ * wants to debug twice.
+ */
+function databaseRequired(): boolean {
+  const value = process.env.REQUIRE_TEST_DB;
+  return value !== undefined && value !== '' && value !== '0' && value !== 'false';
+}
+
+/**
+ * True when a MySQL server is reachable with the test credentials.
+ *
+ * With REQUIRE_TEST_DB set this throws instead. The suites guarded by it are
+ * where the visibility rules are actually proved, and a skipped visibility
+ * suite is indistinguishable from a passing one in a green check -- so CI
+ * must not be able to report success having run none of them.
+ *
+ * The underlying error is attached as `cause`: "no database answered" and
+ * "the password is wrong" look identical from the outside otherwise, and the
+ * probe swallowing that distinction wasted time more than once.
+ */
 export async function databaseAvailable(): Promise<boolean> {
+  const config = testConfig();
   let pool: Pool | undefined;
   try {
-    pool = createPool(testConfig());
+    pool = createPool(config);
     await pool.query('SELECT 1');
     return true;
-  } catch {
+  } catch (error) {
+    if (databaseRequired()) {
+      throw new Error(
+        'REQUIRE_TEST_DB is set but no database answered at ' +
+          `${config.DB_USER}@${config.DB_HOST}:${config.DB_PORT}/${config.DB_NAME}`,
+        { cause: error },
+      );
+    }
     return false;
   } finally {
-    await pool?.end();
+    // Closing a pool that never connected can itself reject, and that failure
+    // is never the interesting one -- it must not replace the error above.
+    await pool?.end().catch(() => undefined);
   }
 }
 
