@@ -1,4 +1,4 @@
--- 0006_timeline (down)
+-- 0007_timeline (down)
 --
 -- Reverse order, and note what is lost: `event_detail.body_markdown` holds
 -- prose, so rolling this back discards every event narrative that was written
@@ -14,15 +14,20 @@
 -- The relationship rows first: relationship_predicate is referenced by a
 -- RESTRICT foreign key, so an edge asserted with one of these verbs would
 -- otherwise refuse the DELETE below.
+--
+-- Exactly the codes the up-migration seeded, and no others. 'commanded' looks
+-- like it belongs here and does not: 0006_relationship_roles introduced it, so
+-- removing it here would leave that migration applied and its vocabulary
+-- half gone.
 DELETE FROM relationship
  WHERE predicate_id IN (
    SELECT id FROM relationship_predicate
-    WHERE code IN ('organized', 'attended', 'commanded', 'targeted',
+    WHERE code IN ('organized', 'attended', 'targeted',
                    'witnessed', 'caused', 'part_of')
  );
 
 DELETE FROM relationship_predicate
- WHERE code IN ('organized', 'attended', 'commanded', 'targeted',
+ WHERE code IN ('organized', 'attended', 'targeted',
                 'witnessed', 'caused', 'part_of');
 
 ALTER TABLE mention

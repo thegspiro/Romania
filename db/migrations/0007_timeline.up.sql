@@ -1,4 +1,4 @@
--- 0006_timeline (up)
+-- 0007_timeline (up)
 --
 -- Chronology.
 --
@@ -97,10 +97,13 @@ DEALLOCATE PREPARE apply_mention_columns;
 --
 -- INSERT IGNORE, matching 0002: re-runnable, and a predicate the operator has
 -- deleted does not reappear with a different id.
+--
+-- 'commanded' is deliberately absent: 0006_relationship_roles seeds it, and
+-- that migration owns it. Seeding it here would be a harmless no-op, but the
+-- down-migration would then delete a predicate this one did not create.
 INSERT IGNORE INTO relationship_predicate (code, label, inverse_label, is_symmetric) VALUES
   ('organized',       'Organized',        'Organized by',    0),
   ('attended',        'Attended',         'Attended by',     0),
-  ('commanded',       'Commanded',        'Commanded by',    0),
   ('targeted',        'Targeted',         'Targeted by',     0),
   ('witnessed',       'Witnessed',        'Witnessed by',    0),
   ('caused',          'Caused',           'Caused by',       0),

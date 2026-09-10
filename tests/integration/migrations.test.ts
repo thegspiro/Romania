@@ -73,8 +73,8 @@ describe.skipIf(!available)('migration runner', () => {
     expect(names).toContain('manuscript_build');
   });
 
-  it('adds the timeline columns 0006 introduces', async () => {
-    // 0006 only ALTERs, so the table-name assertions above cannot see it.
+  it('adds the timeline columns 0007 introduces', async () => {
+    // 0007 only ALTERs, so the table-name assertions above cannot see it.
     const columns = await queryRows<RowDataPacket & { TABLE_NAME: string; COLUMN_NAME: string }>(
       pool,
       `SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS

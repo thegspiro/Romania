@@ -233,7 +233,7 @@ const DETAIL_SPECS: Readonly<Record<EntityKind, DetailSpec>> = Object.freeze({
         // `date_precision` predates the per-endpoint pair and is still read by
         // anything written before them. Keeping it equal to the start's
         // precision keeps it a true answer to the question it always answered,
-        // and is what makes migration 0006's backfill safe to re-run.
+        // and is what makes migration 0007's backfill safe to re-run.
         startPrecision,
         startPrecision,
         endPrecision,

@@ -488,7 +488,7 @@ describe.skipIf(!available)('timeline', () => {
     expect(record?.detail.isCirca).toBe(1);
     expect(record?.detail.bodyMarkdown).toBe('An account.');
     // The legacy column keeps tracking the start, which is what makes
-    // migration 0006's backfill safe to run again.
+    // migration 0007's backfill safe to run again.
     expect(record?.detail.datePrecision).toBe('month');
 
     const publicPage = await anonymous('/events/a-dated-event');
