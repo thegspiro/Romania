@@ -80,7 +80,14 @@ export const FLASH_MESSAGES: Readonly<Record<string, Flash>> = Object.freeze({
 
   relationship_added: { kind: 'success', text: 'Relationship added.' },
   relationship_removed: { kind: 'success', text: 'Relationship removed.' },
-  relationship_duplicate: { kind: 'error', text: 'That relationship already exists.' },
+  relationship_duplicate: {
+    kind: 'error',
+    text: 'That relationship already exists with the same role and period.',
+  },
+  relationship_role_long: {
+    kind: 'error',
+    text: 'That role or position is too long (255 characters maximum).',
+  },
   relationship_invalid: { kind: 'error', text: 'Choose a different item and a relationship type.' },
 
   essay_created: { kind: 'success', text: 'Essay created.' },

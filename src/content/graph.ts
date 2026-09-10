@@ -17,11 +17,17 @@
  * hidden from the drawing -- it is never traversed *through*. Otherwise the
  * shape of the graph would betray a private node sitting between two public
  * ones.
+ *
+ * An asserted edge may carry an office and a period, which is what lets the
+ * walk be asked for the network as it stood in one year. That filter narrows
+ * the drawing and is applied on top of the visibility test, never instead of
+ * it: no year makes a private node reachable.
  */
 import type { RowDataPacket } from 'mysql2/promise';
 import { queryRows, type Pool, type PoolConnection } from '../db/pool.js';
 import { visibilityFilter, type Viewer } from './visibility.js';
 import { referenceHref } from './references.js';
+import { columnToIsoDate, edgeLabel, formatPeriod, isDatePrecision } from './relationships.js';
 
 export interface GraphNode {
   id: number;
@@ -35,12 +41,21 @@ export interface GraphNode {
 export interface GraphEdge {
   source: number;
   target: number;
+  /** The predicate, read in the direction the edge is drawn. */
   label: string;
+  /** The office the edge was held in, when one was recorded. */
+  roleTitle: string | null;
+  /** The period as prose, or null when neither end is known. */
+  period: string | null;
+  /** What to draw on the edge: the role leads when there is one. */
+  display: string;
   relation: 'asserted' | 'mentioned';
 }
 
 export interface Graph {
   centre: number;
+  /** The year the walk was filtered to, or null when it was not filtered. */
+  year: number | null;
   nodes: GraphNode[];
   edges: GraphEdge[];
   /** True when the budget stopped the walk before it ran out of neighbours. */
@@ -55,6 +70,10 @@ interface NeighbourRow extends RowDataPacket {
   other_kind: string;
   other_title: string;
   label: string;
+  role_title: string | null;
+  start_date: unknown;
+  end_date: unknown;
+  date_precision: string | null;
   relation: 'asserted' | 'mentioned';
   from_id: number;
   to_id: number;
@@ -69,6 +88,7 @@ async function neighboursOf(
   db: Pool | PoolConnection,
   ids: readonly number[],
   viewer: Viewer,
+  year: number | null,
 ): Promise<NeighbourRow[]> {
   if (ids.length === 0) return [];
 
@@ -77,34 +97,51 @@ async function neighboursOf(
   const near = visibilityFilter(viewer, 'ci');
   const far = visibilityFilter(viewer, 'other');
 
+  // Interval overlap against the whole calendar year, compared as dates so
+  // ix_relationship_period stays usable. An edge with no dates always shows:
+  // "no period recorded" is not "did not exist then". A mention carries no
+  // dates at all, so the two mention branches are never narrowed.
+  const period =
+    year === null
+      ? ''
+      : ' AND (r.start_date IS NULL OR r.start_date <= ?)' +
+        ' AND (r.end_date IS NULL OR r.end_date >= ?)';
+  const periodParams: string[] =
+    year === null
+      ? []
+      : [`${String(year).padStart(4, '0')}-12-31`, `${String(year).padStart(4, '0')}-01-01`];
+
   return queryRows<NeighbourRow>(
     db,
     `SELECT other.id AS other_id, other.kind AS other_kind, other.title AS other_title,
-            p.label AS label, 'asserted' AS relation,
+            p.label AS label, r.role_title AS role_title,
+            r.start_date AS start_date, r.end_date AS end_date,
+            r.date_precision AS date_precision, 'asserted' AS relation,
             r.from_item_id AS from_id, r.to_item_id AS to_id
        FROM relationship r
        JOIN relationship_predicate p ON p.id = r.predicate_id
        JOIN content_item ci ON ci.id = r.from_item_id
        JOIN content_item other ON other.id = r.to_item_id
       WHERE r.from_item_id IN (${placeholders})
-        AND ${edge.sql} AND ${near.sql} AND ${far.sql}
+        AND ${edge.sql} AND ${near.sql} AND ${far.sql}${period}
 
       UNION ALL
 
      SELECT other.id, other.kind, other.title,
-            p.inverse_label, 'asserted',
+            p.inverse_label, r.role_title, r.start_date, r.end_date,
+            r.date_precision, 'asserted',
             r.from_item_id, r.to_item_id
        FROM relationship r
        JOIN relationship_predicate p ON p.id = r.predicate_id
        JOIN content_item ci ON ci.id = r.to_item_id
        JOIN content_item other ON other.id = r.from_item_id
       WHERE r.to_item_id IN (${placeholders})
-        AND ${edge.sql} AND ${near.sql} AND ${far.sql}
+        AND ${edge.sql} AND ${near.sql} AND ${far.sql}${period}
 
       UNION ALL
 
      SELECT other.id, other.kind, other.title,
-            'mentions', 'mentioned',
+            'mentions', NULL, NULL, NULL, 'unknown', 'mentioned',
             m.from_item_id, m.to_item_id
        FROM mention m
        JOIN content_item ci ON ci.id = m.from_item_id
@@ -115,7 +152,7 @@ async function neighboursOf(
       UNION ALL
 
      SELECT other.id, other.kind, other.title,
-            'mentioned in', 'mentioned',
+            'mentioned in', NULL, NULL, NULL, 'unknown', 'mentioned',
             m.from_item_id, m.to_item_id
        FROM mention m
        JOIN content_item ci ON ci.id = m.to_item_id
@@ -127,10 +164,12 @@ async function neighboursOf(
       ...edge.params,
       ...near.params,
       ...far.params,
+      ...periodParams,
       ...ids,
       ...edge.params,
       ...near.params,
       ...far.params,
+      ...periodParams,
       ...ids,
       ...near.params,
       ...far.params,
@@ -141,14 +180,34 @@ async function neighboursOf(
   );
 }
 
+/** The year an edge is tested against, or null for "every year at once". */
+export interface GraphOptions {
+  /**
+   * Restricts asserted edges to those whose period covers this calendar year.
+   * Out-of-range values are ignored rather than refused, so a hand-edited
+   * query string cannot empty the drawing in a way that looks like a leak.
+   */
+  year?: number | null;
+}
+
+/** Normalises a year from a query string. */
+export function parseGraphYear(value: unknown): number | null {
+  if (typeof value !== 'string' || !/^\d{1,4}$/.test(value.trim())) return null;
+  const year = Number(value.trim());
+  return year >= 1 && year <= 9999 ? year : null;
+}
+
 /** Builds the neighbourhood around one item. */
 export async function buildGraph(
   db: Pool | PoolConnection,
   centre: { id: number; kind: string; slug: string; title: string },
   viewer: Viewer,
   depth = 2,
+  options: GraphOptions = {},
 ): Promise<Graph> {
   const maxDepth = Math.min(Math.max(Math.trunc(depth), 1), MAX_DEPTH);
+  const year =
+    typeof options.year === 'number' && Number.isSafeInteger(options.year) ? options.year : null;
 
   const nodes = new Map<number, GraphNode>([
     [
@@ -168,7 +227,7 @@ export async function buildGraph(
   let truncated = false;
 
   for (let distance = 1; distance <= maxDepth && frontier.length > 0; distance += 1) {
-    const rows = await neighboursOf(db, frontier, viewer);
+    const rows = await neighboursOf(db, frontier, viewer, year);
     const next: number[] = [];
 
     for (const row of rows) {
@@ -194,9 +253,27 @@ export async function buildGraph(
 
       const source = Number(row.from_id);
       const target = Number(row.to_id);
-      const key = `${source}-${target}-${row.relation}-${row.label}`;
+      const period = formatPeriod({
+        startDate: columnToIsoDate(row.start_date),
+        endDate: columnToIsoDate(row.end_date),
+        precision: isDatePrecision(row.date_precision) ? row.date_precision : 'unknown',
+      });
+      const display = edgeLabel(row.label, row.role_title, period);
+
+      // The office and the period are part of the identity of an edge: two
+      // posts held at the same organization are two edges, not one drawn
+      // twice.
+      const key = `${source}-${target}-${row.relation}-${display}`;
       if (!edges.has(key)) {
-        edges.set(key, { source, target, label: row.label, relation: row.relation });
+        edges.set(key, {
+          source,
+          target,
+          label: row.label,
+          roleTitle: row.role_title,
+          period,
+          display,
+          relation: row.relation,
+        });
       }
     }
 
@@ -225,5 +302,5 @@ export async function buildGraph(
     (item) => nodes.has(item.source) && nodes.has(item.target),
   );
 
-  return { centre: centre.id, nodes: [...nodes.values()], edges: kept, truncated };
+  return { centre: centre.id, year, nodes: [...nodes.values()], edges: kept, truncated };
 }

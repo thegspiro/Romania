@@ -28,7 +28,7 @@ import {
 } from '../content/manuscripts.js';
 import { listMentionsOf, listMentionsFrom } from '../content/mentions.js';
 import { listRelationshipsFor } from '../content/relationships.js';
-import { buildGraph } from '../content/graph.js';
+import { buildGraph, parseGraphYear } from '../content/graph.js';
 import { renderProse, renderFragment } from '../content/markdown.js';
 import { resolveForRender, resolveTimelines } from '../content/render-context.js';
 import {
@@ -117,6 +117,10 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
           // "the other places that they have been mentioned"
           mentions: await listMentionsOf(pool, record.id, request.viewer),
           relationships: await listRelationshipsFor(pool, record.id, request.viewer),
+          // Carried into the graph's data URL so the year survives a reload
+          // without JavaScript. Re-parsed rather than echoed, so nothing from
+          // the query string reaches the page unchecked.
+          graphYear: parseGraphYear((request.query as { year?: unknown }).year),
           canonicalUrl: `${config.PUBLIC_BASE_URL}${record.href}`,
         },
         { noindex: record.noindex || record.visibility !== 'public' },
@@ -336,12 +340,17 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
     const record = await findEntityBySlug(pool, entityKind, slug, request.viewer);
     if (record === null) throw notFound(`${entityKind} ${slug}`);
 
-    const depth = Number((request.query as { depth?: string }).depth ?? '2');
+    const query = request.query as { depth?: string; year?: unknown };
+    const depth = Number(query.depth ?? '2');
     const graph = await buildGraph(
       pool,
       { id: record.id, kind: record.kind, slug: record.slug, title: record.title },
       request.viewer,
       Number.isSafeInteger(depth) ? depth : 2,
+      // A year narrows which asserted edges are drawn. It is not a visibility
+      // decision and cannot become one: the filter is ANDed on top of the
+      // viewer's own, never in place of it.
+      { year: parseGraphYear(query.year) },
     );
 
     return reply.type('application/json').header('Cache-Control', 'private, no-store').send(graph);

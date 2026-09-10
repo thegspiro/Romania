@@ -687,7 +687,37 @@ button.danger {
   border: 1px solid var(--rule);
 }
 
+.relationship-role {
+  margin-top: 0.2rem;
+  font-size: 0.9375rem;
+}
+
+.role-title {
+  font-weight: 600;
+}
+
+.role-period {
+  color: var(--ink-muted);
+  margin-left: 0.4rem;
+}
+
 /* --- Network graph -------------------------------------------------------- */
+
+.graph-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin-top: 0.75rem;
+}
+
+.graph-controls input[type='number'] {
+  width: 7rem;
+}
+
+.graph-controls .hint {
+  flex: 1 1 100%;
+}
 
 .graph-canvas {
   height: 420px;
