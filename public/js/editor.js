@@ -1,20 +1,28 @@
 /**
- * The essay editor: reference picker and preview.
+ * The prose editor: reference picker, preview, and slug type-ahead.
  *
  * Progressive enhancement. Without JavaScript the textarea is still a working
- * Markdown editor and the form still saves; what is lost is the convenience of
- * picking a reference and seeing it rendered before publishing.
+ * Markdown editor, the slug fields are still text inputs, and every form still
+ * saves; what is lost is the convenience of picking a reference, seeing it
+ * rendered before publishing, and not having to remember a slug.
  *
  * The picker never asks the author to type the reference syntax. It inserts
  * the text the server tells it to, so how a reference is spelled is defined in
  * exactly one place -- `formatReference` in src/content/references.ts.
+ *
+ * The editor binds to `[data-editor]` rather than to the essay form's id, so
+ * the same enhancement serves the entity forms -- a person's biography and an
+ * event's account are prose with references in them for the same reasons an
+ * essay is.
  */
 (function () {
   'use strict';
 
-  var editor = document.getElementById('essay-editor');
-  var textarea = document.getElementById('bodyMarkdown');
-  if (!editor || !textarea) return;
+  var editor = document.querySelector('[data-editor]');
+  if (!editor) return;
+
+  var textarea = document.getElementById(editor.getAttribute('data-editor') || '');
+  if (!textarea) return;
 
   var search = document.getElementById('reference-search');
   var kindSelect = document.getElementById('reference-kind');
@@ -24,6 +32,7 @@
   var previewBody = document.getElementById('preview-body');
   var previewFootnotes = document.getElementById('preview-footnotes');
   var csrf = editor.getAttribute('data-csrf') || '';
+  var previewUrl = editor.getAttribute('data-preview-url') || '/admin/essays/preview';
 
   // --- Reference picker ----------------------------------------------------
 
@@ -149,7 +158,7 @@
       body.set('_csrf', csrf);
       body.set('bodyMarkdown', textarea.value);
 
-      fetch('/admin/essays/preview', {
+      fetch(previewUrl, {
         method: 'POST',
         credentials: 'same-origin',
         headers: {
@@ -189,4 +198,85 @@
         });
     });
   }
+})();
+
+/**
+ * Slug type-ahead.
+ *
+ * A relationship and an event's place are both recorded by typing the other
+ * item's slug, which means remembering it. This fills a native <datalist> from
+ * the same admin search the reference picker uses, so the field keeps working
+ * exactly as before with JavaScript off -- it just stops requiring recall.
+ *
+ * The list is scoped by `data-slug-picker`, or by another control named in
+ * `data-slug-picker-kind-from` when the kind is itself a choice on the form.
+ */
+(function () {
+  'use strict';
+
+  var inputs = document.querySelectorAll('input[data-slug-picker]');
+  if (inputs.length === 0) return;
+
+  Array.prototype.forEach.call(inputs, function (input) {
+    var datalist = document.getElementById(input.getAttribute('list') || '');
+    if (!datalist) return;
+
+    var fixedKind = input.getAttribute('data-slug-picker') || 'all';
+    var kindSource = document.getElementById(
+      input.getAttribute('data-slug-picker-kind-from') || '',
+    );
+    var timer = null;
+    var lastQuery = '';
+
+    function fill() {
+      var term = input.value.trim();
+      var kind = kindSource ? kindSource.value : fixedKind;
+      var query = kind + ' ' + term;
+
+      // Typing a slug that was just picked would otherwise re-query on every
+      // keystroke that changes nothing.
+      if (term.length < 2 || query === lastQuery) return;
+      lastQuery = query;
+
+      fetch(
+        '/admin/reference-search?q=' +
+          encodeURIComponent(term) +
+          '&kind=' +
+          encodeURIComponent(kind),
+        { credentials: 'same-origin', headers: { Accept: 'application/json' } },
+      )
+        .then(function (response) {
+          if (!response.ok) throw new Error('Search failed (' + response.status + ').');
+          return response.json();
+        })
+        .then(function (payload) {
+          datalist.textContent = '';
+          (payload.results || []).forEach(function (item) {
+            var option = document.createElement('option');
+            // The value is the slug, because that is what the field stores.
+            option.value = item.slug;
+            // textContent, not markup: titles are author-supplied data.
+            option.label = item.title + (item.visibility === 'public' ? '' : ' · private');
+            datalist.appendChild(option);
+          });
+        })
+        .catch(function () {
+          // A failed lookup leaves the field exactly as usable as it was
+          // before this script ran.
+          datalist.textContent = '';
+        });
+    }
+
+    input.addEventListener('input', function () {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(fill, 200);
+    });
+
+    if (kindSource) {
+      kindSource.addEventListener('change', function () {
+        lastQuery = '';
+        fill();
+      });
+    }
+  });
 })();

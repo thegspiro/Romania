@@ -143,6 +143,47 @@ describe.skipIf(!available)('mentions', () => {
       );
       expect(Number(rows[0]?.total)).toBe(0);
     });
+
+    it('records the paragraph each occurrence sits in', async () => {
+      const person = await makeEntity(harness.pool, 'person', 'Ion Antonescu', 'public');
+      await makeEssay(
+        harness.pool,
+        'Anchored',
+        'private',
+        [
+          'Named in the first paragraph: [[person:ion-antonescu]].',
+          '',
+          '## A heading',
+          '',
+          'And again here: [[person:ion-antonescu|the Marshal]].',
+        ].join('\n'),
+      );
+
+      const rows = await queryRows<RowDataPacket & { occurrence: number; block_index: number }>(
+        harness.pool,
+        `SELECT occurrence, block_index FROM mention
+          WHERE to_item_id = ? ORDER BY occurrence ASC`,
+        [person],
+      );
+
+      // The heading counts as a block, so the second mention is in the third.
+      expect(rows.map((row) => Number(row.block_index))).toEqual([1, 3]);
+    });
+
+    it('anchors a backlink at the first occurrence', async () => {
+      const person = await makeEntity(harness.pool, 'person', 'Ion Antonescu', 'public');
+      await makeEssay(
+        harness.pool,
+        'Anchored Link',
+        'public',
+        'An opening.\n\nNamed here: [[person:ion-antonescu]].',
+      );
+
+      const [backlink] = await listMentionsOf(harness.pool, person, ANONYMOUS);
+      // The quoted context and the paragraph the link opens are the same one.
+      expect(backlink?.blockIndex).toBe(2);
+      expect(backlink?.href).toBe('/essays/anchored-link#p2');
+    });
   });
 
   describe('backlink visibility', () => {

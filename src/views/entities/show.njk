@@ -53,9 +53,49 @@
             <dt>Also known as</dt><dd>{{ record.detail.historicalNames }}</dd>
           {% endif %}
         {% elif kind == 'event' %}
-          {% if record.detail.startDate %}<dt>Started</dt><dd>{{ record.detail.startDate }}</dd>{% endif %}
-          {% if record.detail.endDate %}<dt>Ended</dt><dd>{{ record.detail.endDate }}</dd>{% endif %}
-          <dt>Date precision</dt><dd>{{ record.detail.datePrecision }}</dd>
+          {#
+            One formatted string from `formatEventDate`, which is the only
+            thing that knows a date stored as 1944-01-01 at year precision
+            means "1944". The template must not print the raw column.
+
+            The place comes from the same read that resolves it for every
+            listing, so a private one is absent here for the same reason and
+            in the same way -- no title, no slug, no id.
+          #}
+          {% if event %}
+            <dt>Date</dt><dd>{{ event.dateLabel }}</dd>
+            {#
+              What the sources support when they will not give a date: the
+              events this one is known to sit between. Every anchor here
+              survived the viewer's filter, on the edge and on the anchor
+              event alike, so naming one discloses nothing.
+            #}
+            {% if event.bounds %}
+              {% if event.bounds.after.length > 0 %}
+                <dt>After</dt>
+                <dd>
+                  {% for anchor in event.bounds.after %}
+                    <a href="{{ anchor.href }}">{{ anchor.title }}</a>{% if anchor.dateLabel %}
+                      <span class="muted small">({{ anchor.dateLabel }})</span>
+                    {% endif %}{% if not loop.last %}; {% endif %}
+                  {% endfor %}
+                </dd>
+              {% endif %}
+              {% if event.bounds.before.length > 0 %}
+                <dt>Before</dt>
+                <dd>
+                  {% for anchor in event.bounds.before %}
+                    <a href="{{ anchor.href }}">{{ anchor.title }}</a>{% if anchor.dateLabel %}
+                      <span class="muted small">({{ anchor.dateLabel }})</span>
+                    {% endif %}{% if not loop.last %}; {% endif %}
+                  {% endfor %}
+                </dd>
+              {% endif %}
+            {% endif %}
+            {% if event.place %}
+              <dt>Place</dt><dd><a href="{{ event.place.href }}">{{ event.place.title }}</a></dd>
+            {% endif %}
+          {% endif %}
         {% endif %}
 
         {% if record.detail.alternateNames %}
@@ -64,14 +104,34 @@
       </dl>
     </section>
 
-    {% if biographyHtml %}
+    {% if rendered %}
       <section>
-        <h2>{{ 'Biography' if kind == 'person' else 'Description' }}</h2>
-        <div class="prose">{{ biographyHtml | safe }}</div>
+        <h2>
+          {% if kind == 'person' %}Biography
+          {% elif kind == 'event' %}Account
+          {% else %}Description{% endif %}
+        </h2>
+        {# markdown-it with html:false, references resolved for this viewer. #}
+        <div class="prose">{{ rendered.html | safe }}</div>
+
+        {% if rendered.footnotes.length > 0 %}
+          <ol class="footnotes">
+            {% for note in rendered.footnotes %}
+              <li id="fn-{{ note.number }}">
+                {# citeproc output, already through sanitizeCitationHtml. #}
+                {{ note.html | safe }}
+                <a href="#fnref-{{ note.number }}" class="footnote-back" aria-label="Back to text">↩</a>
+              </li>
+            {% endfor %}
+          </ol>
+        {% endif %}
       </section>
     {% endif %}
 
     {% set editable = false %}
+    {% set chronologyHeading = 'In time' if kind == 'event' else 'Chronology' %}
+    {% set chronologyEmpty = 'No connected events recorded yet.' %}
+    {% include "partials/chronology.njk" %}
     {% include "partials/relationships.njk" %}
     {% include "partials/mentions.njk" %}
     {% include "partials/graph.njk" %}

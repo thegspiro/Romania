@@ -1,0 +1,82 @@
+{% extends "layouts/base.njk" %}
+{% import "partials/macros.njk" as ui %}
+
+{% block title %}Timeline — Dissertation Research{% endblock %}
+
+{% block content %}
+  <h1>Timeline</h1>
+  <p class="muted">
+    Events in date order. A date is shown only as precisely as it is known:
+    “1943” means the year, not the first of January.
+  </p>
+
+  {#
+    A GET form, so a filtered chronology has a URL that can be linked and
+    bookmarked. No visibility control here: `listTimeline` refuses one from a
+    non-administrator, because `?visibility=private` would be a way to
+    enumerate unpublished material.
+  #}
+  <form method="get" action="/timeline" class="filter-form">
+    <p class="field">
+      <label for="timeline-q">Search</label>
+      <input type="search" id="timeline-q" name="q" value="{{ search }}" />
+    </p>
+    <p class="field">
+      <label for="timeline-from">From</label>
+      <input type="text" id="timeline-from" name="from" value="{{ from }}"
+             inputmode="numeric" placeholder="1940" />
+      <span class="hint">A year, or a full date as 1940-06-02.</span>
+    </p>
+    <p class="field">
+      <label for="timeline-to">To</label>
+      <input type="text" id="timeline-to" name="to" value="{{ to }}"
+             inputmode="numeric" placeholder="1944" />
+    </p>
+    <p class="field">
+      <label for="timeline-place">Place</label>
+      <input type="text" id="timeline-place" name="place" value="{{ place }}"
+             placeholder="iasi" />
+      <span class="hint">The URL segment of a place's page.</span>
+    </p>
+    <p class="field">
+      <label for="timeline-related">Connected to</label>
+      <input type="text" id="timeline-related" name="related" value="{{ related }}"
+             placeholder="person:ion-antonescu" />
+      <span class="hint">
+        A kind and a slug, as written in prose: person, organization, place or event.
+      </span>
+    </p>
+    <p class="field">
+      <button type="submit">Filter</button>
+      <a href="/timeline">Clear</a>
+    </p>
+  </form>
+
+  <p class="muted small">
+    {{ total }} {{ 'event' if total == 1 else 'events' }}.
+  </p>
+
+  {% include "partials/timeline-band.njk" %}
+
+  {% if entries.length == 0 %}
+    <p class="empty">Nothing matches those filters.</p>
+  {% else %}
+    <ol class="chronology-list timeline-page-list">
+      {% for entry in entries %}
+        <li>
+          <span class="chronology-date">{{ entry.dateLabel }}</span>
+          <a href="{{ entry.href }}">{{ entry.title }}</a>
+          {% if entry.place %}
+            <span class="chronology-place">{{ entry.place.title }}</span>
+          {% endif %}
+          {{ ui.badge(entry.visibility) }}
+          {% if entry.summary %}
+            <div class="muted small">{{ entry.summary }}</div>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+
+    {{ ui.pagination('/timeline', page, pageCount, search) }}
+  {% endif %}
+{% endblock %}

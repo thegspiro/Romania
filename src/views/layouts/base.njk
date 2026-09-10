@@ -25,8 +25,10 @@
         <nav aria-label="Main">
           <a href="/essays"{% if currentPath.startsWith('/essays') %} aria-current="page"{% endif %}>Essays</a>
           <a href="/manuscripts"{% if currentPath.startsWith('/manuscripts') %} aria-current="page"{% endif %}>Manuscripts</a>
+          <a href="/timeline"{% if currentPath.startsWith('/timeline') %} aria-current="page"{% endif %}>Timeline</a>
           <a href="/people"{% if currentPath.startsWith('/people') %} aria-current="page"{% endif %}>People</a>
           <a href="/places"{% if currentPath.startsWith('/places') %} aria-current="page"{% endif %}>Places</a>
+          <a href="/events"{% if currentPath.startsWith('/events') %} aria-current="page"{% endif %}>Events</a>
           <a href="/artifacts"{% if currentPath.startsWith('/artifacts') %} aria-current="page"{% endif %}>Artifacts</a>
           <a href="/sources"{% if currentPath.startsWith('/sources') %} aria-current="page"{% endif %}>Sources</a>
           {% if isAdmin %}

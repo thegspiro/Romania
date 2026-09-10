@@ -74,6 +74,39 @@ mention is exactly as visible as the item whose prose contains it.
 Backlink reads filter on the **citing** item. A private essay naming a public
 person must not surface on that person's public page.
 
+A `mention` also records `block_index`: which top-level block of the citing
+prose the reference sat in, so a backlink lands on the paragraph rather than
+the top of the page. It is part of the same projection — computed by
+`blockAnchorsFor` from the numbering `renderProse` emits as `id="pN"`, so a
+stored anchor always addresses a paragraph that exists. Both come from one
+walk in `src/content/markdown.ts`; do not add a second.
+
+**Chronology lives in `src/content/timeline.ts`.** Two rules follow from
+`event_detail` storing partial dates in a `DATE` column:
+
+- `1944-01-01` at `year` precision **means "1944"**. `formatEventDate` is the
+  only place a stored date becomes a human one, so nothing else can claim a
+  certainty the record does not carry. Templates print the string it returned.
+- An event's **place is joined with the viewer's filter in the ON clause**, so
+  a private place makes the place disappear, never the event. The result is
+  indistinguishable from an event that was never given one.
+- The precision ladder covers the clock too (`hour`, `minute`). A time is
+  stored nullable and shown only when the precision reaches it, so coarsening
+  an event's precision withdraws the claim without losing the value.
+- An event the sources will not date but do **place** carries `happened_after`
+  edges instead. The chronology puts it at the start of the window its visible
+  anchors allow and draws the whole window, marked as uncertain, so a reader
+  cannot mistake it for a dated fact. Bounds are filtered on the edge **and**
+  the anchor _before_ the window is computed: filtering afterwards would leave
+  a private event's date deciding where a public one sits on the band, which
+  discloses it without ever naming it.
+
+Prose may embed a chronology as a fenced ```timeline block, resolved by
+`resolveTimelines` before rendering — the same shape as `resolveForRender`, so
+the published page, the admin preview and a compiled document agree. For
+Pandoc, `timelinesToPandoc` turns the block into ordinary Markdown in
+TypeScript, with the build's `Viewer` already applied; the worker never learns
+the syntax exists.
 **A relationship edge may carry an office and a period.** `role_title`,
 `start_date`, `end_date` and `date_precision` live on `relationship`, not on
 either endpoint, because an office is a property of the connection. Two posts
@@ -302,6 +335,7 @@ the properties being asserted actually live.
 | Outline, navigation, assembly          | `src/content/manuscripts.ts`        |
 | Build records, staging, enqueue        | `src/content/builds.ts`             |
 | Graph traversal with per-hop filtering | `src/content/graph.ts`              |
+| Dates, chronological reads, the band   | `src/content/timeline.ts`           |
 | Path safety, magic bytes, hashing      | `src/files/storage.ts`              |
 | Access-checked file lookup             | `src/files/repository.ts`           |
 | Job runner                             | `worker/runner.py`                  |

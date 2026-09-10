@@ -22,6 +22,7 @@ import {
   type PoolConnection,
 } from '../db/pool.js';
 import { visibilityFilter, type Viewer } from './visibility.js';
+import { blockAnchorsFor } from './markdown.js';
 import {
   extractContext,
   parseReferences,
@@ -96,6 +97,16 @@ export async function rebuildReferences(
   const references = parseReferences(markdown);
   const targets = await resolveTargets(connection, references);
 
+  // Which paragraph each reference sits in, so a backlink can land on the
+  // sentence that named the target rather than the top of the page. Computed
+  // from the same block numbering the renderer emits as `id="pN"`, and stored
+  // here rather than derived on read because this is the only moment the text
+  // and the row are guaranteed to be the same version.
+  const anchors = blockAnchorsFor(
+    markdown,
+    references.map((reference) => reference.index),
+  );
+
   // Titles let a reference with no display text read as its subject's name
   // in the context snippet, rather than as a de-hyphenated slug.
   const titles = new Map([...targets].map(([key, row]) => [key, row.title]));
@@ -112,7 +123,7 @@ export async function rebuildReferences(
   let citations = 0;
   let citationOrder = 0;
 
-  for (const reference of references) {
+  for (const [position, reference] of references.entries()) {
     const target = targets.get(`${targetKind(reference.kind)}:${reference.slug}`);
     if (target === undefined) {
       unresolved.push({ kind: targetKind(reference.kind), slug: reference.slug });
@@ -149,12 +160,14 @@ export async function rebuildReferences(
 
     await execute(
       connection,
-      `INSERT INTO mention (from_item_id, to_item_id, occurrence, anchor_text, context)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO mention
+         (from_item_id, to_item_id, occurrence, block_index, anchor_text, context)
+       VALUES (?, ?, ?, ?, ?, ?)`,
       [
         itemId,
         target.id,
         occurrence,
+        anchors[position] ?? null,
         (reference.argument ?? target.title).slice(0, 500),
         extractContext(markdown, reference, { titles }).slice(0, 1000),
       ],
@@ -172,11 +185,24 @@ export interface Backlink {
   kind: string;
   slug: string;
   title: string;
+  /**
+   * Where to read it. Carries a `#pN` fragment when the first mention's
+   * paragraph is known, so the link lands on the sentence rather than the top
+   * of a long essay.
+   */
   href: string;
   /** How the prose named the target at its first occurrence here. */
   anchorText: string;
   context: string | null;
   occurrences: number;
+  /** 1-based top-level block of the citing prose, or null for older rows. */
+  blockIndex: number | null;
+}
+
+/** A backlink's URL, pointing at the paragraph when one is recorded. */
+function backlinkHref(kind: string, slug: string, blockIndex: number | null): string {
+  const base = referenceHref(kind, slug);
+  return blockIndex === null ? base : `${base}#p${blockIndex}`;
 }
 
 /**
@@ -204,15 +230,19 @@ export async function listMentionsOf(
       anchor_text: string;
       context: string | null;
       occurrences: number;
+      block_index: number | null;
     }
   >(
     db,
     // Joining the occurrence-0 row gives the FIRST mention's wording and
     // context. An aggregate such as MIN() would pick alphabetically, which
     // shows the reader a sentence from the middle of the piece for no reason.
+    // Its block index comes from the same row, so the quoted sentence and the
+    // paragraph the link opens are the same one.
     `SELECT ci.id AS item_id, ci.kind, ci.slug, ci.title,
             first_mention.anchor_text AS anchor_text,
             first_mention.context AS context,
+            first_mention.block_index AS block_index,
             COUNT(*) AS occurrences
        FROM mention m
        JOIN content_item ci ON ci.id = m.from_item_id
@@ -222,22 +252,27 @@ export async function listMentionsOf(
         AND first_mention.occurrence = 0
       WHERE m.to_item_id = ? AND ${visible.sql}
       GROUP BY ci.id, ci.kind, ci.slug, ci.title,
-               first_mention.anchor_text, first_mention.context
+               first_mention.anchor_text, first_mention.context,
+               first_mention.block_index
       ORDER BY ci.title ASC
       ${limitOffsetClause(Math.min(Math.max(Math.trunc(limit), 1), 500))}`,
     [itemId, ...visible.params],
   );
 
-  return rows.map((row) => ({
-    itemId: row.item_id,
-    kind: row.kind,
-    slug: row.slug,
-    title: row.title,
-    href: referenceHref(row.kind, row.slug),
-    anchorText: row.anchor_text,
-    context: row.context,
-    occurrences: Number(row.occurrences),
-  }));
+  return rows.map((row) => {
+    const blockIndex = row.block_index === null ? null : Number(row.block_index);
+    return {
+      itemId: row.item_id,
+      kind: row.kind,
+      slug: row.slug,
+      title: row.title,
+      href: backlinkHref(row.kind, row.slug, blockIndex),
+      anchorText: row.anchor_text,
+      context: row.context,
+      occurrences: Number(row.occurrences),
+      blockIndex,
+    };
+  });
 }
 
 /** How many visible items mention this one. Used for listings and the graph. */
@@ -292,10 +327,14 @@ export async function listMentionsFrom(
     kind: row.kind,
     slug: row.slug,
     title: row.title,
+    // The target's own page, not a paragraph of this one: the anchor belongs
+    // to the prose that did the mentioning, which is where the reader already
+    // is.
     href: referenceHref(row.kind, row.slug),
     anchorText: row.anchor_text,
     context: null,
     occurrences: Number(row.occurrences),
+    blockIndex: null,
   }));
 }
 

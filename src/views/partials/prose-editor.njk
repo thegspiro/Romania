@@ -1,0 +1,53 @@
+{#
+  A Markdown field with the reference picker and the server-rendered preview.
+
+  Progressive enhancement, and the enhancement is the only part that is
+  optional: with JavaScript off this is a labelled textarea inside a form that
+  still saves. `data-editor` names the textarea the script should drive, so the
+  same markup serves an essay body, a biography and an event's account.
+
+  The preview is rendered by the server through the same pipeline as the
+  published page. A preview that resolved references differently -- that showed
+  a private source's title, say -- would be worse than no preview.
+#}
+<div class="editor" data-editor="{{ proseField }}" data-csrf="{{ csrfToken }}">
+  <div class="editor-toolbar">
+    <label for="reference-kind" class="visually-hidden">Reference type</label>
+    <select id="reference-kind">
+      <option value="all">Anything</option>
+      <option value="person">People</option>
+      <option value="organization">Organizations</option>
+      <option value="place">Places</option>
+      <option value="event">Events</option>
+      <option value="artifact">Artifacts</option>
+      <option value="cite">Sources (cite)</option>
+      <option value="essay">Essays</option>
+    </select>
+
+    <label for="reference-search" class="visually-hidden">Find something to link</label>
+    <input
+      type="search"
+      id="reference-search"
+      placeholder="Find a person, place, event or source to insert…"
+      autocomplete="off"
+    />
+
+    <button type="button" id="editor-preview">Preview</button>
+  </div>
+
+  <ul id="reference-results" class="reference-results" hidden></ul>
+
+  <div class="editor-panes">
+    <p class="field">
+      <label for="{{ proseField }}">{{ proseLabel }}</label>
+      <textarea id="{{ proseField }}" name="{{ proseField }}" rows="{{ proseRows | default(12) }}" spellcheck="true">{{ values[proseField] if values[proseField] is not none else '' }}</textarea>
+      {% if proseHint %}<span class="hint">{{ proseHint }}</span>{% endif %}
+    </p>
+
+    <div id="editor-preview-pane" class="preview-pane" hidden>
+      <h3>Preview</h3>
+      <div id="preview-body" class="prose"></div>
+      <ol id="preview-footnotes" class="footnotes"></ol>
+    </div>
+  </div>
+</div>

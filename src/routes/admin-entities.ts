@@ -35,6 +35,12 @@ import {
   listPredicates,
   listRelationshipsFor,
 } from '../content/relationships.js';
+import {
+  findEventBoundSlugs,
+  parseSlugList,
+  setEventBounds,
+  type EventBoundsInput,
+} from '../content/timeline.js';
 import { recordAudit } from '../content/audit.js';
 import { actorId, flashFor, parseId, readCheckbox, readString } from './form.js';
 
@@ -58,8 +64,55 @@ const DETAIL_FIELDS: Readonly<Record<EntityKind, readonly string[]>> = Object.fr
     'adminArea',
     'historicalNames',
   ],
-  event: ['startDate', 'endDate', 'datePrecision', 'placeSlug'],
+  event: [
+    'startDate',
+    'startTime',
+    'endDate',
+    'endTime',
+    'startPrecision',
+    'endPrecision',
+    'isCirca',
+    'placeSlug',
+    'bodyMarkdown',
+  ],
 });
+
+/**
+ * The relative bounds posted alongside an event.
+ *
+ * These are not detail columns: a bound is a `happened_after` edge in the
+ * relationship table, for the reason migration 0008 gives. They are read here
+ * so the event form can offer "after" and "before" fields, rather than making
+ * the operator record "X before Y" by editing Y and getting the direction
+ * backwards.
+ */
+function readEventBounds(kind: EntityKind, body: unknown): EventBoundsInput | null {
+  if (kind !== 'event') return null;
+
+  // Written with the event's own visibility, which is the intuitive reading:
+  // a published event's bounds are published with it. Safe regardless, because
+  // every read filters the anchor as well as the edge -- a public bound
+  // pointing at an unpublished event still shows nothing.
+  const requested = readString(body, 'visibility');
+
+  return {
+    afterSlugs: parseSlugList(readString(body, 'afterSlugs')),
+    beforeSlugs: parseSlugList(readString(body, 'beforeSlugs')),
+    visibility: isVisibility(requested) ? requested : 'private',
+  };
+}
+
+/** The bounds already recorded, as the two comma-separated form fields. */
+async function boundFields(
+  pool: AppContext['pool'],
+  eventId: number,
+): Promise<{ afterSlugs: string; beforeSlugs: string }> {
+  const bounds = await findEventBoundSlugs(pool, eventId);
+  return {
+    afterSlugs: bounds.afterSlugs.join(', '),
+    beforeSlugs: bounds.beforeSlugs.join(', '),
+  };
+}
 
 function readEntityForm(kind: EntityKind, body: unknown): { input: EntityInput; errors: string[] } {
   const errors: string[] = [];
@@ -167,7 +220,11 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
         );
       }
 
-      const id = await createEntity(pool, kind, input);
+      const { id } = await createEntity(pool, kind, input);
+
+      const bounds = readEventBounds(kind, request.body);
+      if (bounds !== null) await setEventBounds(pool, id, bounds);
+
       await recordAudit(
         pool,
         {
@@ -199,7 +256,11 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
           mode: 'edit',
           action: `/admin/${path}/${id}`,
           record,
-          values: { ...record, ...record.detail },
+          values: {
+            ...record,
+            ...record.detail,
+            ...(kind === 'event' ? await boundFields(pool, id) : {}),
+          },
           errors: [],
           relationships: await listRelationshipsFor(pool, id, request.viewer),
           predicates: await listPredicates(pool),
@@ -238,7 +299,11 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
         );
       }
 
-      if (!(await updateEntity(pool, kind, id, input))) throw notFound(`${kind} ${id}`);
+      if ((await updateEntity(pool, kind, id, input)) === null) throw notFound(`${kind} ${id}`);
+
+      const bounds = readEventBounds(kind, request.body);
+      if (bounds !== null) await setEventBounds(pool, id, bounds);
+
       await recordAudit(
         pool,
         {

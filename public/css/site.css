@@ -943,3 +943,149 @@ button.danger {
     padding-top: 1rem;
   }
 }
+
+/* --- Chronology and the timeline band ------------------------------------ */
+
+.chronology {
+  margin-top: 2.5rem;
+}
+
+.chronology-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+
+.chronology-list > li {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.chronology-list > li:last-child {
+  border-bottom: none;
+}
+
+.chronology-date,
+.timeline-date {
+  display: inline-block;
+  min-width: 11rem;
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+  color: var(--ink-muted);
+}
+
+.chronology-place,
+.timeline-place {
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+  color: var(--ink-muted);
+}
+
+.chronology-place::before,
+.timeline-place::before {
+  content: '· ';
+}
+
+.timeline-page-list > li {
+  padding: 0.6rem 0;
+}
+
+/* The band. Geometry comes from layoutTimelineBand as SVG attributes; only
+   colour is decided here, because the CSP forbids a style attribute. */
+.timeline-band {
+  margin: 1.25rem 0;
+}
+
+.timeline-band .band {
+  display: block;
+  overflow: visible;
+}
+
+.band-span {
+  fill: var(--accent);
+}
+
+.band-span-private {
+  fill: var(--ink-muted);
+}
+
+/* The window a bounded event could have fallen in, not a period it occupied.
+   Outlined rather than filled, so it cannot be read as a dated fact. */
+.band-span-uncertain {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 2;
+}
+
+.band-span-uncertain.band-span-private {
+  stroke: var(--ink-muted);
+}
+
+.timeline-band a:hover .band-span-uncertain,
+.timeline-band a:focus .band-span-uncertain {
+  fill: var(--accent-soft);
+  stroke: var(--ink);
+}
+
+.timeline-band a:hover .band-span,
+.timeline-band a:focus .band-span {
+  fill: var(--ink);
+}
+
+.band-tick {
+  stroke: var(--rule);
+  stroke-width: 1;
+}
+
+.band-tick-label {
+  fill: var(--ink-muted);
+  font-family: var(--sans);
+  font-size: 11px;
+  text-anchor: middle;
+}
+
+/* A timeline block embedded in prose. */
+.prose .timeline {
+  margin: 1.5rem 0;
+  padding: 0.75rem 1rem;
+  border-left: 3px solid var(--rule);
+  background: var(--accent-soft);
+}
+
+.timeline-title {
+  margin: 0 0 0.5rem;
+  font-family: var(--sans);
+  font-size: 0.9375rem;
+}
+
+.timeline-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+
+.timeline-list > li {
+  padding: 0.2rem 0;
+}
+
+/* --- Paragraph anchors ---------------------------------------------------- */
+
+/* A backlink lands on the paragraph that named its subject. The highlight says
+   which one, and fades so it does not become permanent decoration. */
+.prose :target {
+  background: var(--accent-soft);
+  box-shadow:
+    -0.5rem 0 0 var(--accent-soft),
+    0.5rem 0 0 var(--accent-soft);
+}
+
+.filter-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0 1rem;
+  align-items: end;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--rule);
+}

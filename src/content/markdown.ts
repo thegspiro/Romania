@@ -18,9 +18,17 @@
  * no href, title, slug or id -- invariant 2 in CLAUDE.md.
  */
 import MarkdownIt from 'markdown-it';
+import type Token from 'markdown-it/lib/token.mjs';
 import type { CslItem } from '../citations/csl.js';
 import { renderBibliography, renderNote } from '../citations/render.js';
 import { isReferenceKind, referenceHref, referenceKey, type ReferenceKind } from './references.js';
+import {
+  TIMELINE_BLOCK_INFO,
+  parseTimelineDirective,
+  timelineDirectiveKey,
+  type TimelineDirective,
+  type TimelineEntry,
+} from './timeline.js';
 import type { Viewer } from './visibility.js';
 
 /** Shown in place of anything the viewer is not permitted to know exists. */
@@ -40,6 +48,14 @@ export interface RenderOptions {
   /** Resolved targets, keyed by `referenceKey`. */
   targets: Map<string, ReferenceTarget>;
   viewer: Viewer;
+  /**
+   * Entries for each timeline block, keyed by `timelineDirectiveKey`.
+   *
+   * Optional: omitted, a timeline block renders as an empty chronology rather
+   * than throwing, so a caller that has no reason to resolve them (a word
+   * count, a test of the reference rule) is not obliged to.
+   */
+  timelines?: ReadonlyMap<string, readonly TimelineEntry[]> | undefined;
 }
 
 export interface RenderedFootnote {
@@ -65,6 +81,48 @@ interface RenderEnvironment {
   targets: Map<string, ReferenceTarget>;
   /** Citations in first-appearance order, one entry per marker. */
   citations: { slug: string; locator: string | undefined; csl: CslItem | undefined }[];
+  timelines: ReadonlyMap<string, readonly TimelineEntry[]>;
+  /**
+   * Whether to put an id on each top-level block.
+   *
+   * Off for `renderFragment`, because a page renders several fragments and two
+   * of them carrying `id="p1"` would be invalid HTML and an ambiguous anchor.
+   */
+  blockAnchors: boolean;
+}
+
+function emptyEnvironment(): RenderEnvironment {
+  return { targets: new Map(), citations: [], timelines: new Map(), blockAnchors: false };
+}
+
+/**
+ * The top-level blocks of a parsed document, in document order.
+ *
+ * One walk, used twice: once by the renderer to emit `id="pN"`, and once by
+ * `blockAnchorsFor` to tell `rebuildReferences` which N a reference fell in.
+ * Two hand-kept copies of this numbering would eventually disagree, and a
+ * backlink would then land on the wrong paragraph.
+ *
+ * A closing token and an inline token are skipped: the first has no source
+ * map, the second is nested inside a block that already counted.
+ */
+function topLevelBlocks(tokens: readonly Token[]): { token: Token; ordinal: number }[] {
+  const blocks: { token: Token; ordinal: number }[] = [];
+  for (const token of tokens) {
+    if (token.level !== 0 || token.nesting === -1 || token.map === null) continue;
+    blocks.push({ token, ordinal: blocks.length + 1 });
+  }
+  return blocks;
+}
+
+function blockAnchorPlugin(md: MarkdownIt): void {
+  md.core.ruler.push('block_anchors', (state) => {
+    const env = state.env as RenderEnvironment;
+    if (env.blockAnchors !== true) return;
+    for (const { token, ordinal } of topLevelBlocks(state.tokens)) {
+      token.attrSet('id', `p${ordinal}`);
+    }
+  });
 }
 
 /**
@@ -147,6 +205,68 @@ function referencePlugin(md: MarkdownIt): void {
   };
 }
 
+/**
+ * The ```timeline block.
+ *
+ * A fence rather than a new syntax, so the body stays readable in any other
+ * Markdown editor and an author who has not resolved the entries still sees
+ * what the block asked for. Discovery goes through markdown-it's tokenizer, not
+ * a regex over the source: a fence nested in another fence, or sitting inside
+ * an indented code block, is not a directive and must not be read as one.
+ *
+ * The entries were filtered by `resolveTimelineDirectives` for this viewer, so
+ * a private event is simply not in the list -- no gap, no "withheld" marker.
+ * An absence has to be indistinguishable from never having existed.
+ */
+function timelinePlugin(md: MarkdownIt): void {
+  const fallback = md.renderer.rules.fence;
+
+  md.renderer.rules.fence = (tokens, index, options, environment, self) => {
+    const token = tokens[index];
+    const info = token?.info.trim().toLowerCase();
+
+    if (token === undefined || info !== TIMELINE_BLOCK_INFO) {
+      return fallback === undefined
+        ? self.renderToken(tokens, index, options)
+        : fallback(tokens, index, options, environment, self);
+    }
+
+    const env = environment as RenderEnvironment;
+    const directive = parseTimelineDirective(token.content);
+    const entries = env.timelines.get(timelineDirectiveKey(directive)) ?? [];
+    const escape = md.utils.escapeHtml;
+    const id = token.attrGet('id');
+
+    const heading =
+      directive.title === null ? '' : `<h3 class="timeline-title">${escape(directive.title)}</h3>`;
+
+    if (entries.length === 0) {
+      return (
+        `<div class="timeline"${id === null ? '' : ` id="${escape(id)}"`}>${heading}` +
+        `<p class="empty">No events to show here.</p></div>`
+      );
+    }
+
+    const items = entries
+      .map((entry) => {
+        const place =
+          entry.place === null
+            ? ''
+            : ` <span class="timeline-place">${escape(entry.place.title)}</span>`;
+        return (
+          `<li><span class="timeline-date">${escape(entry.dateLabel)}</span> ` +
+          `<a href="${escape(entry.href)}">${escape(entry.title)}</a>${place}</li>`
+        );
+      })
+      .join('');
+
+    return (
+      `<div class="timeline"${id === null ? '' : ` id="${escape(id)}"`}>${heading}` +
+      `<ol class="timeline-list">${items}</ol></div>`
+    );
+  };
+}
+
 function createRenderer(): MarkdownIt {
   const md = new MarkdownIt({
     // The single most important setting in this file.
@@ -157,6 +277,9 @@ function createRenderer(): MarkdownIt {
   });
 
   md.use(referencePlugin);
+  md.use(timelinePlugin);
+  // Pushed last so it sees the final token stream.
+  md.use(blockAnchorPlugin);
 
   // markdown-it validates link protocols by default; this narrows it further
   // to the three that make sense in scholarly prose.
@@ -169,7 +292,12 @@ const renderer = createRenderer();
 
 /** Renders essay prose to HTML, with references resolved for this viewer. */
 export function renderProse(markdown: string, options: RenderOptions): RenderedProse {
-  const env: RenderEnvironment = { targets: options.targets, citations: [] };
+  const env: RenderEnvironment = {
+    targets: options.targets,
+    citations: [],
+    timelines: options.timelines ?? new Map(),
+    blockAnchors: true,
+  };
   const html = renderer.render(markdown, env);
 
   const footnotes = env.citations.map((citation, index) => ({
@@ -193,10 +321,90 @@ export function renderProse(markdown: string, options: RenderOptions): RenderedP
 
 /** Renders a short Markdown fragment (an abstract, a note) with no references. */
 export function renderFragment(markdown: string): string {
-  return renderer.render(markdown, {
-    targets: new Map(),
-    citations: [],
-  } satisfies RenderEnvironment);
+  return renderer.render(markdown, emptyEnvironment());
+}
+
+/**
+ * Every timeline block in a body, in document order.
+ *
+ * Uses the same parse as rendering, so what is resolved and what is drawn can
+ * never be two different sets of blocks.
+ */
+export function parseTimelineDirectives(markdown: string): TimelineDirective[] {
+  return locateTimelineBlocks(markdown).map((block) => block.directive);
+}
+
+export interface TimelineBlockLocation {
+  directive: TimelineDirective;
+  /** Source lines the fence occupies, as a half-open range. */
+  startLine: number;
+  endLine: number;
+}
+
+/**
+ * Every timeline block with the lines it occupies.
+ *
+ * The compile path needs the position as well as the directive, because it
+ * replaces the block with plain Markdown before Pandoc sees it. Line ranges
+ * come from the tokenizer rather than from a search for ``` so a fence nested
+ * inside another one is not mistaken for a block of its own.
+ */
+export function locateTimelineBlocks(markdown: string): TimelineBlockLocation[] {
+  const blocks: TimelineBlockLocation[] = [];
+  for (const token of renderer.parse(markdown, emptyEnvironment())) {
+    if (token.type !== 'fence' || token.map === null) continue;
+    if (token.info.trim().toLowerCase() !== TIMELINE_BLOCK_INFO) continue;
+    blocks.push({
+      directive: parseTimelineDirective(token.content),
+      startLine: token.map[0],
+      endLine: token.map[1],
+    });
+  }
+  return blocks;
+}
+
+/** Offsets of the first character of each line, for the offset->line lookup. */
+function lineStartOffsets(markdown: string): number[] {
+  const starts = [0];
+  for (let index = 0; index < markdown.length; index += 1) {
+    if (markdown.charCodeAt(index) === 0x0a) starts.push(index + 1);
+  }
+  return starts;
+}
+
+function lineForOffset(lineStarts: readonly number[], offset: number): number {
+  let low = 0;
+  let high = lineStarts.length - 1;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if ((lineStarts[middle] ?? 0) <= offset) low = middle;
+    else high = middle - 1;
+  }
+  return low;
+}
+
+/**
+ * Which top-level block each character offset falls in; 1-based, null if none.
+ *
+ * `parseReferences` reports character offsets while markdown-it reports line
+ * ranges, so the two are bridged here rather than in the caller. The numbering
+ * is the one `renderProse` emits as `id="pN"`, because both come from
+ * `topLevelBlocks` -- which is what lets a stored anchor address a real
+ * paragraph.
+ */
+export function blockAnchorsFor(markdown: string, offsets: readonly number[]): (number | null)[] {
+  if (offsets.length === 0) return [];
+
+  const blocks = topLevelBlocks(renderer.parse(markdown, emptyEnvironment()));
+  const lineStarts = lineStartOffsets(markdown);
+
+  return offsets.map((offset) => {
+    const line = lineForOffset(lineStarts, offset);
+    const found = blocks.find(
+      ({ token }) => token.map !== null && line >= token.map[0] && line < token.map[1],
+    );
+    return found?.ordinal ?? null;
+  });
 }
 
 /**

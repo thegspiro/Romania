@@ -61,7 +61,7 @@
         cursor, and a preview rendered by the server through the same pipeline
         the published page uses.
       #}
-      <div class="editor" id="essay-editor" data-csrf="{{ csrfToken }}">
+      <div class="editor" id="essay-editor" data-editor="bodyMarkdown" data-csrf="{{ csrfToken }}">
         <div class="editor-toolbar">
           <label for="reference-kind" class="visually-hidden">Reference type</label>
           <select id="reference-kind">

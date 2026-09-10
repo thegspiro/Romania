@@ -27,7 +27,8 @@ import { visibilityFilter, type Viewer, type Visibility } from './visibility.js'
 import { parseStoredCslItem, type CslItem } from '../citations/csl.js';
 import { parseReferences, referenceHref, targetKind } from './references.js';
 import { resolveTargets } from './mentions.js';
-import { countWords } from './markdown.js';
+import { countWords, locateTimelineBlocks, parseTimelineDirectives } from './markdown.js';
+import { resolveTimelineDirectives, timelineDirectiveKey, type TimelineEntry } from './timeline.js';
 
 export const SECTION_ROLES = ['front_matter', 'body', 'appendix', 'back_matter'] as const;
 export type SectionRole = (typeof SECTION_ROLES)[number];
@@ -623,6 +624,50 @@ export function sectionAnchor(kind: string, slug: string): string {
 }
 
 /**
+ * Replaces every timeline block with the plain Markdown it stands for.
+ *
+ * Assembled here, in TypeScript, from entries already filtered for the build's
+ * audience -- so a public build's chronology contains only what an anonymous
+ * reader could have seen a page at a time. Pandoc receives an ordinary list and
+ * the worker learns nothing about visibility or about this syntax, which is the
+ * seam the architecture depends on.
+ *
+ * Lines are replaced in place, last block first, so an earlier replacement
+ * cannot shift the line numbers of a later one.
+ */
+export function timelinesToPandoc(
+  markdown: string,
+  entriesFor: ReadonlyMap<string, readonly TimelineEntry[]>,
+): string {
+  const blocks = locateTimelineBlocks(markdown);
+  if (blocks.length === 0) return markdown;
+
+  const lines = markdown.split('\n');
+
+  for (const block of [...blocks].reverse()) {
+    const entries = entriesFor.get(timelineDirectiveKey(block.directive)) ?? [];
+    const replacement: string[] = [];
+
+    if (block.directive.title !== null) {
+      replacement.push(`**${block.directive.title}**`, '');
+    }
+
+    if (entries.length === 0) {
+      replacement.push('*No events to show here.*');
+    } else {
+      for (const entry of entries) {
+        const place = entry.place === null ? '' : ` (${entry.place.title})`;
+        replacement.push(`- **${entry.dateLabel}** — ${entry.title}${place}`);
+      }
+    }
+
+    lines.splice(block.startLine, block.endLine - block.startLine, ...replacement);
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * Builds the whole document for one audience.
  *
  * The `viewer` argument is the safety mechanism: a public build is assembled
@@ -667,6 +712,15 @@ export async function assembleDocument(
     titles.set(`${section.kind}:${section.slug}`, section.title);
   }
 
+  // Timeline blocks resolve against the SAME viewer the sections were selected
+  // with, so a public build's chronologies can hold nothing a public reader
+  // could not already have read.
+  const timelineEntries = await resolveTimelineDirectives(
+    db,
+    [...bodies.values()].flatMap((body) => parseTimelineDirectives(body)),
+    viewer,
+  );
+
   const citedSlugs = new Set<string>();
   const parts: string[] = [];
   let wordCount = 0;
@@ -685,8 +739,10 @@ export async function assembleDocument(
     }
 
     const heading = `${'#'.repeat(Math.min(section.depth + 1, 6))} ${section.title} {#${sectionAnchor(section.kind, section.slug)}}`;
+    // Timelines first: the block becomes ordinary Markdown, which the
+    // reference rewrite then walks like any other prose.
     const transformed = referencesToPandoc(
-      demoteHeadings(body, section.depth + 1),
+      timelinesToPandoc(demoteHeadings(body, section.depth + 1), timelineEntries),
       anchors,
       titles,
     );

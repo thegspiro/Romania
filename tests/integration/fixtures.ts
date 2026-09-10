@@ -20,7 +20,7 @@ export async function makeEntity(
   visibility: Visibility,
   detail: Record<string, string> = {},
 ): Promise<number> {
-  return createEntity(pool, kind, {
+  const result = await createEntity(pool, kind, {
     title,
     titleOriginal: '',
     language: '',
@@ -29,6 +29,7 @@ export async function makeEntity(
     noindex: false,
     detail,
   });
+  return result.id;
 }
 
 export async function makeEssay(

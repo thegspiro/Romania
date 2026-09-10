@@ -28,7 +28,7 @@ import {
   targetKind,
   REFERENCE_KINDS,
 } from '../content/references.js';
-import { resolveForRender } from '../content/render-context.js';
+import { resolveForRender, resolveTimelines } from '../content/render-context.js';
 import { searchAllEntities } from '../content/entities.js';
 import { listPlacementsOf } from '../content/manuscripts.js';
 import { recordAudit } from '../content/audit.js';
@@ -316,7 +316,14 @@ export function registerAdminEssayRoutes(admin: FastifyInstance, context: AppCon
     if (markdown.length > 2_000_000) throw badRequest('That body is too long to preview.');
 
     const targets = await resolveForRender(pool, markdown, request.viewer);
-    const rendered = renderProse(markdown, { targets, viewer: request.viewer });
+    const rendered = renderProse(markdown, {
+      targets,
+      viewer: request.viewer,
+      // Resolved the same way the published page resolves them, which is the
+      // whole point of the preview: one that showed an event the published
+      // page withholds would be worse than none.
+      timelines: await resolveTimelines(pool, markdown, request.viewer),
+    });
 
     return reply.type('application/json').send({
       html: rendered.html,

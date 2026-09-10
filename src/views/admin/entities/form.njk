@@ -33,7 +33,6 @@
         {{ ui.field('birthDate', 'Born', values, 'text', 'Free text: "1882", "c. 1882", "n.d." are all fine.') }}
         {{ ui.field('deathDate', 'Died', values) }}
         {{ ui.field('occupation', 'Occupation or role', values) }}
-        {{ ui.area('biography', 'Biography', values, 'Markdown. References inserted here are indexed like anywhere else.', 6) }}
       </fieldset>
     {% elif kind == 'organization' %}
       <fieldset>
@@ -42,7 +41,6 @@
         {{ ui.field('foundedDate', 'Founded', values) }}
         {{ ui.field('dissolvedDate', 'Dissolved', values) }}
         {{ ui.field('occupation', 'Type or sector', values) }}
-        {{ ui.area('biography', 'Description', values, 'Markdown.', 6) }}
       </fieldset>
     {% elif kind == 'place' %}
       <fieldset>
@@ -62,16 +60,76 @@
     {% elif kind == 'event' %}
       <fieldset>
         <legend>Event</legend>
-        {{ ui.field('startDate', 'Start date', values, 'text', 'YYYY-MM-DD.') }}
-        {{ ui.field('endDate', 'End date', values, 'text', 'YYYY-MM-DD.') }}
-        {{ ui.choose('datePrecision', 'Date precision', values, [
+        {{ ui.field('startDate', 'Start date', values, 'text', 'YYYY-MM-DD. For a year you only know as 1944, write 1944-01-01 and set the precision to Year.') }}
+        {{ ui.field('startTime', 'Start time', values, 'text', 'HH:MM, optional. Shown only at Hour or Minute precision.') }}
+        {{ ui.choose('startPrecision', 'Start precision', values, [
           { value: 'unknown', label: 'Unknown' },
-          { value: 'day', label: 'Day' },
-          { value: 'month', label: 'Month' },
+          { value: 'decade', label: 'Decade' },
           { value: 'year', label: 'Year' },
-          { value: 'decade', label: 'Decade' }
-        ], 'How much of the date is actually known. 1944-01-01 with precision "year" means 1944.') }}
-        {{ ui.field('placeSlug', 'Place', values, 'text', "The place page's URL segment, e.g. iasi.") }}
+          { value: 'month', label: 'Month' },
+          { value: 'day', label: 'Day' },
+          { value: 'hour', label: 'Hour' },
+          { value: 'minute', label: 'Minute' }
+        ], 'How much of the instant is actually known. 1944-01-01 at Year reads as "1944"; 14:37 at Hour reads as "14:00", meaning that hour.') }}
+        {{ ui.field('endDate', 'End date', values, 'text', 'YYYY-MM-DD. Leave blank for a single moment.') }}
+        {{ ui.field('endTime', 'End time', values, 'text', 'HH:MM, optional.') }}
+        {{ ui.choose('endPrecision', 'End precision', values, [
+          { value: '', label: 'Same as the start' },
+          { value: 'unknown', label: 'Unknown' },
+          { value: 'decade', label: 'Decade' },
+          { value: 'year', label: 'Year' },
+          { value: 'month', label: 'Month' },
+          { value: 'day', label: 'Day' },
+          { value: 'hour', label: 'Hour' },
+          { value: 'minute', label: 'Minute' }
+        ], 'A range is often known at two different precisions: "from June 1943 until 1945".') }}
+        {{ ui.check('isCirca', 'Approximate', values, 'Renders as "c. 1943". Approximate is not the same as imprecise: a date can be known to the day and still be a guess.') }}
+        {{ ui.slugField('placeSlug', 'Place', values, 'place', "Start typing a place's name; the field stores its URL segment.") }}
+      </fieldset>
+
+      {#
+        Relative dating. Recorded as `happened_after` edges in the relationship
+        table, not as columns on the event -- so a contested ordering can be
+        kept private while both events it connects are published, and so it
+        appears in the network graph like any other asserted connection.
+
+        Both directions are edited from here because "X before Y" and
+        "Y after X" are one fact: making the operator record it from the other
+        event's page is how the direction gets written backwards.
+      #}
+      <fieldset>
+        <legend>Relative dating</legend>
+        <p class="hint">
+          For an event the sources will not date, but do place: it happened
+          after one thing and before another. The chronology puts it at the
+          start of that window and draws the whole window, so a reader can see
+          the uncertainty rather than take the position for a fact.
+        </p>
+        {{ ui.slugField('afterSlugs', 'Happened after', values, 'event', 'Start typing to pick an event. For more than one, type them comma separated.') }}
+        {{ ui.slugField('beforeSlugs', 'Happened before', values, 'event', 'Start typing to pick an event. For more than one, type them comma separated.') }}
+      </fieldset>
+    {% endif %}
+
+    {#
+      The kind's prose. Held out of the fieldsets above because all of them
+      that have one want the same editor, and because it is the one field whose
+      references are projected into `mention` and `citation`.
+    #}
+    {% if kind == 'event' %}
+      <fieldset>
+        <legend>Account</legend>
+        {% set proseField = 'bodyMarkdown' %}
+        {% set proseLabel = 'What happened' %}
+        {% set proseHint = 'Markdown. References inserted here are indexed like anywhere else.' %}
+        {% include "partials/prose-editor.njk" %}
+      </fieldset>
+    {% elif kind == 'person' or kind == 'organization' %}
+      <fieldset>
+        <legend>{{ 'Biography' if kind == 'person' else 'Description' }}</legend>
+        {% set proseField = 'biography' %}
+        {% set proseLabel = 'Biography' if kind == 'person' else 'Description' %}
+        {% set proseHint = 'Markdown. References inserted here are indexed like anywhere else.' %}
+        {% include "partials/prose-editor.njk" %}
       </fieldset>
     {% endif %}
 
@@ -99,4 +157,8 @@
       <button type="submit" class="danger">Delete</button>
     </form>
   {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  <script nonce="{{ nonce }}" src="/assets/js/editor.js"></script>
 {% endblock %}

@@ -82,6 +82,16 @@
       </nav>
     {% endif %}
 
+    {#
+      The events this piece names, in date order. Derived from the prose, so it
+      cannot list an event the text does not mention -- and, being filtered on
+      the event, cannot name one the reader may not see.
+    #}
+    {% if chronology.length > 0 %}
+      {% set chronologyHeading = 'Events discussed here' %}
+      {% include "partials/chronology.njk" %}
+    {% endif %}
+
     {% if mentions.length > 0 %}
       <section class="mentions">
         <h2>Discussed here</h2>

@@ -31,6 +31,7 @@ import { registerAuthRoutes } from '../routes/auth.js';
 import { registerAdminRoutes } from '../routes/admin.js';
 import { registerPublicRoutes } from '../routes/public.js';
 import { registerPublicContentRoutes } from '../routes/public-content.js';
+import { registerTimelineRoutes } from '../routes/timeline.js';
 
 export interface AppContext {
   config: Config;
@@ -156,6 +157,7 @@ export async function buildServer(context: AppContext): Promise<FastifyInstance>
   await registerAdminRoutes(app, context);
   registerPublicRoutes(app, context);
   registerPublicContentRoutes(app, context);
+  registerTimelineRoutes(app, context);
 
   app.setNotFoundHandler(async (request, reply) => {
     return renderPage(config, request, reply, 'errors/404', {}, { status: 404, noindex: true });
