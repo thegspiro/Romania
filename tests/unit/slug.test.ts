@@ -1,28 +1,27 @@
 /**
  * Slug generation.
  *
- * SHARED_FIXTURES is duplicated verbatim in
- * worker/tests/test_bibliography_import.py. The Python worker has its own
- * slugify because it creates sources during a bibliography import, and the two
- * must agree exactly -- otherwise the same title imported one way and typed
- * the other produces two different URLs. Change one list and you must change
- * the other, or one of the two suites fails.
+ * The fixtures come from tests/fixtures/slug-cases.json, which
+ * worker/tests/test_bibliography_import.py reads too. The Python worker has
+ * its own slugify because it creates sources during a bibliography import, and
+ * the two must agree exactly -- otherwise the same title imported one way and
+ * typed the other produces two different URLs.
+ *
+ * The list used to be duplicated in both files with a comment asking whoever
+ * edited one to remember the other. Reading one file instead means a change to
+ * the cases is a change to both suites at once, which is the only version of
+ * that promise a machine can keep.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { MAX_SLUG_LENGTH, slugify, uniqueSlug } from '../../src/content/slug.js';
 
-export const SHARED_FIXTURES: [string, string][] = [
-  ['Anii Şcolii', 'anii-scolii'],
-  ['Bănăţeanu', 'banateanu'],
-  ['Iaşi', 'iasi'],
-  ['Între Două Lumi', 'intre-doua-lumi'],
-  ['Café de la Paix', 'cafe-de-la-paix'],
-  ['Straße', 'strasse'],
-  ['München', 'muenchen'],
-  ['Bucureşti', 'bucuresti'],
-  ['Ярославль', 'yaroslavl'],
-  ['Ærø', 'aero'],
-];
+// Read rather than imported: a JSON import needs resolveJsonModule plus import
+// attributes under NodeNext, which is more machinery than one readFileSync.
+const fixturesPath = new URL('../fixtures/slug-cases.json', import.meta.url);
+const parsed = JSON.parse(readFileSync(fixturesPath, 'utf8')) as { cases: [string, string][] };
+
+export const SHARED_FIXTURES: [string, string][] = parsed.cases;
 
 describe('slugify', () => {
   it.each(SHARED_FIXTURES)('turns %j into %j', (input, expected) => {

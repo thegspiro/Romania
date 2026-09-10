@@ -1,13 +1,20 @@
 """Bibliography import parsing.
 
-SHARED_SLUG_FIXTURES is duplicated verbatim in tests/unit/slug.test.ts. The
-worker creates sources during an import, and its slugify must agree exactly
-with the TypeScript one, or the same title typed into the admin form and
-imported from a file produces two different URLs. Change one list and the
-other suite fails.
+The slug fixtures come from tests/fixtures/slug-cases.json, which
+tests/unit/slug.test.ts reads too. The worker creates sources during an import,
+and its slugify must agree exactly with the TypeScript one, or the same title
+typed into the admin form and imported from a file produces two different URLs.
+
+The list used to be duplicated in both files with a comment asking whoever
+edited one to remember the other. Reading one file instead means a change to
+the cases is a change to both suites at once -- the only version of that
+promise a machine can keep.
 """
 
 from __future__ import annotations
+
+import json
+from pathlib import Path
 
 import pytest
 
@@ -21,17 +28,12 @@ from worker.jobs.bibliography_import import (
     slugify,
 )
 
+# Relative to this file rather than the working directory, so the suite does
+# not silently lose its fixtures when pytest is run from somewhere else.
+_FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "slug-cases.json"
 SHARED_SLUG_FIXTURES = [
-    ("Anii Şcolii", "anii-scolii"),
-    ("Bănăţeanu", "banateanu"),
-    ("Iaşi", "iasi"),
-    ("Între Două Lumi", "intre-doua-lumi"),
-    ("Café de la Paix", "cafe-de-la-paix"),
-    ("Straße", "strasse"),
-    ("München", "muenchen"),
-    ("Bucureşti", "bucuresti"),
-    ("Ярославль", "yaroslavl"),
-    ("Ærø", "aero"),
+    (value, expected)
+    for value, expected in json.loads(_FIXTURES.read_text(encoding="utf-8"))["cases"]
 ]
 
 
