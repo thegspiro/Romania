@@ -58,10 +58,20 @@
         </select>
       </p>
 
+      {#
+        A type-ahead over the admin search, scoped by the kind chosen above.
+        Still a plain text input: with JavaScript off you type the slug, which
+        is what this field always was.
+      #}
       <p class="field">
         <label for="targetSlug">Slug</label>
-        <input type="text" id="targetSlug" name="targetSlug" placeholder="ion-antonescu" required />
-        <span class="hint">The URL segment of the other item's page.</span>
+        <input type="text" id="targetSlug" name="targetSlug" placeholder="ion-antonescu" required
+               list="targetSlug-options" autocomplete="off"
+               data-slug-picker="person" data-slug-picker-kind-from="targetKind" />
+        <datalist id="targetSlug-options"></datalist>
+        <span class="hint">
+          Start typing the other item's name; the field stores its URL segment.
+        </span>
       </p>
 
       <p class="field">

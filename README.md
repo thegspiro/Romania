@@ -29,7 +29,8 @@ What is built and working:
 | **Essays** — Markdown editor, reference picker, server-rendered preview   | Complete                                                                                                            |
 | **People, organizations, places, events** — admin CRUD and public pages   | Complete                                                                                                            |
 | **Artifacts** — catalogue records, file upload, access-controlled serving | Complete                                                                                                            |
-| **Inline references and backlinks** — "everywhere this person is named"   | Complete                                                                                                            |
+| **Inline references and backlinks** — "everywhere this person is named"   | Complete (a backlink lands on the paragraph that named the subject)                                                 |
+| **Timeline** — chronology page, per-subject chronologies, blocks in prose | Complete                                                                                                            |
 | **Manuscripts** — nested outline, prev/next navigation, reusable sections | Complete                                                                                                            |
 | **Compilation** — Pandoc to PDF, DOCX, HTML, LaTeX, per audience          | Complete                                                                                                            |
 | **Relationship graph** — typed edges plus mentions, Cytoscape             | Complete                                                                                                            |
@@ -104,6 +105,18 @@ writes is readable and stays meaningful in any other Markdown editor:
 [[place:iasi]]                         a mention  → display defaults to the target's title
 [[cite:hooligan-year|45-47]]           a citation → footnote on the web and in print
 ```
+
+A chronology can be embedded the same way, as a fenced block. It is resolved
+for the reader asking, so it can never list an event they could not already
+open a page at a time:
+
+````
+```timeline
+about: person:ion-antonescu, place:iasi
+from: 1940
+to: 1944
+```
+````
 
 References are keyed to the **slug**, not to a database id, so they survive a
 title being corrected and remain readable outside the application.

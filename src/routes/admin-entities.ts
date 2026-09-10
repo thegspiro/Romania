@@ -56,7 +56,15 @@ const DETAIL_FIELDS: Readonly<Record<EntityKind, readonly string[]>> = Object.fr
     'adminArea',
     'historicalNames',
   ],
-  event: ['startDate', 'endDate', 'datePrecision', 'placeSlug'],
+  event: [
+    'startDate',
+    'endDate',
+    'startPrecision',
+    'endPrecision',
+    'isCirca',
+    'placeSlug',
+    'bodyMarkdown',
+  ],
 });
 
 function readEntityForm(kind: EntityKind, body: unknown): { input: EntityInput; errors: string[] } {
@@ -165,7 +173,7 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
         );
       }
 
-      const id = await createEntity(pool, kind, input);
+      const { id } = await createEntity(pool, kind, input);
       await recordAudit(
         pool,
         {
@@ -236,7 +244,7 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
         );
       }
 
-      if (!(await updateEntity(pool, kind, id, input))) throw notFound(`${kind} ${id}`);
+      if ((await updateEntity(pool, kind, id, input)) === null) throw notFound(`${kind} ${id}`);
       await recordAudit(
         pool,
         {

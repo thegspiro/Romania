@@ -36,6 +36,38 @@
   </p>
 {% endmacro %}
 
+{#
+  A slug field with a type-ahead.
+
+  Still an ordinary text input: the datalist is filled by public/js/editor.js
+  from the admin search, and with JavaScript off the field behaves exactly as it
+  did before -- you type the slug. `kind` is a content kind to search, or the
+  id of another control to read the kind from.
+#}
+{% macro slugField(name, label, values, kind='all', hint='', kindFrom='') %}
+  <p class="field">
+    <label for="{{ name }}">{{ label }}</label>
+    <input type="text" id="{{ name }}" name="{{ name }}"
+           value="{{ values[name] if values[name] is not none else '' }}"
+           list="{{ name }}-options"
+           autocomplete="off"
+           data-slug-picker="{{ kind }}"
+           {% if kindFrom %}data-slug-picker-kind-from="{{ kindFrom }}"{% endif %} />
+    <datalist id="{{ name }}-options"></datalist>
+    {% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
+  </p>
+{% endmacro %}
+
+{% macro check(name, label, values, hint='') %}
+  <p class="field checkbox">
+    <label>
+      <input type="checkbox" id="{{ name }}" name="{{ name }}" {% if values[name] %}checked{% endif %} />
+      {{ label }}
+    </label>
+    {% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
+  </p>
+{% endmacro %}
+
 {% macro visibilityFields(values) %}
   <fieldset>
     <legend>Publication status</legend>

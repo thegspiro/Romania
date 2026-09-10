@@ -74,6 +74,30 @@ mention is exactly as visible as the item whose prose contains it.
 Backlink reads filter on the **citing** item. A private essay naming a public
 person must not surface on that person's public page.
 
+A `mention` also records `block_index`: which top-level block of the citing
+prose the reference sat in, so a backlink lands on the paragraph rather than
+the top of the page. It is part of the same projection — computed by
+`blockAnchorsFor` from the numbering `renderProse` emits as `id="pN"`, so a
+stored anchor always addresses a paragraph that exists. Both come from one
+walk in `src/content/markdown.ts`; do not add a second.
+
+**Chronology lives in `src/content/timeline.ts`.** Two rules follow from
+`event_detail` storing partial dates in a `DATE` column:
+
+- `1944-01-01` at `year` precision **means "1944"**. `formatEventDate` is the
+  only place a stored date becomes a human one, so nothing else can claim a
+  certainty the record does not carry. Templates print the string it returned.
+- An event's **place is joined with the viewer's filter in the ON clause**, so
+  a private place makes the place disappear, never the event. The result is
+  indistinguishable from an event that was never given one.
+
+Prose may embed a chronology as a fenced ```timeline block, resolved by
+`resolveTimelines` before rendering — the same shape as `resolveForRender`, so
+the published page, the admin preview and a compiled document agree. For
+Pandoc, `timelinesToPandoc` turns the block into ordinary Markdown in
+TypeScript, with the build's `Viewer` already applied; the worker never learns
+the syntax exists.
+
 **Manuscripts are a flat ordered list with a depth column**, not a
 self-referencing tree. Ordering, prev/next, subtree moves and compilation are
 all simple walks over it, and MySQL's self-referencing foreign keys have
@@ -288,6 +312,7 @@ the properties being asserted actually live.
 | Outline, navigation, assembly          | `src/content/manuscripts.ts`        |
 | Build records, staging, enqueue        | `src/content/builds.ts`             |
 | Graph traversal with per-hop filtering | `src/content/graph.ts`              |
+| Dates, chronological reads, the band   | `src/content/timeline.ts`           |
 | Path safety, magic bytes, hashing      | `src/files/storage.ts`              |
 | Access-checked file lookup             | `src/files/repository.ts`           |
 | Job runner                             | `worker/runner.py`                  |

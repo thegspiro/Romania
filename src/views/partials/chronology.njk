@@ -1,0 +1,36 @@
+{#
+  A chronology: events in date order.
+
+  Every entry here has already been through `visibilityFilter` -- an event the
+  viewer may not see never reaches this template, and neither does the title of
+  a place they may not see. There is deliberately no marker where one was left
+  out: an absence has to be indistinguishable from never having existed.
+
+  `dateLabel` was formatted by `formatEventDate`, which is the only thing that
+  knows what a stored date's precision means. Nothing is re-derived here.
+#}
+<section class="chronology">
+  <h2>{{ chronologyHeading | default('Chronology') }}</h2>
+
+  {% if chronology.length == 0 %}
+    <p class="empty">{{ chronologyEmpty | default('No events recorded yet.') }}</p>
+  {% else %}
+    {% set band = chronologyBand %}
+    {% include "partials/timeline-band.njk" %}
+
+    <ol class="chronology-list">
+      {% for entry in chronology %}
+        <li>
+          <span class="chronology-date">{{ entry.dateLabel }}</span>
+          <a href="{{ entry.href }}">{{ entry.title }}</a>
+          {% if entry.place %}
+            <span class="chronology-place">{{ entry.place.title }}</span>
+          {% endif %}
+          {% if entry.visibility != 'public' %}
+            <span class="badge badge-private">Private</span>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+  {% endif %}
+</section>

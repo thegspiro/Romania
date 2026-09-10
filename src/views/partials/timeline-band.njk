@@ -1,0 +1,69 @@
+{#
+  The chronology drawn as a band.
+
+  Server-rendered SVG on purpose. The graph needed a layout engine and so needed
+  Cytoscape; a band of dated spans does not, and `layoutTimelineBand` has
+  already computed every coordinate. So this needs no JavaScript, no vendored
+  library and no CSP exception, and it works in a text browser's fallback the
+  same way the list beneath it does.
+
+  Geometry goes in x/y/width/height attributes; colour comes from classes in
+  site.css. No `style=` attribute -- the CSP forbids inline styles, and
+  check-invariants.mjs fails the build for one.
+
+  The list below this is the same data, not a fallback for it.
+#}
+{% if band %}
+  <figure class="timeline-band">
+    <figcaption class="visually-hidden">
+      A chronology from {{ band.firstYear }} to {{ band.lastYear }},
+      drawn as {{ band.spans.length }} spans. The list that follows carries the
+      same events.
+    </figcaption>
+
+    <svg
+      class="band"
+      viewBox="0 -8 {{ band.width }} {{ band.height }}"
+      width="100%"
+      height="{{ band.height }}"
+      role="presentation"
+      focusable="false"
+      preserveAspectRatio="none"
+    >
+      {% for tick in band.ticks %}
+        <line
+          class="band-tick"
+          x1="{{ tick.x }}"
+          y1="-8"
+          x2="{{ tick.x }}"
+          y2="{{ band.height - 24 }}"
+        />
+        <text class="band-tick-label" x="{{ tick.x }}" y="{{ band.height - 8 }}">
+          {{ tick.year }}
+        </text>
+      {% endfor %}
+
+      {% for span in band.spans %}
+        <a href="{{ span.href }}">
+          <title>{{ span.dateLabel }} — {{ span.title }}</title>
+          <rect
+            class="band-span{% if span.visibility != 'public' %} band-span-private{% endif %}"
+            x="{{ span.x }}"
+            y="{{ span.y }}"
+            width="{{ span.width }}"
+            height="14"
+            rx="3"
+          />
+        </a>
+      {% endfor %}
+    </svg>
+
+    {% if band.undated > 0 %}
+      <p class="muted small">
+        {{ band.undated }} undated
+        {{ 'event is' if band.undated == 1 else 'events are' }}
+        listed below but cannot be placed on the band.
+      </p>
+    {% endif %}
+  </figure>
+{% endif %}

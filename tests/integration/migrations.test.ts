@@ -4,8 +4,10 @@
  * The rollback path is tested because an untested `.down.sql` is discovered
  * only when a rollback is already needed, which is the worst possible moment.
  */
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import mysql from 'mysql2/promise';
 import type { RowDataPacket } from 'mysql2/promise';
 import { databaseAvailable, testConfig } from './helpers.js';
 import { loadMigrations, migrateDown, migrateUp, migrationStatus } from '../../src/db/migrate.js';
@@ -69,6 +71,71 @@ describe.skipIf(!available)('migration runner', () => {
     expect(names).toContain('manuscript_detail');
     expect(names).toContain('manuscript_section');
     expect(names).toContain('manuscript_build');
+  });
+
+  it('adds the timeline columns 0006 introduces', async () => {
+    // 0006 only ALTERs, so the table-name assertions above cannot see it.
+    const columns = await queryRows<RowDataPacket & { TABLE_NAME: string; COLUMN_NAME: string }>(
+      pool,
+      `SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('event_detail', 'mention')`,
+      [config.DB_NAME],
+    );
+    const named = columns.map((row) => `${row.TABLE_NAME}.${row.COLUMN_NAME}`);
+
+    expect(named).toContain('event_detail.start_precision');
+    expect(named).toContain('event_detail.end_precision');
+    expect(named).toContain('event_detail.is_circa');
+    expect(named).toContain('event_detail.body_markdown');
+    expect(named).toContain('event_detail.sort_date');
+    expect(named).toContain('mention.block_index');
+    // Kept for backward compatibility, not replaced.
+    expect(named).toContain('event_detail.date_precision');
+  });
+
+  it('computes the chronological sort key in the database', async () => {
+    // A generated column, so nothing in the application maintains it and it
+    // cannot drift from the dates it is derived from.
+    const row = await queryOne<RowDataPacket & { EXTRA: string }>(
+      pool,
+      `SELECT EXTRA FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'event_detail' AND COLUMN_NAME = 'sort_date'`,
+      [config.DB_NAME],
+    );
+    expect(row?.EXTRA).toContain('GENERATED');
+  });
+
+  it('can re-run every up-migration against a schema that already has it', async () => {
+    // MySQL commits implicitly around DDL, so a file that fails partway cannot
+    // roll back and the version is never recorded -- the operator's only
+    // recovery is to fix it and run it again. That makes re-runnability a
+    // property of every up-migration, not a style preference, and it is
+    // otherwise invisible until the day it is needed.
+    //
+    // Mirrors the runner's connection exactly: it is the only one in the
+    // system with multipleStatements enabled, and a whole file is one query.
+    const connection = await mysql.createConnection({
+      host: config.DB_HOST,
+      port: config.DB_PORT,
+      user: config.DB_USER,
+      password: config.DB_PASSWORD,
+      database: config.DB_NAME,
+      multipleStatements: true,
+      charset: 'utf8mb4_0900_ai_ci',
+      timezone: 'Z',
+    });
+
+    try {
+      for (const migration of await loadMigrations(MIGRATIONS_DIR)) {
+        const sql = await readFile(migration.upPath, 'utf8');
+        await expect(
+          connection.query(sql),
+          `${migration.version} ${migration.name} is not re-runnable`,
+        ).resolves.toBeDefined();
+      }
+    } finally {
+      await connection.end();
+    }
   });
 
   it('is a no-op when already up to date', async () => {

@@ -30,7 +30,13 @@ import { listMentionsOf, listMentionsFrom } from '../content/mentions.js';
 import { listRelationshipsFor } from '../content/relationships.js';
 import { buildGraph } from '../content/graph.js';
 import { renderProse, renderFragment } from '../content/markdown.js';
-import { resolveForRender } from '../content/render-context.js';
+import { resolveForRender, resolveTimelines } from '../content/render-context.js';
+import {
+  findTimelineEntry,
+  layoutTimelineBand,
+  listEventsMentionedBy,
+  listEventsRelatedTo,
+} from '../content/timeline.js';
 import { findServableFile } from '../files/repository.js';
 import { resolveStoragePath } from '../files/storage.js';
 import { parseSlug } from './form.js';
@@ -72,6 +78,24 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
       const record = await findEntityBySlug(pool, kind, slug, request.viewer);
       if (record === null) throw notFound(`${kind} ${slug}`);
 
+      // The kind's own prose -- a person's biography, an event's narrative.
+      // Rendered through `renderProse` rather than `renderFragment` so its
+      // references link and its paragraphs carry the anchors a backlink
+      // addresses, exactly as an essay's do.
+      const body = record.detail.bodyMarkdown ?? record.detail.biography;
+      const rendered =
+        typeof body === 'string' && body.trim() !== ''
+          ? renderProse(body, {
+              targets: await resolveForRender(pool, body, request.viewer),
+              viewer: request.viewer,
+              timelines: await resolveTimelines(pool, body, request.viewer),
+            })
+          : null;
+
+      // Where this subject sits in time: the events it is connected to, by
+      // asserted edge or by prose, in date order.
+      const chronology = await listEventsRelatedTo(pool, record.id, request.viewer);
+
       return renderPage(
         config,
         request,
@@ -83,10 +107,13 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
           labels,
           record,
           summaryHtml: record.summary === null ? null : renderFragment(record.summary),
-          biographyHtml:
-            typeof record.detail.biography === 'string' && record.detail.biography !== ''
-              ? renderFragment(record.detail.biography)
-              : null,
+          rendered,
+          // The event's own date label and place, resolved by the same read
+          // that resolves them for every listing -- so a private place is
+          // withheld here for the same reason and in the same way.
+          event: kind === 'event' ? await findTimelineEntry(pool, slug, request.viewer) : null,
+          chronology,
+          chronologyBand: layoutTimelineBand(chronology),
           // "the other places that they have been mentioned"
           mentions: await listMentionsOf(pool, record.id, request.viewer),
           relationships: await listRelationshipsFor(pool, record.id, request.viewer),
@@ -125,9 +152,15 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
     if (essay === null) throw notFound(`essay ${slug}`);
 
     const targets = await resolveForRender(pool, essay.bodyMarkdown, request.viewer);
-    const rendered = renderProse(essay.bodyMarkdown, { targets, viewer: request.viewer });
+    const rendered = renderProse(essay.bodyMarkdown, {
+      targets,
+      viewer: request.viewer,
+      timelines: await resolveTimelines(pool, essay.bodyMarkdown, request.viewer),
+    });
 
     // Where this piece sits in the whole, when it is part of one.
+    const chronology = await listEventsMentionedBy(pool, essay.id, request.viewer);
+
     const manuscriptSlug = (request.query as { manuscript?: string }).manuscript;
     let navigation = null;
     if (typeof manuscriptSlug === 'string' && /^[a-z0-9-]{1,190}$/.test(manuscriptSlug)) {
@@ -148,6 +181,10 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
         navigation,
         mentions: await listMentionsFrom(pool, essay.id, request.viewer),
         mentionedIn: await listMentionsOf(pool, essay.id, request.viewer),
+        // The events this piece names, read as a sequence rather than as an
+        // alphabetical list of links.
+        chronology,
+        chronologyBand: layoutTimelineBand(chronology),
         canonicalUrl: `${config.PUBLIC_BASE_URL}${essay.href}`,
       },
       { noindex: essay.noindex || essay.visibility !== 'public' },

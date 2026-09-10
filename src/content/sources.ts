@@ -54,7 +54,8 @@ export interface SourceRecord extends SourceSummary {
   archiveLocation: string | null;
   callNumber: string | null;
   url: string | null;
-  accessedOn: Date | null;
+  /** 'YYYY-MM-DD'; a DATE is a calendar day, not an instant. */
+  accessedOn: string | null;
   notes: string | null;
 }
 
@@ -78,7 +79,7 @@ interface SourceRow extends RowDataPacket {
   archive_location: string | null;
   call_number: string | null;
   url: string | null;
-  accessed_on: Date | null;
+  accessed_on: string | null;
   notes: string | null;
 }
 

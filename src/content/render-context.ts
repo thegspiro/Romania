@@ -9,10 +9,31 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { queryRows, type Pool, type PoolConnection } from '../db/pool.js';
 import { parseStoredCslItem } from '../citations/csl.js';
-import type { ReferenceTarget } from './markdown.js';
+import { parseTimelineDirectives, type ReferenceTarget } from './markdown.js';
 import { parseReferences } from './references.js';
 import { resolveTargets } from './mentions.js';
+import { resolveTimelineDirectives, type TimelineEntry } from './timeline.js';
 import { isAdmin, type Viewer } from './visibility.js';
+
+/**
+ * The entries every timeline block in a body should show, for this viewer.
+ *
+ * Separate from `resolveForRender` rather than folded into it: a caller that
+ * only needs references keeps the query it always made, and this one is skipped
+ * entirely when the body contains no block. Like `resolveForRender`, it exists
+ * so the published page, the admin preview and the compiled document all
+ * resolve the same way -- a preview that showed an event the published page
+ * withholds would be worse than no preview.
+ */
+export async function resolveTimelines(
+  db: Pool | PoolConnection,
+  markdown: string,
+  viewer: Viewer,
+): Promise<Map<string, TimelineEntry[]>> {
+  const directives = parseTimelineDirectives(markdown);
+  if (directives.length === 0) return new Map();
+  return resolveTimelineDirectives(db, directives, viewer);
+}
 
 export async function resolveForRender(
   db: Pool | PoolConnection,

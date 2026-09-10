@@ -33,7 +33,6 @@
         {{ ui.field('birthDate', 'Born', values, 'text', 'Free text: "1882", "c. 1882", "n.d." are all fine.') }}
         {{ ui.field('deathDate', 'Died', values) }}
         {{ ui.field('occupation', 'Occupation or role', values) }}
-        {{ ui.area('biography', 'Biography', values, 'Markdown. References inserted here are indexed like anywhere else.', 6) }}
       </fieldset>
     {% elif kind == 'organization' %}
       <fieldset>
@@ -42,7 +41,6 @@
         {{ ui.field('foundedDate', 'Founded', values) }}
         {{ ui.field('dissolvedDate', 'Dissolved', values) }}
         {{ ui.field('occupation', 'Type or sector', values) }}
-        {{ ui.area('biography', 'Description', values, 'Markdown.', 6) }}
       </fieldset>
     {% elif kind == 'place' %}
       <fieldset>
@@ -62,16 +60,48 @@
     {% elif kind == 'event' %}
       <fieldset>
         <legend>Event</legend>
-        {{ ui.field('startDate', 'Start date', values, 'text', 'YYYY-MM-DD.') }}
-        {{ ui.field('endDate', 'End date', values, 'text', 'YYYY-MM-DD.') }}
-        {{ ui.choose('datePrecision', 'Date precision', values, [
+        {{ ui.field('startDate', 'Start date', values, 'text', 'YYYY-MM-DD. For a year you only know as 1944, write 1944-01-01 and set the precision to Year.') }}
+        {{ ui.choose('startPrecision', 'Start precision', values, [
           { value: 'unknown', label: 'Unknown' },
           { value: 'day', label: 'Day' },
           { value: 'month', label: 'Month' },
           { value: 'year', label: 'Year' },
           { value: 'decade', label: 'Decade' }
-        ], 'How much of the date is actually known. 1944-01-01 with precision "year" means 1944.') }}
-        {{ ui.field('placeSlug', 'Place', values, 'text', "The place page's URL segment, e.g. iasi.") }}
+        ], 'How much of the date is actually known. 1944-01-01 at Year precision reads as "1944".') }}
+        {{ ui.field('endDate', 'End date', values, 'text', 'YYYY-MM-DD. Leave blank for a single moment.') }}
+        {{ ui.choose('endPrecision', 'End precision', values, [
+          { value: '', label: 'Same as the start' },
+          { value: 'unknown', label: 'Unknown' },
+          { value: 'day', label: 'Day' },
+          { value: 'month', label: 'Month' },
+          { value: 'year', label: 'Year' },
+          { value: 'decade', label: 'Decade' }
+        ], 'A range is often known at two different precisions: "from June 1943 until 1945".') }}
+        {{ ui.check('isCirca', 'Approximate', values, 'Renders as "c. 1943". Approximate is not the same as imprecise: a date can be known to the day and still be a guess.') }}
+        {{ ui.slugField('placeSlug', 'Place', values, 'place', "Start typing a place's name; the field stores its URL segment.") }}
+      </fieldset>
+    {% endif %}
+
+    {#
+      The kind's prose. Held out of the fieldsets above because all of them
+      that have one want the same editor, and because it is the one field whose
+      references are projected into `mention` and `citation`.
+    #}
+    {% if kind == 'event' %}
+      <fieldset>
+        <legend>Account</legend>
+        {% set proseField = 'bodyMarkdown' %}
+        {% set proseLabel = 'What happened' %}
+        {% set proseHint = 'Markdown. References inserted here are indexed like anywhere else.' %}
+        {% include "partials/prose-editor.njk" %}
+      </fieldset>
+    {% elif kind == 'person' or kind == 'organization' %}
+      <fieldset>
+        <legend>{{ 'Biography' if kind == 'person' else 'Description' }}</legend>
+        {% set proseField = 'biography' %}
+        {% set proseLabel = 'Biography' if kind == 'person' else 'Description' %}
+        {% set proseHint = 'Markdown. References inserted here are indexed like anywhere else.' %}
+        {% include "partials/prose-editor.njk" %}
       </fieldset>
     {% endif %}
 
@@ -99,4 +129,8 @@
       <button type="submit" class="danger">Delete</button>
     </form>
   {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  <script nonce="{{ nonce }}" src="/assets/js/editor.js"></script>
 {% endblock %}

@@ -27,6 +27,8 @@ import {
 import { slugify, uniqueSlug } from './slug.js';
 import { visibilityFilter, type Viewer, type Visibility } from './visibility.js';
 import { referenceHref } from './references.js';
+import { rebuildReferences, type RebuildResult } from './mentions.js';
+import { isDatePrecision, type DatePrecision } from './timeline.js';
 
 export const ENTITY_KINDS = ['person', 'organization', 'place', 'event'] as const;
 export type EntityKind = (typeof ENTITY_KINDS)[number];
@@ -88,6 +90,15 @@ interface DetailSpec {
   fromRow: (row: RowDataPacket) => EntityDetail;
   /** Extra columns searched by the admin listing, qualified with `d`. */
   searchColumns: string[];
+  /**
+   * The kind's Markdown body, if it has one.
+   *
+   * Its references are projected into `mention` and `citation` exactly as an
+   * essay's are. Only one column per kind: the projection is rebuilt wholesale
+   * from one string, and a mention's context and paragraph anchor have to point
+   * somewhere definite.
+   */
+  prose?: (input: Record<string, string>) => string;
 }
 
 function text(value: string | undefined): string | null {
@@ -113,6 +124,20 @@ function coordinate(value: string | undefined, bound: number): number | null {
 function isoDate(value: string | undefined): string | null {
   const trimmed = (value ?? '').trim();
   return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
+}
+
+/** A posted checkbox: present and not "off" means checked. */
+function readBoolean(value: string | undefined): boolean {
+  const trimmed = (value ?? '').trim().toLowerCase();
+  return trimmed !== '' && trimmed !== '0' && trimmed !== 'off' && trimmed !== 'false';
+}
+
+/** A date precision from the form, whitelisted against the column's ENUM. */
+function precisionOr(
+  value: string | undefined,
+  fallback: DatePrecision = 'unknown',
+): DatePrecision {
+  return isDatePrecision(value) ? value : fallback;
 }
 
 const DETAIL_SPECS: Readonly<Record<EntityKind, DetailSpec>> = Object.freeze({
@@ -164,20 +189,24 @@ const DETAIL_SPECS: Readonly<Record<EntityKind, DetailSpec>> = Object.freeze({
     searchColumns: ['d.admin_area', 'd.historical_names'],
   },
   event: {
-    select: 'd.start_date, d.end_date, d.date_precision, d.place_item_id',
+    select:
+      'd.start_date, d.end_date, d.date_precision, d.start_precision, d.end_precision, ' +
+      'd.is_circa, d.body_markdown, d.place_item_id',
     join: 'LEFT JOIN event_detail d ON d.content_item_id = ci.id',
     insert: `INSERT INTO event_detail
-               (content_item_id, start_date, end_date, date_precision, place_item_id)
-             VALUES (?, ?, ?, ?, ?)`,
+               (content_item_id, start_date, end_date, date_precision, start_precision,
+                end_precision, is_circa, body_markdown, place_item_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     update: `UPDATE event_detail
-                SET start_date = ?, end_date = ?, date_precision = ?, place_item_id = ?
+                SET start_date = ?, end_date = ?, date_precision = ?, start_precision = ?,
+                    end_precision = ?, is_circa = ?, body_markdown = ?, place_item_id = ?
               WHERE content_item_id = ?`,
     params: async (input, connection) => {
-      const precision = ['day', 'month', 'year', 'decade', 'unknown'].includes(
-        input.datePrecision ?? '',
-      )
-        ? (input.datePrecision as string)
-        : 'unknown';
+      const startPrecision = precisionOr(input.startPrecision ?? input.datePrecision);
+      // An endpoint left blank inherits the start's precision: "June 1943 to
+      // August 1944" is one statement about how well the range is known, and
+      // making the operator say it twice invites them to say it wrong.
+      const endPrecision = precisionOr(input.endPrecision, startPrecision);
 
       // The form names a place by slug; an unknown slug becomes no place
       // rather than a foreign key error the operator cannot interpret.
@@ -197,15 +226,34 @@ const DETAIL_SPECS: Readonly<Record<EntityKind, DetailSpec>> = Object.freeze({
       // The CHECK constraint requires end >= start; swapping is friendlier
       // than refusing, and the operator sees the result immediately.
       const ordered = start !== null && end !== null && end < start ? [end, start] : [start, end];
-      return [ordered[0] ?? null, ordered[1] ?? null, precision, placeId];
+
+      return [
+        ordered[0] ?? null,
+        ordered[1] ?? null,
+        // `date_precision` predates the per-endpoint pair and is still read by
+        // anything written before them. Keeping it equal to the start's
+        // precision keeps it a true answer to the question it always answered,
+        // and is what makes migration 0006's backfill safe to re-run.
+        startPrecision,
+        startPrecision,
+        endPrecision,
+        readBoolean(input.isCirca) ? 1 : 0,
+        text(input.bodyMarkdown),
+        placeId,
+      ];
     },
     fromRow: (row) => ({
       startDate: row.start_date === null ? null : String(row.start_date).slice(0, 10),
       endDate: row.end_date === null ? null : String(row.end_date).slice(0, 10),
       datePrecision: (row.date_precision as string) ?? 'unknown',
+      startPrecision: (row.start_precision as string) ?? 'unknown',
+      endPrecision: (row.end_precision as string) ?? 'unknown',
+      isCirca: row.is_circa === 1 ? 1 : 0,
+      bodyMarkdown: (row.body_markdown as string | null) ?? null,
       placeItemId: row.place_item_id === null ? null : Number(row.place_item_id),
     }),
-    searchColumns: [],
+    searchColumns: ['d.body_markdown'],
+    prose: (input) => input.bodyMarkdown ?? '',
   },
 });
 
@@ -248,6 +296,9 @@ function agentSpec(): DetailSpec {
       biography: (row.biography as string | null) ?? null,
     }),
     searchColumns: ['d.alternate_names', 'd.occupation'],
+    // The biography is Markdown and the editor offers the reference picker for
+    // it, so its references are indexed like any other prose.
+    prose: (input) => input.biography ?? '',
   };
 }
 
@@ -412,11 +463,40 @@ export async function searchAllEntities(
 
 // --- Writes ----------------------------------------------------------------
 
+/**
+ * The result of a write that also rebuilt projections.
+ *
+ * Mirrors `EssayWriteResult`: the caller shows the operator which references
+ * point at nothing and which cited sources are still private, before the page
+ * is published rather than after.
+ */
+export interface EntityWriteResult {
+  id: number;
+  references: RebuildResult | null;
+}
+
+/**
+ * Rebuilds an entity's projections from its prose, in the caller's transaction.
+ *
+ * Returns null for a kind that has no body. The transaction is the caller's on
+ * purpose: the rows and the text they describe must commit together, so a
+ * listing can never describe a version of the prose that was never saved.
+ */
+async function rebuildEntityProse(
+  connection: PoolConnection,
+  spec: DetailSpec,
+  id: number,
+  input: EntityInput,
+): Promise<RebuildResult | null> {
+  if (spec.prose === undefined) return null;
+  return rebuildReferences(connection, id, spec.prose(input.detail));
+}
+
 export async function createEntity(
   pool: Pool,
   kind: EntityKind,
   input: EntityInput,
-): Promise<number> {
+): Promise<EntityWriteResult> {
   const spec = DETAIL_SPECS[kind];
 
   return withTransaction(pool, async (connection) => {
@@ -453,7 +533,7 @@ export async function createEntity(
 
     const id = result.insertId;
     await execute(connection, spec.insert, [id, ...(await spec.params(input.detail, connection))]);
-    return id;
+    return { id, references: await rebuildEntityProse(connection, spec, id, input) };
   });
 }
 
@@ -469,7 +549,7 @@ export async function updateEntity(
   kind: EntityKind,
   id: number,
   input: EntityInput,
-): Promise<boolean> {
+): Promise<EntityWriteResult | null> {
   const spec = DETAIL_SPECS[kind];
 
   return withTransaction(pool, async (connection) => {
@@ -478,7 +558,7 @@ export async function updateEntity(
       'SELECT id FROM content_item WHERE id = ? AND kind = ? FOR UPDATE',
       [id, kind],
     );
-    if (existing === null) return false;
+    if (existing === null) return null;
 
     await execute(
       connection,
@@ -510,7 +590,7 @@ export async function updateEntity(
       await execute(connection, spec.insert, [id, ...detailParams]);
     }
 
-    return true;
+    return { id, references: await rebuildEntityProse(connection, spec, id, input) };
   });
 }
 

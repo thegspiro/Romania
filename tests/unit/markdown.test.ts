@@ -16,10 +16,14 @@ import {
 } from '../../src/content/references.js';
 import {
   WITHHELD_LABEL,
+  blockAnchorsFor,
   countWords,
+  parseTimelineDirectives,
+  renderFragment,
   renderProse,
   type ReferenceTarget,
 } from '../../src/content/markdown.js';
+import { timelineDirectiveKey, type TimelineEntry } from '../../src/content/timeline.js';
 import { ANONYMOUS } from '../../src/content/visibility.js';
 import type { CslItem } from '../../src/citations/csl.js';
 
@@ -234,7 +238,9 @@ describe('renderProse', () => {
 
   it('renders ordinary Markdown', () => {
     const { html } = render('# Heading\n\nSome *emphasis* and a [link](https://example.org).');
-    expect(html).toContain('<h1>Heading</h1>');
+    // Top-level blocks carry a paragraph anchor; see the `block anchors`
+    // suite below for what that is for.
+    expect(html).toContain('<h1 id="p1">Heading</h1>');
     expect(html).toContain('<em>emphasis</em>');
     expect(html).toContain('href="https://example.org"');
   });
@@ -252,5 +258,140 @@ describe('countWords', () => {
 
   it('is zero for empty prose', () => {
     expect(countWords('   \n\n  ')).toBe(0);
+  });
+});
+
+describe('block anchors', () => {
+  it('numbers top-level blocks so a backlink can address a paragraph', () => {
+    const { html } = render('First paragraph.\n\n## A heading\n\nSecond paragraph.');
+    expect(html).toContain('<p id="p1">');
+    expect(html).toContain('<h2 id="p2">');
+    expect(html).toContain('<p id="p3">');
+  });
+
+  it('does not number a fragment', () => {
+    // renderProse and renderFragment share one renderer, and a page renders
+    // several fragments: two of them carrying id="p1" would be invalid HTML
+    // and an ambiguous anchor.
+    expect(renderFragment('First.\n\nSecond.')).not.toContain('id="p');
+  });
+
+  it('does not number a block nested inside another', () => {
+    const { html } = render('- one\n- two\n\nAfter.');
+    expect(html).toContain('<ul id="p1">');
+    // The list items are inside the list, which already counted.
+    expect(html).not.toContain('<li id=');
+    expect(html).toContain('<p id="p2">');
+  });
+
+  it('reports the block a reference falls in', () => {
+    const markdown = 'First paragraph.\n\nNamed here: [[person:ion-antonescu]].\n\nLast.';
+    const offsets = parseReferences(markdown).map((reference) => reference.index);
+    expect(blockAnchorsFor(markdown, offsets)).toEqual([2]);
+  });
+
+  it('uses the same numbering the renderer emits', () => {
+    // This is the property the whole feature rests on: a stored anchor has to
+    // address a paragraph that actually exists in the rendered page.
+    const markdown = '# Title\n\n> A quotation.\n\nProse with [[person:ion-antonescu]] in it.';
+    const [anchor] = blockAnchorsFor(
+      markdown,
+      parseReferences(markdown).map((reference) => reference.index),
+    );
+    const { html } = render(markdown);
+    expect(html).toContain(`<p id="p${anchor}">`);
+  });
+
+  it('maps every offset in a multi-reference body', () => {
+    const markdown = '[[person:ion-antonescu]] opens.\n\nAnd [[person:hidden-person]] closes.';
+    const offsets = parseReferences(markdown).map((reference) => reference.index);
+    expect(blockAnchorsFor(markdown, offsets)).toEqual([1, 2]);
+  });
+
+  it('returns nothing for no offsets', () => {
+    expect(blockAnchorsFor('Anything.', [])).toEqual([]);
+  });
+});
+
+describe('timeline blocks', () => {
+  const entry: TimelineEntry = {
+    id: 7,
+    slug: 'pogrom',
+    title: 'The Iasi pogrom',
+    href: '/events/pogrom',
+    visibility: 'public',
+    summary: null,
+    dates: {
+      startDate: '1941-06-29',
+      endDate: null,
+      startPrecision: 'day',
+      endPrecision: 'unknown',
+      isCirca: false,
+    },
+    dateLabel: '29 June 1941',
+    place: null,
+  };
+
+  function withEntries(markdown: string, entries: TimelineEntry[]) {
+    const directives = parseTimelineDirectives(markdown);
+    const key = timelineDirectiveKey(directives[0]!);
+    return renderProse(markdown, {
+      targets: targets(),
+      viewer: ANONYMOUS,
+      timelines: new Map([[key, entries]]),
+    }).html;
+  }
+
+  it('finds a directive through the tokenizer', () => {
+    const directives = parseTimelineDirectives('```timeline\nfrom: 1940\n```');
+    expect(directives).toHaveLength(1);
+    expect(directives[0]?.from).toBe('1940-01-01');
+  });
+
+  it('does not read a fence inside an indented code block as a directive', () => {
+    expect(parseTimelineDirectives('    ```timeline\n    from: 1940\n    ```')).toHaveLength(0);
+  });
+
+  it('renders the resolved entries as a list', () => {
+    const html = withEntries('```timeline\nfrom: 1940\n```', [entry]);
+    expect(html).toContain('class="timeline"');
+    expect(html).toContain('29 June 1941');
+    expect(html).toContain('href="/events/pogrom"');
+  });
+
+  it('escapes an entry title rather than trusting it', () => {
+    const html = withEntries('```timeline\nfrom: 1940\n```', [
+      { ...entry, title: '<script>alert(1)</script>' },
+    ]);
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
+
+  it('renders an empty chronology when nothing resolves, with no placeholder row', () => {
+    const html = withEntries('```timeline\nfrom: 1940\n```', []);
+    expect(html).toContain('No events to show here');
+    // An event the viewer may not see must leave no trace at all -- not a gap,
+    // not a "withheld" marker.
+    expect(html).not.toContain('withheld');
+  });
+
+  it('renders with no resolution at all rather than throwing', () => {
+    const html = renderProse('```timeline\n```', { targets: targets(), viewer: ANONYMOUS }).html;
+    expect(html).toContain('class="timeline"');
+  });
+
+  it('leaves an ordinary fence alone', () => {
+    const { html } = render('```sh\nnpm test\n```');
+    expect(html).toContain('<pre>');
+    expect(html).toContain('class="language-sh"');
+    expect(html).toContain('npm test');
+    expect(html).not.toContain('class="timeline"');
+  });
+
+  it('leaves a reference inside a code fence literal', () => {
+    // The reason references are an inline rule rather than a substitution.
+    const { html } = render('```\n[[person:ion-antonescu]]\n```');
+    expect(html).toContain('[[person:ion-antonescu]]');
+    expect(html).not.toContain('href="/people/ion-antonescu"');
   });
 });

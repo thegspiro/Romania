@@ -30,6 +30,18 @@ export function createPool(config: Config): Pool {
     // Store and read everything in UTC; formatting to a local zone is a
     // presentation concern handled in templates.
     timezone: 'Z',
+    // DATE columns arrive as 'YYYY-MM-DD' strings rather than JS Dates.
+    //
+    // A DATE holds a calendar day with no time and no zone -- 2 June 1943 is
+    // that day everywhere. Turning it into a Date invents a midnight instant
+    // that then has to be converted back, and `String(aDate).slice(0, 10)`
+    // (which every mapping here does) yields "Tue Jun 01", not an ISO date.
+    // For an event whose date is the record, that is the difference between a
+    // chronology and a blank.
+    //
+    // Only DATE: DATETIME columns are instants and stay Dates, which is what
+    // `created_at` and friends are typed as.
+    dateStrings: ['DATE'],
     supportBigNumbers: true,
     bigNumberStrings: false,
     // DECIMAL columns (latitude/longitude) arrive as numbers rather than
