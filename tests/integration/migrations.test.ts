@@ -161,6 +161,60 @@ describe.skipIf(!available)('migration runner', () => {
     await pool.query('DELETE FROM content_item WHERE id = 9002');
   });
 
+  it('lets one pair hold two offices but still refuses an exact duplicate', async () => {
+    // The widened unique key. Without the generated period_key folding NULL
+    // to '', the undated pair below would be accepted twice, because MySQL
+    // treats NULLs in a unique index as distinct.
+    await pool.query(
+      `INSERT INTO content_item (id, kind, slug, title)
+       VALUES (9003, 'person', 'office-holder', 'Holder'),
+              (9004, 'organization', 'the-ministry', 'Ministry')`,
+    );
+    const insert = `INSERT INTO relationship
+        (from_item_id, to_item_id, predicate_id, role_title, start_date, end_date)
+      VALUES (9003, 9004, 1, ?, ?, ?)`;
+
+    await expect(
+      pool.query(insert, ['Minister', '1937-01-01', '1938-01-01']),
+    ).resolves.toBeDefined();
+    await expect(
+      pool.query(insert, ['Prime Minister', '1940-01-01', '1944-01-01']),
+    ).resolves.toBeDefined();
+    // The same office over the same period is the same claim twice.
+    await expect(pool.query(insert, ['Minister', '1937-01-01', '1938-01-01'])).rejects.toThrow();
+
+    await expect(pool.query(insert, [null, null, null])).resolves.toBeDefined();
+    await expect(pool.query(insert, [null, null, null])).rejects.toThrow();
+
+    await pool.query('DELETE FROM content_item WHERE id IN (9003, 9004)');
+  });
+
+  it('enforces the relationship period and role check constraints', async () => {
+    await pool.query(
+      `INSERT INTO content_item (id, kind, slug, title)
+       VALUES (9005, 'person', 'checked-person', 'Person'),
+              (9006, 'organization', 'checked-org', 'Org')`,
+    );
+
+    // An office that ended before it began is a data-entry error, not a fact.
+    await expect(
+      pool.query(
+        `INSERT INTO relationship (from_item_id, to_item_id, predicate_id, start_date, end_date)
+         VALUES (9005, 9006, 1, '1944-01-01', '1940-01-01')`,
+      ),
+    ).rejects.toThrow();
+
+    // '' and NULL would be two spellings of "no office recorded".
+    await expect(
+      pool.query(
+        `INSERT INTO relationship (from_item_id, to_item_id, predicate_id, role_title)
+         VALUES (9005, 9006, 1, '')`,
+      ),
+    ).rejects.toThrow();
+
+    await pool.query('DELETE FROM content_item WHERE id IN (9005, 9006)');
+  });
+
   it('seeds the relationship vocabulary', async () => {
     const row = await queryOne<RowDataPacket & { total: number }>(
       pool,

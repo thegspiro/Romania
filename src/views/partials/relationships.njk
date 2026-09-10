@@ -3,9 +3,13 @@
 
   `listRelationshipsFor` has already applied the visibility rule to the edge
   and to both endpoints, so anything reaching this template is showable.
+
+  An edge may carry the office it was held in and the period it held for. Both
+  are plain text under autoescape -- never marked safe, because the operator
+  types them.
 #}
 <section class="relationships">
-  <h2>Relationships</h2>
+  <h2>Roles and relationships</h2>
 
   {% if relationships.length == 0 %}
     <p class="empty">No relationships recorded.</p>
@@ -19,6 +23,18 @@
           {% if relationship.visibility != 'public' %}
             <span class="badge badge-private">Private</span>
           {% endif %}
+
+          {% if relationship.roleTitle or relationship.periodLabel %}
+            <div class="relationship-role">
+              {% if relationship.roleTitle %}
+                <span class="role-title">{{ relationship.roleTitle }}</span>
+              {% endif %}
+              {% if relationship.periodLabel %}
+                <span class="role-period">{{ relationship.periodLabel }}</span>
+              {% endif %}
+            </div>
+          {% endif %}
+
           {% if relationship.note %}<div class="muted small">{{ relationship.note }}</div>{% endif %}
 
           {% if isAdmin and editable %}
@@ -62,6 +78,43 @@
         <label for="targetSlug">Slug</label>
         <input type="text" id="targetSlug" name="targetSlug" placeholder="ion-antonescu" required />
         <span class="hint">The URL segment of the other item's page.</span>
+      </p>
+
+      <p class="field">
+        <label for="roleTitle">Role or position</label>
+        <input type="text" id="roleTitle" name="roleTitle" maxlength="255"
+               placeholder="Minister of the Interior" />
+        <span class="hint">
+          The office or capacity this connection was held in. Leave blank for a
+          plain relationship. Record a second post at the same organization as
+          its own relationship rather than editing this one.
+        </span>
+      </p>
+
+      <p class="field">
+        <label for="startDate">From</label>
+        <input type="date" id="startDate" name="startDate" />
+        <span class="hint">Leave blank when the date is not known.</span>
+      </p>
+
+      <p class="field">
+        <label for="endDate">Until</label>
+        <input type="date" id="endDate" name="endDate" />
+      </p>
+
+      <p class="field">
+        <label for="datePrecision">Date precision</label>
+        <select id="datePrecision" name="datePrecision">
+          <option value="unknown">Unknown</option>
+          <option value="day">Day</option>
+          <option value="month">Month</option>
+          <option value="year">Year</option>
+          <option value="decade">Decade</option>
+        </select>
+        <span class="hint">
+          How much of the dates above is actually known. A date entered as
+          1940-01-01 with year precision reads as “1940”.
+        </span>
       </p>
 
       <p class="field">

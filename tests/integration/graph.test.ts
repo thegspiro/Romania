@@ -25,8 +25,12 @@ import {
   type Harness,
 } from './helpers.js';
 import { makeEntity, makeEssay, makeSource } from './fixtures.js';
-import { buildGraph } from '../../src/content/graph.js';
-import { createRelationship, listPredicates } from '../../src/content/relationships.js';
+import { buildGraph, type Graph } from '../../src/content/graph.js';
+import {
+  createRelationship,
+  listPredicates,
+  type Predicate,
+} from '../../src/content/relationships.js';
 import { findEntityById } from '../../src/content/entities.js';
 import { ANONYMOUS, adminViewer } from '../../src/content/visibility.js';
 
@@ -36,12 +40,15 @@ describe.skipIf(!available)('relational browsing', () => {
   let harness: Harness;
   let admin: ReturnType<typeof adminViewer>;
   let associatedWith: number;
+  let heldOffice: number;
+  let predicates: Predicate[];
 
   beforeAll(async () => {
     harness = await createHarness();
     admin = adminViewer(harness.userId);
-    const predicates = await listPredicates(harness.pool);
+    predicates = await listPredicates(harness.pool);
     associatedWith = predicates.find((predicate) => predicate.code === 'associated_with')!.id;
+    heldOffice = predicates.find((predicate) => predicate.code === 'held_office_in')!.id;
   });
 
   afterAll(async () => {
@@ -236,6 +243,271 @@ describe.skipIf(!available)('relational browsing', () => {
       for (const node of graph.nodes) expect(node.href).toMatch(/^\/[a-z]+\/[a-z0-9-]+$/);
       expect(graph.nodes.find((node) => node.id === d)?.href).toBe('/places/place-d');
       expect(graph.truncated).toBe(false);
+    });
+  });
+
+  describe('offices and periods on the drawing', () => {
+    /** One person, one organization, one dated office between them. */
+    async function office(
+      role: string,
+      startDate: string | null,
+      endDate: string | null,
+    ): Promise<{ person: number; org: number }> {
+      const person = await makeEntity(harness.pool, 'person', 'Ion Antonescu', 'public');
+      const org = await makeEntity(harness.pool, 'organization', 'Council of Ministers', 'public');
+      const outcome = await createRelationship(harness.pool, {
+        fromItemId: person,
+        toItemId: org,
+        predicateId: heldOffice,
+        roleTitle: role,
+        startDate,
+        endDate,
+        datePrecision: 'year',
+        note: '',
+        visibility: 'public',
+      });
+      expect(outcome.ok).toBe(true);
+      return { person, org };
+    }
+
+    it('carries the office and the period onto the edge', async () => {
+      const { person } = await office('Prime Minister', '1941-01-01', '1944-01-01');
+      const centre = (await findEntityById(harness.pool, 'person', person, admin))!;
+
+      const graph = await buildGraph(harness.pool, centre, ANONYMOUS, 2);
+      expect(graph.edges).toHaveLength(1);
+      expect(graph.edges[0]?.roleTitle).toBe('Prime Minister');
+      expect(graph.edges[0]?.period).toBe('1941–1944');
+      // What the drawing actually prints: the role leads, not the predicate.
+      expect(graph.edges[0]?.display).toBe('Prime Minister, 1941–1944');
+    });
+
+    it('draws two posts at one organization as two edges', async () => {
+      const { person, org } = await office('Minister of Defence', '1937-01-01', '1938-01-01');
+      await createRelationship(harness.pool, {
+        fromItemId: person,
+        toItemId: org,
+        predicateId: heldOffice,
+        roleTitle: 'Prime Minister',
+        startDate: '1941-01-01',
+        endDate: '1944-01-01',
+        datePrecision: 'year',
+        note: '',
+        visibility: 'public',
+      });
+      const centre = (await findEntityById(harness.pool, 'person', person, admin))!;
+
+      const graph = await buildGraph(harness.pool, centre, ANONYMOUS, 2);
+      // Two claims about one pair, so two edges and still two nodes.
+      expect(graph.nodes).toHaveLength(2);
+      expect(graph.edges.map((edge) => edge.roleTitle).sort()).toEqual([
+        'Minister of Defence',
+        'Prime Minister',
+      ]);
+    });
+
+    it('leaves an unqualified edge reading as its predicate', async () => {
+      const one = await makeEntity(harness.pool, 'person', 'Person One', 'public');
+      const two = await makeEntity(harness.pool, 'person', 'Person Two', 'public');
+      await createRelationship(harness.pool, {
+        fromItemId: one,
+        toItemId: two,
+        predicateId: associatedWith,
+        note: '',
+        visibility: 'public',
+      });
+      const centre = (await findEntityById(harness.pool, 'person', one, admin))!;
+
+      const graph = await buildGraph(harness.pool, centre, ANONYMOUS, 1);
+      expect(graph.edges[0]?.roleTitle).toBeNull();
+      expect(graph.edges[0]?.period).toBeNull();
+      expect(graph.edges[0]?.display).toBe('Associated with');
+    });
+  });
+
+  describe('the network in one year', () => {
+    /** A dated edge from a public person to a public organization. */
+    async function dated(
+      title: string,
+      startDate: string | null,
+      endDate: string | null,
+    ): Promise<number> {
+      const person = await makeEntity(harness.pool, 'person', 'Ion Antonescu', 'public');
+      const org = await makeEntity(harness.pool, 'organization', title, 'public');
+      await createRelationship(harness.pool, {
+        fromItemId: person,
+        toItemId: org,
+        predicateId: heldOffice,
+        roleTitle: 'Member',
+        startDate,
+        endDate,
+        datePrecision: 'year',
+        note: '',
+        visibility: 'public',
+      });
+      return person;
+    }
+
+    it('keeps an edge whose period covers the year', async () => {
+      const person = await dated('Council of Ministers', '1940-09-06', '1944-08-23');
+      const centre = (await findEntityById(harness.pool, 'person', person, admin))!;
+
+      const graph = await buildGraph(harness.pool, centre, ANONYMOUS, 2, { year: 1942 });
+      expect(graph.year).toBe(1942);
+      expect(graph.edges).toHaveLength(1);
+      expect(graph.nodes).toHaveLength(2);
+    });
+
+    it('keeps an edge that starts or ends inside the year itself', async () => {
+      // Overlap is tested against the whole calendar year, not against a day.
+      const person = await dated('Council of Ministers', '1940-09-06', '1944-08-23');
+      const centre = (await findEntityById(harness.pool, 'person', person, admin))!;
+
+      for (const year of [1940, 1944]) {
+        const graph = await buildGraph(harness.pool, centre, ANONYMOUS, 2, { year });
+        expect(graph.edges).toHaveLength(1);
+      }
+    });
+
+    it('drops an edge whose period ended before the year', async () => {
+      const person = await dated('Council of Ministers', '1930-01-01', '1935-01-01');
+      const centre = (await findEntityById(harness.pool, 'person', person, admin))!;
+
+      const graph = await buildGraph(harness.pool, centre, ANONYMOUS, 2, { year: 1942 });
+      expect(graph.edges).toEqual([]);
+      // With no edge there is no second node either.
+      expect(graph.nodes.map((node) => node.id)).toEqual([person]);
+    });
+
+    it('drops an edge whose period had not started', async () => {
+      const person = await dated('Council of Ministers', '1950-01-01', null);
+      const centre = (await findEntityById(harness.pool, 'person', person, admin))!;
+
+      expect((await buildGraph(harness.pool, centre, ANONYMOUS, 2, { year: 1942 })).edges).toEqual(
+        [],
+      );
+    });
+
+    it('keeps an open-ended edge that had already started', async () => {
+      const person = await dated('Council of Ministers', '1930-01-01', null);
+      const centre = (await findEntityById(harness.pool, 'person', person, admin))!;
+
+      expect(
+        (await buildGraph(harness.pool, centre, ANONYMOUS, 2, { year: 1942 })).edges,
+      ).toHaveLength(1);
+    });
+
+    it('always keeps an edge with no dates recorded', async () => {
+      // An unknown period is not an absent one. Hiding undated edges would
+      // make the filter quietly lose most of a half-recorded corpus.
+      const person = await dated('Council of Ministers', null, null);
+      const centre = (await findEntityById(harness.pool, 'person', person, admin))!;
+
+      expect(
+        (await buildGraph(harness.pool, centre, ANONYMOUS, 2, { year: 1942 })).edges,
+      ).toHaveLength(1);
+    });
+
+    it('never narrows a mention, which carries no period at all', async () => {
+      const person = await makeEntity(harness.pool, 'person', 'Ion Antonescu', 'public');
+      await makeEssay(harness.pool, 'Open Essay', 'public', 'On [[person:ion-antonescu]].');
+      const centre = (await findEntityById(harness.pool, 'person', person, admin))!;
+
+      const graph = await buildGraph(harness.pool, centre, ANONYMOUS, 2, { year: 1600 });
+      expect(graph.edges.map((edge) => edge.relation)).toEqual(['mentioned']);
+    });
+
+    it('reports no year when the walk was not filtered', async () => {
+      const person = await dated('Council of Ministers', '1940-01-01', '1944-01-01');
+      const centre = (await findEntityById(harness.pool, 'person', person, admin))!;
+
+      expect((await buildGraph(harness.pool, centre, ANONYMOUS, 2)).year).toBeNull();
+      expect(
+        (await buildGraph(harness.pool, centre, ANONYMOUS, 2, { year: null })).year,
+      ).toBeNull();
+    });
+
+    it('cannot reach a private node at any year', async () => {
+      // The year narrows on top of the visibility filter, never instead of it.
+      // public A -- private B -- public C, every edge dated and public.
+      const a = await makeEntity(harness.pool, 'person', 'Person A', 'public');
+      const b = await makeEntity(harness.pool, 'organization', 'Org B', 'private');
+      const c = await makeEntity(harness.pool, 'person', 'Person C', 'public');
+      for (const [from, to] of [
+        [a, b],
+        [b, c],
+      ] as const) {
+        await createRelationship(harness.pool, {
+          fromItemId: from,
+          toItemId: to,
+          predicateId: heldOffice,
+          roleTitle: 'Member',
+          startDate: '1930-01-01',
+          endDate: '1950-01-01',
+          datePrecision: 'year',
+          note: '',
+          visibility: 'public',
+        });
+      }
+      const centre = (await findEntityById(harness.pool, 'person', a, admin))!;
+
+      for (const year of [1900, 1942, 2000]) {
+        const graph = await buildGraph(harness.pool, centre, ANONYMOUS, 3, { year });
+        const reached = graph.nodes.map((node) => node.id);
+        expect(reached).not.toContain(b);
+        expect(reached).not.toContain(c);
+        expect(JSON.stringify(graph)).not.toContain('Org B');
+      }
+    });
+
+    it('carries the year into the page without reflecting the query string', async () => {
+      await dated('Council of Ministers', '1940-01-01', '1944-01-01');
+
+      const page = await harness.app.inject({
+        method: 'GET',
+        url: '/people/ion-antonescu?year=1942',
+      });
+      expect(page.statusCode).toBe(200);
+      // The year survives a reload, so the control works without JavaScript.
+      expect(page.body).toContain('/graph/people/ion-antonescu.json?year=1942');
+
+      // A hostile year is re-parsed, not echoed: it reaches neither the data
+      // URL nor the input's value.
+      const hostile = await harness.app.inject({
+        method: 'GET',
+        url: `/people/ion-antonescu?year=${encodeURIComponent('"><script>alert(1)</script>')}`,
+      });
+      expect(hostile.statusCode).toBe(200);
+      expect(hostile.body).not.toContain('<script>alert(1)</script>');
+      expect(hostile.body).not.toContain('.json?year=');
+      expect(hostile.body).toContain('/graph/people/ion-antonescu.json"');
+    });
+
+    it('honours ?year= on the endpoint and ignores a nonsense value', async () => {
+      const person = await dated('Council of Ministers', '1930-01-01', '1935-01-01');
+      expect(person).toBeGreaterThan(0);
+
+      const filtered = await harness.app.inject({
+        method: 'GET',
+        url: '/graph/people/ion-antonescu.json?year=1942',
+      });
+      expect(filtered.statusCode).toBe(200);
+      const body = filtered.json<Graph>();
+      expect(body.year).toBe(1942);
+      expect(body.edges).toEqual([]);
+
+      // Anything that is not a plain year is read as "no filter", so a
+      // hand-edited query string cannot empty the drawing.
+      for (const value of ['banana', '-5', '99999', '19.5', '']) {
+        const response = await harness.app.inject({
+          method: 'GET',
+          url: `/graph/people/ion-antonescu.json?year=${encodeURIComponent(value)}`,
+        });
+        expect(response.statusCode).toBe(200);
+        const unfiltered = response.json<Graph>();
+        expect(unfiltered.year).toBeNull();
+        expect(unfiltered.edges).toHaveLength(1);
+      }
     });
   });
 

@@ -74,6 +74,20 @@ mention is exactly as visible as the item whose prose contains it.
 Backlink reads filter on the **citing** item. A private essay naming a public
 person must not surface on that person's public page.
 
+**A relationship edge may carry an office and a period.** `role_title`,
+`start_date`, `end_date` and `date_precision` live on `relationship`, not on
+either endpoint, because an office is a property of the connection. Two posts
+at one organization are two edges — which is why the unique key includes the
+generated `period_key`, a STORED column folding NULL to `''`. Do not narrow
+that key back to the bare triple: MySQL treats NULLs in a unique index as
+distinct, so the old duplicate check only still works because of that column.
+
+The graph accepts an optional year, and filters asserted edges by interval
+overlap. An **undated edge is always drawn** — an unknown period is not an
+absent one. The year is ANDed on top of `visibilityFilter`, never in place of
+it; a filter that could make a private node reachable would be a leak, and
+`tests/integration/graph.test.ts` pins that it cannot.
+
 **Manuscripts are a flat ordered list with a depth column**, not a
 self-referencing tree. Ordering, prev/next, subtree moves and compilation are
 all simple walks over it, and MySQL's self-referencing foreign keys have

@@ -33,6 +33,7 @@ What is built and working:
 | **Manuscripts** — nested outline, prev/next navigation, reusable sections | Complete                                                                                                            |
 | **Compilation** — Pandoc to PDF, DOCX, HTML, LaTeX, per audience          | Complete                                                                                                            |
 | **Relationship graph** — typed edges plus mentions, Cytoscape             | Complete                                                                                                            |
+| **Roles and positions** — offices and periods on an edge, network by year | Complete                                                                                                            |
 | Chicago citation rendering                                                | Complete (CMOS 18th ed., notes and bibliography)                                                                    |
 | Authentication — password + passkey, recovery codes                       | Complete                                                                                                            |
 | Public/private enforcement                                                | Complete and tested                                                                                                 |
@@ -117,6 +118,35 @@ from an essay disappears from the subject's page immediately.
 Each person, organization, place and event page therefore shows its own
 fields, everywhere it is mentioned (with the surrounding sentence as context),
 its typed relationships, and a network graph of connections within two hops.
+
+### Roles, positions and periods
+
+A relationship may say more than that two people were connected. It can carry
+the **office it was held in** and the **period it held for**:
+
+```
+Ion Antonescu  --[ Held office in ]-->  Council of Ministers
+                 President of the Council of Ministers, 1940-1944
+```
+
+Both live on the edge rather than on either endpoint, because an office is a
+property of the connection: the same person may hold several posts at one
+institution in succession, and the same post passes between people. Each is
+its own edge, so a career reads as a sequence rather than as one flattened
+line, and the drawing labels each edge with the role rather than the bare
+predicate.
+
+Dates carry a **precision**, the same contract `event_detail` uses: a date
+stored as `1944-01-01` with year precision reads as "1944", never as
+"1 January 1944". Nothing renders more exactness than was claimed.
+
+Because the edges are dated, the network can be asked what it looked like at a
+moment. `?year=1941` on an entity page draws only the relationships whose
+period covers that year. A relationship with **no dates recorded is always
+drawn** — an unknown period is not an absent one, and hiding undated edges
+would quietly empty a half-recorded corpus. The year narrows the walk on top
+of the visibility rule and never in place of it: no year makes a private node
+reachable.
 
 ### From pieces to a single document
 
