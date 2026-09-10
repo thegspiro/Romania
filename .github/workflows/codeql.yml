@@ -1,0 +1,65 @@
+# Static analysis for the patterns a linter does not look for.
+#
+# Separate from ci.yml on purpose. This takes minutes rather than seconds, its
+# findings go to the Security tab rather than a job log, and it should not sit
+# in the way of the fast feedback loop. It is also the piece here most safely
+# deleted if it proves more noise than signal.
+#
+# Worth having for this application specifically: it traces untrusted input to
+# dangerous sinks, which is the shape of every way unpublished research could
+# leak -- a path built from a request, a query built from a parameter, a
+# response that reveals what a filter should have removed.
+name: CodeQL
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Advisories arrive after a merge as well as before one, so the default
+    # branch is rescanned weekly rather than only when something changes.
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: analyze
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      # Required for CodeQL to upload its results.
+      security-events: write
+
+    strategy:
+      # One language failing should not hide the other's findings.
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, python]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          language: ${{ matrix.language }}
+          # security-extended over the default pack: the cost is a few more
+          # minutes and some lower-confidence findings, which is the right
+          # trade when the thing being protected is unpublished research.
+          queries: security-extended
+
+      # No build step. The TypeScript is analysed from source, and building
+      # would add nothing CodeQL uses.
+      - name: Analyse
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
