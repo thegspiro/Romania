@@ -36,7 +36,11 @@
     })
     .then(function (graph) {
       if (!graph.nodes || graph.nodes.length <= 1) {
-        say('No connections recorded yet.');
+        say(
+          graph.year
+            ? 'No connections recorded for ' + graph.year + '.'
+            : 'No connections recorded yet.',
+        );
         return;
       }
 
@@ -60,7 +64,9 @@
             id: 'e' + index,
             source: String(edge.source),
             target: String(edge.target),
-            label: edge.label,
+            // The server folded the office and the period into `display`,
+            // so the drawing and the list above it read the same way.
+            label: edge.display || edge.label,
             relation: edge.relation,
           },
         });

@@ -28,8 +28,10 @@ import {
 import { KIND_PATHS } from '../content/references.js';
 import { listMentionsOf } from '../content/mentions.js';
 import {
+  MAX_ROLE_TITLE,
   createRelationship,
   deleteRelationship,
+  isDatePrecision,
   listPredicates,
   listRelationshipsFor,
 } from '../content/relationships.js';
@@ -319,6 +321,16 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
       return reply.redirect(`${safeReturn(returnTo)}?msg=relationship_invalid`);
     }
 
+    // An office is a property of the edge, not of either endpoint, so it is
+    // read here alongside the predicate. A malformed date is normalised away
+    // by createRelationship rather than refused; an over-long title is not,
+    // because silently truncating an office would misstate the record.
+    const roleTitle = readString(request.body, 'roleTitle').trim();
+    if (roleTitle.length > MAX_ROLE_TITLE) {
+      return reply.redirect(`${safeReturn(returnTo)}?msg=relationship_role_long`);
+    }
+    const datePrecision = readString(request.body, 'datePrecision');
+
     const target = await findItemIdBySlug(targetKindRaw, targetSlug);
     if (target === null) return reply.redirect(`${safeReturn(returnTo)}?msg=relationship_invalid`);
 
@@ -326,13 +338,21 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
       fromItemId,
       toItemId: target,
       predicateId,
+      roleTitle,
+      startDate: readString(request.body, 'startDate'),
+      endDate: readString(request.body, 'endDate'),
+      datePrecision: isDatePrecision(datePrecision) ? datePrecision : 'unknown',
       note: readString(request.body, 'note').trim() || null,
       visibility: isVisibility(visibility) ? visibility : 'private',
     });
 
     if (!outcome.ok) {
       const code =
-        outcome.reason === 'duplicate' ? 'relationship_duplicate' : 'relationship_invalid';
+        outcome.reason === 'duplicate'
+          ? 'relationship_duplicate'
+          : outcome.reason === 'role_too_long'
+            ? 'relationship_role_long'
+            : 'relationship_invalid';
       return reply.redirect(`${safeReturn(returnTo)}?msg=${code}`);
     }
 
