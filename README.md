@@ -449,14 +449,24 @@ skipped every visibility test is green and proves nothing — so set
 `.github/workflows/ci.yml` runs the same gate on every pull request, in three
 independent jobs:
 
-| Job      | Runs                                                                                                                                                       |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node`   | format, typecheck, lint, build, then vitest against a MySQL 8.4 service container with `REQUIRE_TEST_DB=1`                                                 |
-| `python` | the pinned pandoc, then ruff and pytest                                                                                                                    |
-| `docker` | builds the image and smoke-tests it — runs as uid 1000, pandoc and tectonic present, the worker venv imports, built assets landed, dev dependencies pruned |
+| Job          | Runs                                                                                                                                                                          |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node`       | format, typecheck, lint, build, then vitest against a MySQL 8.4 service container with `REQUIRE_TEST_DB=1`                                                                    |
+| `python`     | the pinned pandoc, then ruff and pytest                                                                                                                                       |
+| `migrations` | refuses a change that edits or deletes a migration already on `main`                                                                                                          |
+| `docker`     | builds the image and smoke-tests it — runs as uid 1000, pandoc and tectonic present, every declared Python dependency installed, built assets landed, dev dependencies pruned |
+
+A separate `codeql` workflow runs static analysis on both languages, and again
+weekly on `main` — advisories arrive after a merge as well as before one.
 
 `docker` reaches out to Debian mirrors and GitHub releases, so it can go red
 without a code change; nothing depends on it.
+
+The `node` job also enforces the rules that used to live only in `CLAUDE.md`:
+what may bypass template autoescaping, the CSP's ban on inline styles and
+un-nonced scripts, and the visibility chokepoint. Both audits
+(`npm audit`, `pip-audit`) run against **production** dependencies only —
+what actually ships, not what happens to be in a runner.
 
 CI installs the **same pinned pandoc `.deb`** the image does
 (`.github/scripts/install-pandoc.sh` and the `PANDOC_VERSION` arg in the

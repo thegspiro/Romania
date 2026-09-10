@@ -233,6 +233,36 @@ REQUIRE_TEST_DB=1 npm test
 CI sets it, so a pull request cannot go green with the visibility suites
 silently absent. Locally it is opt-in, and without it the skip still works.
 
+### Rules CI now enforces
+
+These were prose until they were checks. `.github/scripts/check-invariants.mjs`
+runs in the `node` job and fails on:
+
+- a `| safe` whose expression is not on its allowlist,
+- an inline `style=` attribute, or a `<script>` without a nonce,
+- a `visibility = '<literal>'` in a `.ts` file outside
+  `src/content/visibility.ts`.
+
+The last one takes an escape hatch, because not every match is a viewer
+decision -- an admin dashboard counting published items is not. Put
+`visibility-literal-ok: <reason>` on the line or in the comment block directly
+above it. An exception nobody wrote down is indistinguishable from a mistake,
+which is why a reason is required rather than a bare marker.
+
+Adding a `| safe` means editing `SAFE_ALLOWLIST` in that script. That friction
+is the point; do not widen the pattern to avoid it.
+
+`.github/scripts/check-migrations.sh` fails a pull request that modifies or
+deletes a migration already on `main`. Adding one is fine -- that is how the
+schema moves.
+
+Run both locally before pushing:
+
+```sh
+node .github/scripts/check-invariants.mjs
+./.github/scripts/check-migrations.sh origin/main
+```
+
 New or changed behaviour needs a test. Anything touching visibility, auth or
 SQL needs an integration test against a real database, because that is where
 the properties being asserted actually live.
@@ -270,9 +300,9 @@ the properties being asserted actually live.
 during an import. They must agree exactly, or the same title imported one way
 and typed the other produces two different URLs.
 
-The same fixture list is asserted in `tests/unit/slug.test.ts` and
-`worker/tests/test_bibliography_import.py`. **Change one, change both** — one
-of the two suites will fail otherwise, which is the point.
+Both suites read their cases from `tests/fixtures/slug-cases.json`. Editing
+that file changes both at once, so the two implementations cannot drift while
+both stay green — which two hand-kept copies could not actually guarantee.
 
 ---
 
