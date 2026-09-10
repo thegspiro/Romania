@@ -176,6 +176,10 @@ export async function registerAdminRoutes(
           pool,
           `SELECT
              SUM(kind = 'source') AS sources,
+             -- visibility-literal-ok: counts what is published for the admin
+             -- dashboard. Not a viewer decision -- this page is admin-only and
+             -- the number is the same whoever asks, so visibilityFilter would
+             -- be the wrong tool, not merely a heavier one.
              SUM(kind = 'source' AND visibility = 'public') AS publicSources,
              SUM(kind = 'essay') AS essays
            FROM content_item`,

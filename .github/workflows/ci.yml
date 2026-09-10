@@ -93,6 +93,12 @@ jobs:
       - name: Format
         run: npm run format:check
 
+      # The rules CLAUDE.md states in prose: what may bypass autoescaping, the
+      # CSP's ban on inline styles and un-nonced scripts, and the visibility
+      # chokepoint. Needs no database and no build, so it fails fast.
+      - name: Invariants
+        run: node .github/scripts/check-invariants.mjs
+
       # Before lint on purpose: both read tsconfig.typecheck.json, but on a
       # broken program tsc gives one located message where the typed ESLint
       # rules give a cascade. Running tsc first makes the clearer one win.
@@ -122,6 +128,36 @@ jobs:
       # each drops it; any parallelism is cross-file schema corruption.
       - name: Test
         run: npm test
+
+      # Production dependencies only: a dev-only advisory with no fix available
+      # would otherwise block every pull request for something that never
+      # reaches a server. high and above for the same reason -- a genuine
+      # high-severity vulnerability in shipped code SHOULD block a merge, and
+      # the answer when it does is to deal with the advisory, not to lower this
+      # number. Run plain `npm audit` periodically for the fuller picture.
+      - name: Audit dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  # Only on pull_request: a push to main has no base branch to diff against.
+  # Its own job rather than a step in `node`, because it is the one thing here
+  # that needs full history, and fetch-depth: 0 would slow that checkout for
+  # every other step that does not.
+  migrations:
+    name: migrations
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # The guard diffs against the merge base, so the base branch and the
+          # history back to it must actually be present.
+          fetch-depth: 0
+
+      - name: No applied migration was edited
+        run: .github/scripts/check-migrations.sh "origin/${{ github.base_ref }}"
 
   python:
     name: python
@@ -165,6 +201,19 @@ jobs:
       # the pandoc end-to-end case ran.
       - name: Test
         run: pytest -q -rs
+
+      # Audits what the image actually ships, derived from pyproject.toml the
+      # same way the Dockerfile derives it -- not whatever happens to be in this
+      # runner, which also holds pytest, ruff and pip-audit itself.
+      #
+      # Auditing the environment instead would need --skip-editable for the
+      # local package, and --strict counts a skip as a collection failure, so
+      # the two cannot be combined. Auditing the requirements sidesteps that and
+      # checks the more meaningful set.
+      - name: Audit dependencies
+        run: |
+          python3 -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']))" > /tmp/shipped.txt
+          pip-audit --strict --requirement /tmp/shipped.txt
 
   docker:
     name: docker

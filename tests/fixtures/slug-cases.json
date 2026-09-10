@@ -1,0 +1,15 @@
+{
+  "$comment": "Shared by tests/unit/slug.test.ts and worker/tests/test_bibliography_import.py. slugify exists in both TypeScript and Python because the worker creates sources during a bibliography import, and the two must agree exactly -- otherwise the same title imported one way and typed the other produces two different URLs. This file is the single source for the fixtures so the two cannot drift while both suites stay green.",
+  "cases": [
+    ["Anii Şcolii", "anii-scolii"],
+    ["Bănăţeanu", "banateanu"],
+    ["Iaşi", "iasi"],
+    ["Între Două Lumi", "intre-doua-lumi"],
+    ["Café de la Paix", "cafe-de-la-paix"],
+    ["Straße", "strasse"],
+    ["München", "muenchen"],
+    ["Bucureşti", "bucuresti"],
+    ["Ярославль", "yaroslavl"],
+    ["Ærø", "aero"]
+  ]
+}

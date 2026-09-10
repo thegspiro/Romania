@@ -112,7 +112,15 @@ but a disposable one.
 
 Ship a tested `.down.sql` with every `.up.sql`. Make up-migrations
 re-runnable. Never edit a migration that has been applied — the runner stores
-a checksum and will refuse to start.
+a checksum and will refuse to start, and CI now refuses first.
+
+### When a guard fires
+
+`check-invariants.mjs` and `check-migrations.sh` encode rules from
+`CLAUDE.md`. Satisfy the rule; do not widen the check to get past it. The one
+sanctioned escape is the `visibility-literal-ok: <reason>` marker, and it
+wants a real reason — an exception nobody wrote down is indistinguishable from
+a mistake.
 
 ---
 
@@ -152,7 +160,8 @@ Recorded so they are not rediscovered:
 - **BibTeX encodes diacritics as LaTeX commands.** Romanian titles import as
   `Anii \cScolii` unless `decode_latex` runs first.
 - **`slugify` exists in TypeScript and Python** and the two must agree
-  exactly. The same fixture list is asserted in both suites.
+  exactly. Both suites read `tests/fixtures/slug-cases.json`, so one edit
+  changes both — two hand-kept copies let them drift while both stayed green.
 - **Sentence boundaries cannot be found in raw Markdown.** A sentence
   routinely ends `.[[cite:x|45]]`, where the full stop is not followed by
   whitespace and so is invisible to a boundary search. `extractContext`
