@@ -112,15 +112,26 @@ WORKDIR /app
 
 # Python dependencies into a virtualenv so they cannot collide with the
 # distribution's system packages.
+#
+# The list is DERIVED from pyproject.toml rather than restated here. Two copies
+# of a dependency list drift, and the drift is silent until something fails at
+# runtime in the image but not in CI.
+#
+# Only [project].dependencies is read, so the dev extra (pytest, ruff) can
+# never reach the production image. Written to a requirements file rather than
+# expanded on the command line: the specifiers contain < and >, and a
+# newline-separated file leaves no question about how the shell splits them.
+#
+# Deliberately not `pip install .`: the worker package is not installed at all,
+# it is found on sys.path via WORKDIR /app. Installing it would ship a second
+# copy and force COPY worker above this layer, busting the cache on every
+# worker source edit.
 COPY pyproject.toml ./
 RUN python3 -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir \
-       "PyMySQL>=1.1.1,<2" \
-       "Pillow>=11.0.0,<12" \
-       "pypdfium2>=4.30.0,<5" \
-       "bibtexparser>=1.4.1,<2" \
-       "rispy>=0.9.0,<1" \
-       "requests>=2.32.3,<3"
+    && python3 -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']))" \
+         > /tmp/requirements.txt \
+    && /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt \
+    && rm -f /tmp/requirements.txt
 ENV PATH="/opt/venv/bin:${PATH}"
 
 # Application code. Ownership is set here rather than with a later chown, which
