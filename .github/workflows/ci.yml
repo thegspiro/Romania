@@ -93,6 +93,12 @@ jobs:
       - name: Format
         run: npm run format:check
 
+      # The rules CLAUDE.md states in prose: what may bypass autoescaping, the
+      # CSP's ban on inline styles and un-nonced scripts, and the visibility
+      # chokepoint. Needs no database and no build, so it fails fast.
+      - name: Invariants
+        run: node .github/scripts/check-invariants.mjs
+
       # Before lint on purpose: both read tsconfig.typecheck.json, but on a
       # broken program tsc gives one located message where the typed ESLint
       # rules give a cascade. Running tsc first makes the clearer one win.
