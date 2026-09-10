@@ -129,6 +129,27 @@ jobs:
       - name: Test
         run: npm test
 
+  # Only on pull_request: a push to main has no base branch to diff against.
+  # Its own job rather than a step in `node`, because it is the one thing here
+  # that needs full history, and fetch-depth: 0 would slow that checkout for
+  # every other step that does not.
+  migrations:
+    name: migrations
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # The guard diffs against the merge base, so the base branch and the
+          # history back to it must actually be present.
+          fetch-depth: 0
+
+      - name: No applied migration was edited
+        run: .github/scripts/check-migrations.sh "origin/${{ github.base_ref }}"
+
   python:
     name: python
     runs-on: ubuntu-latest
