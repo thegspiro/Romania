@@ -43,11 +43,16 @@
         </text>
       {% endfor %}
 
+      {#
+        An uncertain span is the window an event could have fallen in, not the
+        period it occupied, so it is drawn as an outline rather than a solid
+        bar. A reader must not mistake a bounded guess for a dated fact.
+      #}
       {% for span in band.spans %}
         <a href="{{ span.href }}">
           <title>{{ span.dateLabel }} — {{ span.title }}</title>
           <rect
-            class="band-span{% if span.visibility != 'public' %} band-span-private{% endif %}"
+            class="band-span{% if span.uncertain %} band-span-uncertain{% endif %}{% if span.visibility != 'public' %} band-span-private{% endif %}"
             x="{{ span.x }}"
             y="{{ span.y }}"
             width="{{ span.width }}"

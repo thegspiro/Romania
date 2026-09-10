@@ -61,24 +61,52 @@
       <fieldset>
         <legend>Event</legend>
         {{ ui.field('startDate', 'Start date', values, 'text', 'YYYY-MM-DD. For a year you only know as 1944, write 1944-01-01 and set the precision to Year.') }}
+        {{ ui.field('startTime', 'Start time', values, 'text', 'HH:MM, optional. Shown only at Hour or Minute precision.') }}
         {{ ui.choose('startPrecision', 'Start precision', values, [
           { value: 'unknown', label: 'Unknown' },
-          { value: 'day', label: 'Day' },
-          { value: 'month', label: 'Month' },
+          { value: 'decade', label: 'Decade' },
           { value: 'year', label: 'Year' },
-          { value: 'decade', label: 'Decade' }
-        ], 'How much of the date is actually known. 1944-01-01 at Year precision reads as "1944".') }}
+          { value: 'month', label: 'Month' },
+          { value: 'day', label: 'Day' },
+          { value: 'hour', label: 'Hour' },
+          { value: 'minute', label: 'Minute' }
+        ], 'How much of the instant is actually known. 1944-01-01 at Year reads as "1944"; 14:37 at Hour reads as "14:00", meaning that hour.') }}
         {{ ui.field('endDate', 'End date', values, 'text', 'YYYY-MM-DD. Leave blank for a single moment.') }}
+        {{ ui.field('endTime', 'End time', values, 'text', 'HH:MM, optional.') }}
         {{ ui.choose('endPrecision', 'End precision', values, [
           { value: '', label: 'Same as the start' },
           { value: 'unknown', label: 'Unknown' },
-          { value: 'day', label: 'Day' },
-          { value: 'month', label: 'Month' },
+          { value: 'decade', label: 'Decade' },
           { value: 'year', label: 'Year' },
-          { value: 'decade', label: 'Decade' }
+          { value: 'month', label: 'Month' },
+          { value: 'day', label: 'Day' },
+          { value: 'hour', label: 'Hour' },
+          { value: 'minute', label: 'Minute' }
         ], 'A range is often known at two different precisions: "from June 1943 until 1945".') }}
         {{ ui.check('isCirca', 'Approximate', values, 'Renders as "c. 1943". Approximate is not the same as imprecise: a date can be known to the day and still be a guess.') }}
         {{ ui.slugField('placeSlug', 'Place', values, 'place', "Start typing a place's name; the field stores its URL segment.") }}
+      </fieldset>
+
+      {#
+        Relative dating. Recorded as `happened_after` edges in the relationship
+        table, not as columns on the event -- so a contested ordering can be
+        kept private while both events it connects are published, and so it
+        appears in the network graph like any other asserted connection.
+
+        Both directions are edited from here because "X before Y" and
+        "Y after X" are one fact: making the operator record it from the other
+        event's page is how the direction gets written backwards.
+      #}
+      <fieldset>
+        <legend>Relative dating</legend>
+        <p class="hint">
+          For an event the sources will not date, but do place: it happened
+          after one thing and before another. The chronology puts it at the
+          start of that window and draws the whole window, so a reader can see
+          the uncertainty rather than take the position for a fact.
+        </p>
+        {{ ui.slugField('afterSlugs', 'Happened after', values, 'event', 'Start typing to pick an event. For more than one, type them comma separated.') }}
+        {{ ui.slugField('beforeSlugs', 'Happened before', values, 'event', 'Start typing to pick an event. For more than one, type them comma separated.') }}
       </fieldset>
     {% endif %}
 

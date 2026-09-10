@@ -25,9 +25,11 @@ import {
 import { makeEntity, makeEssay, makeManuscript } from './fixtures.js';
 import { ANONYMOUS, adminViewer } from '../../src/content/visibility.js';
 import {
+  findEventBoundSlugs,
   listEventsMentionedBy,
   listEventsRelatedTo,
   listTimeline,
+  setEventBounds,
 } from '../../src/content/timeline.js';
 import { createRelationship, listPredicates } from '../../src/content/relationships.js';
 import { deleteEntity, findEntityById, updateEntity } from '../../src/content/entities.js';
@@ -431,6 +433,204 @@ describe.skipIf(!available)('timeline', () => {
     expect(page.body).not.toContain('Unpublished incident');
     expect(page.body).not.toContain('unpublished-incident');
     expect(personId).toBeGreaterThan(0);
+  });
+
+  // --- Time of day ---------------------------------------------------------
+
+  it('records and renders a time when the precision claims one', async () => {
+    await makeEvent('An order signed', 'public', {
+      startDate: '1943-06-02',
+      startTime: '14:30',
+      startPrecision: 'minute',
+    });
+
+    const page = await anonymous('/events/an-order-signed');
+    expect(page.body).toContain('2 June 1943, 14:30');
+  });
+
+  it('does not show a stored time below hour precision', async () => {
+    await makeEvent('A day-long affair', 'public', {
+      startDate: '1943-06-02',
+      startTime: '14:30',
+      startPrecision: 'day',
+    });
+
+    const page = await anonymous('/events/a-day-long-affair');
+    expect(page.body).toContain('2 June 1943');
+    expect(page.body).not.toContain('14:30');
+  });
+
+  it('orders two events on the same day by the clock', async () => {
+    await makeEvent('The afternoon meeting', 'public', {
+      startDate: '1943-06-02',
+      startTime: '17:00',
+      startPrecision: 'minute',
+    });
+    await makeEvent('The morning meeting', 'public', {
+      startDate: '1943-06-02',
+      startTime: '09:00',
+      startPrecision: 'minute',
+    });
+
+    const result = await listTimeline(harness.pool, ANONYMOUS);
+    expect(result.items.map((entry) => entry.title)).toEqual([
+      'The morning meeting',
+      'The afternoon meeting',
+    ]);
+  });
+
+  // --- Relative dating -----------------------------------------------------
+
+  /** Records "event happens after `after`, and before `before`". */
+  async function bound(
+    eventId: number,
+    anchors: { after?: string[]; before?: string[] },
+    visibility: 'public' | 'private' = 'public',
+  ): Promise<void> {
+    await setEventBounds(harness.pool, eventId, {
+      afterSlugs: anchors.after ?? [],
+      beforeSlugs: anchors.before ?? [],
+      visibility,
+    });
+  }
+
+  it('places an undated event between the events that bound it', async () => {
+    await makeEvent('The pogrom', 'public', { startDate: '1941-06-29' });
+    await makeEvent('The armistice', 'public', { startDate: '1944-08-23' });
+    const contested = await makeEvent('A contested killing', 'public');
+    await bound(contested, { after: ['the-pogrom'], before: ['the-armistice'] });
+
+    const result = await listTimeline(harness.pool, ANONYMOUS);
+    // Sorted into the chronology at the start of its window, not dumped at
+    // the end with the genuinely unplaceable.
+    expect(result.items.map((entry) => entry.title)).toEqual([
+      'The pogrom',
+      'A contested killing',
+      'The armistice',
+    ]);
+
+    const entry = result.items[1];
+    expect(entry?.dateLabel).toBe('after The pogrom, before The armistice');
+    expect(entry?.bounds?.earliest).toBe('1941-06-29');
+    expect(entry?.bounds?.latest).toBe('1944-08-23');
+  });
+
+  it('draws a bounded event as an uncertainty span', async () => {
+    await makeEvent('The pogrom', 'public', { startDate: '1941-06-29' });
+    await makeEvent('The armistice', 'public', { startDate: '1944-08-23' });
+    const contested = await makeEvent('A contested killing', 'public');
+    await bound(contested, { after: ['the-pogrom'], before: ['the-armistice'] });
+
+    const page = await anonymous('/timeline');
+    expect(page.body).toContain('band-span-uncertain');
+    expect(page.body).toContain('after The pogrom, before The armistice');
+  });
+
+  it('shows the bounds on the event page', async () => {
+    await makeEvent('The pogrom', 'public', { startDate: '1941-06-29' });
+    const contested = await makeEvent('A contested killing', 'public');
+    await bound(contested, { after: ['the-pogrom'] });
+
+    const page = await anonymous('/events/a-contested-killing');
+    expect(page.body).toContain('The pogrom');
+    expect(page.body).toContain('/events/the-pogrom');
+  });
+
+  it('does not let a private anchor place a public event', async () => {
+    // The disclosure this guards: if the window were computed and *then*
+    // filtered, a public event would sit at a private event's date on the
+    // band, which gives that date away without ever naming it.
+    await makeEvent('Unpublished incident', 'private', { startDate: '1941-06-29' });
+    const contested = await makeEvent('A contested killing', 'public');
+    await bound(contested, { after: ['unpublished-incident'] });
+
+    const anonymousResult = await listTimeline(harness.pool, ANONYMOUS);
+    const entry = anonymousResult.items.find((item) => item.title === 'A contested killing');
+    expect(entry?.bounds).toBeNull();
+    expect(entry?.dateLabel).toBe('Undated');
+
+    const page = await anonymous('/timeline');
+    expect(page.body).not.toContain('Unpublished incident');
+    expect(page.body).not.toContain('unpublished-incident');
+    expect(page.body).not.toContain('1941');
+
+    // The administrator sees the bound and the position it implies.
+    const asAdmin = await listTimeline(harness.pool, adminViewer(harness.userId));
+    const adminEntry = asAdmin.items.find((item) => item.title === 'A contested killing');
+    expect(adminEntry?.bounds?.earliest).toBe('1941-06-29');
+  });
+
+  it('does not let a private bound place a public event', async () => {
+    await makeEvent('The pogrom', 'public', { startDate: '1941-06-29' });
+    const contested = await makeEvent('A contested killing', 'public');
+    // Both events published, the claim connecting them not.
+    await bound(contested, { after: ['the-pogrom'] }, 'private');
+
+    const result = await listTimeline(harness.pool, ANONYMOUS);
+    const entry = result.items.find((item) => item.title === 'A contested killing');
+    expect(entry?.bounds).toBeNull();
+
+    const asAdmin = await listTimeline(harness.pool, adminViewer(harness.userId));
+    const adminEntry = asAdmin.items.find((item) => item.title === 'A contested killing');
+    expect(adminEntry?.bounds?.earliest).toBe('1941-06-29');
+  });
+
+  it('ignores an anchor that is itself undated rather than chasing a chain', async () => {
+    await makeEvent('Also undated', 'public');
+    const contested = await makeEvent('A contested killing', 'public');
+    await bound(contested, { after: ['also-undated'] });
+
+    const result = await listTimeline(harness.pool, ANONYMOUS);
+    const entry = result.items.find((item) => item.title === 'A contested killing');
+    // The anchor is named, because that is a real claim about ordering; the
+    // window is empty, because nothing dates it.
+    expect(entry?.bounds?.earliest).toBeNull();
+    expect(entry?.dateLabel).toBe('after Also undated');
+  });
+
+  it('takes the tightest window when several anchors bound one event', async () => {
+    await makeEvent('Early', 'public', { startDate: '1940-01-01' });
+    await makeEvent('Later', 'public', { startDate: '1942-01-01' });
+    await makeEvent('Latest', 'public', { startDate: '1945-01-01' });
+    const contested = await makeEvent('A contested killing', 'public');
+    await bound(contested, { after: ['early', 'later'], before: ['latest'] });
+
+    const result = await listTimeline(harness.pool, ANONYMOUS);
+    const entry = result.items.find((item) => item.title === 'A contested killing');
+    // The latest lower bound and the earliest upper bound are the ones that
+    // actually narrow it, and the label names them.
+    expect(entry?.bounds?.earliest).toBe('1942-01-01');
+    expect(entry?.bounds?.latest).toBe('1945-01-01');
+    expect(entry?.dateLabel).toBe('after Later, before Latest');
+  });
+
+  it('replaces bounds wholesale rather than accumulating them', async () => {
+    await makeEvent('The pogrom', 'public', { startDate: '1941-06-29' });
+    await makeEvent('The armistice', 'public', { startDate: '1944-08-23' });
+    const contested = await makeEvent('A contested killing', 'public');
+
+    await bound(contested, { after: ['the-pogrom'] });
+    await bound(contested, { after: ['the-armistice'] });
+
+    const stored = await findEventBoundSlugs(harness.pool, contested);
+    expect(stored.afterSlugs).toEqual(['the-armistice']);
+    expect(stored.beforeSlugs).toEqual([]);
+  });
+
+  it('reports a slug that names no event instead of failing the save', async () => {
+    const contested = await makeEvent('A contested killing', 'public');
+    const result = await setEventBounds(harness.pool, contested, {
+      afterSlugs: ['no-such-event'],
+      beforeSlugs: [],
+      visibility: 'public',
+    });
+    expect(result.unresolved).toEqual(['no-such-event']);
+  });
+
+  it('refuses to bound an event against itself', async () => {
+    const contested = await makeEvent('A contested killing', 'public');
+    await bound(contested, { after: ['a-contested-killing'] });
+    expect((await findEventBoundSlugs(harness.pool, contested)).afterSlugs).toEqual([]);
   });
 
   // --- The admin form ------------------------------------------------------

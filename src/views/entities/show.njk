@@ -64,6 +64,34 @@
           #}
           {% if event %}
             <dt>Date</dt><dd>{{ event.dateLabel }}</dd>
+            {#
+              What the sources support when they will not give a date: the
+              events this one is known to sit between. Every anchor here
+              survived the viewer's filter, on the edge and on the anchor
+              event alike, so naming one discloses nothing.
+            #}
+            {% if event.bounds %}
+              {% if event.bounds.after.length > 0 %}
+                <dt>After</dt>
+                <dd>
+                  {% for anchor in event.bounds.after %}
+                    <a href="{{ anchor.href }}">{{ anchor.title }}</a>{% if anchor.dateLabel %}
+                      <span class="muted small">({{ anchor.dateLabel }})</span>
+                    {% endif %}{% if not loop.last %}; {% endif %}
+                  {% endfor %}
+                </dd>
+              {% endif %}
+              {% if event.bounds.before.length > 0 %}
+                <dt>Before</dt>
+                <dd>
+                  {% for anchor in event.bounds.before %}
+                    <a href="{{ anchor.href }}">{{ anchor.title }}</a>{% if anchor.dateLabel %}
+                      <span class="muted small">({{ anchor.dateLabel }})</span>
+                    {% endif %}{% if not loop.last %}; {% endif %}
+                  {% endfor %}
+                </dd>
+              {% endif %}
+            {% endif %}
             {% if event.place %}
               <dt>Place</dt><dd><a href="{{ event.place.href }}">{{ event.place.title }}</a></dd>
             {% endif %}

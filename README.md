@@ -30,7 +30,7 @@ What is built and working:
 | **People, organizations, places, events** — admin CRUD and public pages   | Complete                                                                                                            |
 | **Artifacts** — catalogue records, file upload, access-controlled serving | Complete                                                                                                            |
 | **Inline references and backlinks** — "everywhere this person is named"   | Complete (a backlink lands on the paragraph that named the subject)                                                 |
-| **Timeline** — chronology page, per-subject chronologies, blocks in prose | Complete                                                                                                            |
+| **Timeline** — chronology page, per-subject chronologies, blocks in prose | Complete (optional times; a contested event placed by "after X, before Y")                                          |
 | **Manuscripts** — nested outline, prev/next navigation, reusable sections | Complete                                                                                                            |
 | **Compilation** — Pandoc to PDF, DOCX, HTML, LaTeX, per audience          | Complete                                                                                                            |
 | **Relationship graph** — typed edges plus mentions, Cytoscape             | Complete                                                                                                            |

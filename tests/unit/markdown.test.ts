@@ -324,12 +324,15 @@ describe('timeline blocks', () => {
     dates: {
       startDate: '1941-06-29',
       endDate: null,
+      startTime: null,
+      endTime: null,
       startPrecision: 'day',
       endPrecision: 'unknown',
       isCirca: false,
     },
     dateLabel: '29 June 1941',
     place: null,
+    bounds: null,
   };
 
   function withEntries(markdown: string, entries: TimelineEntry[]) {

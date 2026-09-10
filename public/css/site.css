@@ -1009,6 +1009,25 @@ button.danger {
   fill: var(--ink-muted);
 }
 
+/* The window a bounded event could have fallen in, not a period it occupied.
+   Outlined rather than filled, so it cannot be read as a dated fact. */
+.band-span-uncertain {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 2;
+}
+
+.band-span-uncertain.band-span-private {
+  stroke: var(--ink-muted);
+}
+
+.timeline-band a:hover .band-span-uncertain,
+.timeline-band a:focus .band-span-uncertain {
+  fill: var(--accent-soft);
+  stroke: var(--ink);
+}
+
 .timeline-band a:hover .band-span,
 .timeline-band a:focus .band-span {
   fill: var(--ink);

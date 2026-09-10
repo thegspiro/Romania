@@ -90,6 +90,16 @@ walk in `src/content/markdown.ts`; do not add a second.
 - An event's **place is joined with the viewer's filter in the ON clause**, so
   a private place makes the place disappear, never the event. The result is
   indistinguishable from an event that was never given one.
+- The precision ladder covers the clock too (`hour`, `minute`). A time is
+  stored nullable and shown only when the precision reaches it, so coarsening
+  an event's precision withdraws the claim without losing the value.
+- An event the sources will not date but do **place** carries `happened_after`
+  edges instead. The chronology puts it at the start of the window its visible
+  anchors allow and draws the whole window, marked as uncertain, so a reader
+  cannot mistake it for a dated fact. Bounds are filtered on the edge **and**
+  the anchor _before_ the window is computed: filtering afterwards would leave
+  a private event's date deciding where a public one sits on the band, which
+  discloses it without ever naming it.
 
 Prose may embed a chronology as a fenced ```timeline block, resolved by
 `resolveTimelines` before rendering — the same shape as `resolveForRender`, so

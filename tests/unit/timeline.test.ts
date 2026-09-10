@@ -10,14 +10,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   UNDATED_LABEL,
+  claimsTime,
   eventEndYear,
   eventYear,
+  formatEventBounds,
   formatEventDate,
   layoutTimelineBand,
   normaliseBoundary,
+  parseSlugList,
   parseTimelineDirective,
   sortEntries,
   timelineDirectiveKey,
+  type EventBoundAnchor,
   type EventDates,
   type TimelineEntry,
 } from '../../src/content/timeline.js';
@@ -26,6 +30,8 @@ function dates(overrides: Partial<EventDates> = {}): EventDates {
   return {
     startDate: null,
     endDate: null,
+    startTime: null,
+    endTime: null,
     startPrecision: 'unknown',
     endPrecision: 'unknown',
     isCirca: false,
@@ -111,6 +117,113 @@ describe('formatEventDate', () => {
 
   it('says so when there is no date at all', () => {
     expect(formatEventDate(dates())).toBe(UNDATED_LABEL);
+  });
+});
+
+describe('time of day', () => {
+  it('shows the clock at minute precision', () => {
+    expect(
+      formatEventDate(
+        dates({ startDate: '1943-06-02', startTime: '14:30', startPrecision: 'minute' }),
+      ),
+    ).toBe('2 June 1943, 14:30');
+  });
+
+  it('truncates to the hour at hour precision', () => {
+    // The same rule the date follows: the stored value is read only as far as
+    // the precision claims, so 14:37 at Hour means the 14:00 hour.
+    expect(
+      formatEventDate(
+        dates({ startDate: '1943-06-02', startTime: '14:37', startPrecision: 'hour' }),
+      ),
+    ).toBe('2 June 1943, 14:00');
+  });
+
+  it('hides a stored time below hour precision', () => {
+    // A time can be left in the column by an edit that coarsened the
+    // precision; showing it would claim a certainty that was withdrawn.
+    expect(
+      formatEventDate(
+        dates({ startDate: '1943-06-02', startTime: '14:30', startPrecision: 'day' }),
+      ),
+    ).toBe('2 June 1943');
+    expect(claimsTime('day')).toBe(false);
+    expect(claimsTime('hour')).toBe(true);
+    expect(claimsTime('minute')).toBe(true);
+  });
+
+  it('falls back to the date when the precision claims a time and none is stored', () => {
+    expect(formatEventDate(dates({ startDate: '1943-06-02', startPrecision: 'minute' }))).toBe(
+      '2 June 1943',
+    );
+  });
+
+  it('carries a time on each end of a range', () => {
+    expect(
+      formatEventDate(
+        dates({
+          startDate: '1943-06-02',
+          startTime: '09:00',
+          startPrecision: 'minute',
+          endDate: '1943-06-02',
+          endTime: '17:15',
+          endPrecision: 'minute',
+        }),
+      ),
+    ).toBe('2 June 1943, 09:00 – 2 June 1943, 17:15');
+  });
+});
+
+describe('formatEventBounds', () => {
+  function anchor(title: string): EventBoundAnchor {
+    return { id: 1, title, href: '/events/x', dateLabel: null };
+  }
+
+  it('reads as the sources do', () => {
+    expect(
+      formatEventBounds({
+        after: [anchor('the Iasi pogrom')],
+        before: [anchor('the armistice')],
+        earliest: '1941-06-29',
+        latest: '1944-08-23',
+      }),
+    ).toBe('after the Iasi pogrom, before the armistice');
+  });
+
+  it('states only the end it knows', () => {
+    expect(
+      formatEventBounds({
+        after: [anchor('the pogrom')],
+        before: [],
+        earliest: null,
+        latest: null,
+      }),
+    ).toBe('after the pogrom');
+    expect(
+      formatEventBounds({
+        after: [],
+        before: [anchor('the armistice')],
+        earliest: null,
+        latest: null,
+      }),
+    ).toBe('before the armistice');
+  });
+
+  it('is null when nothing places the event', () => {
+    expect(formatEventBounds({ after: [], before: [], earliest: null, latest: null })).toBeNull();
+  });
+});
+
+describe('parseSlugList', () => {
+  it('splits on commas and whitespace', () => {
+    expect(parseSlugList('the-pogrom, the-armistice')).toEqual(['the-pogrom', 'the-armistice']);
+    expect(parseSlugList('one two')).toEqual(['one', 'two']);
+  });
+
+  it('drops anything that is not a slug', () => {
+    expect(parseSlugList('Good Slug?, real-slug')).toEqual(['real-slug']);
+    expect(parseSlugList('')).toEqual([]);
+    expect(parseSlugList(undefined)).toEqual([]);
   });
 });
 
@@ -204,6 +317,7 @@ function entry(id: number, overrides: Partial<TimelineEntry> = {}): TimelineEntr
     dates: entryDates,
     dateLabel: formatEventDate(entryDates),
     place: null,
+    bounds: null,
     ...overrides,
   };
 }
@@ -223,6 +337,30 @@ describe('sortEntries', () => {
     const ordered = sortEntries([
       entry(1, { dates: dates({ startDate: '1940-01-01', startPrecision: 'year' }) }),
       entry(2, { dates: dates({ startDate: '1940-01-01', startPrecision: 'decade' }) }),
+    ]);
+    expect(ordered.map((item) => item.id)).toEqual([2, 1]);
+  });
+
+  it('sorts a bounded event at the start of its window', () => {
+    const ordered = sortEntries([
+      entry(1, { dates: dates({ startDate: '1945-01-01', startPrecision: 'year' }) }),
+      entry(2, {
+        bounds: { after: [], before: [], earliest: '1941-06-29', latest: '1944-08-23' },
+      }),
+      entry(3, { dates: dates({ startDate: '1940-01-01', startPrecision: 'year' }) }),
+    ]);
+    // Not shoved to the end with the undated: it is placed, just not precisely.
+    expect(ordered.map((item) => item.id)).toEqual([3, 2, 1]);
+  });
+
+  it('breaks a tie on the same day by the clock', () => {
+    const ordered = sortEntries([
+      entry(1, {
+        dates: dates({ startDate: '1943-06-02', startTime: '17:00', startPrecision: 'minute' }),
+      }),
+      entry(2, {
+        dates: dates({ startDate: '1943-06-02', startTime: '09:00', startPrecision: 'minute' }),
+      }),
     ]);
     expect(ordered.map((item) => item.id)).toEqual([2, 1]);
   });
@@ -288,6 +426,43 @@ describe('layoutTimelineBand', () => {
 
     const rows = new Set(band?.spans.map((span) => span.y));
     expect(rows.size).toBe(2);
+  });
+
+  it('draws a bounded event across its whole window, marked uncertain', () => {
+    const band = layoutTimelineBand([
+      entry(1, {
+        bounds: {
+          after: [{ id: 9, title: 'A', href: '/events/a', dateLabel: '1941' }],
+          before: [{ id: 8, title: 'B', href: '/events/b', dateLabel: '1944' }],
+          earliest: '1941-06-29',
+          latest: '1944-08-23',
+        },
+      }),
+    ]);
+
+    const span = band?.spans[0];
+    // The window, not a point: the event is somewhere in there and the
+    // sources do not say where.
+    expect(span?.startYear).toBe(1941);
+    expect(span?.endYear).toBe(1944);
+    expect(span?.uncertain).toBe(true);
+    expect(band?.undated).toBe(0);
+  });
+
+  it('marks a dated event as certain', () => {
+    const band = layoutTimelineBand([
+      entry(1, { dates: dates({ startDate: '1943-01-01', startPrecision: 'year' }) }),
+    ]);
+    expect(band?.spans[0]?.uncertain).toBe(false);
+  });
+
+  it('leaves an event with neither date nor bounds off the drawing', () => {
+    const band = layoutTimelineBand([
+      entry(1, { dates: dates({ startDate: '1943-01-01', startPrecision: 'year' }) }),
+      entry(2),
+    ]);
+    expect(band?.spans).toHaveLength(1);
+    expect(band?.undated).toBe(1);
   });
 
   it('carries the private flag through so the drawing can mark it', () => {

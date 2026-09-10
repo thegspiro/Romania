@@ -126,6 +126,25 @@ function isoDate(value: string | undefined): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
 }
 
+/**
+ * A clock time from the form, as 'HH:MM'.
+ *
+ * Anything else is discarded rather than rejected, the same way `isoDate`
+ * treats a malformed date: a blank field and a typo both mean "no time was
+ * recorded", and neither should stop the event being saved.
+ */
+function clockTime(value: string | undefined): string | null {
+  const trimmed = (value ?? '').trim();
+  const match = /^(\d{1,2}):(\d{2})$/.exec(trimmed);
+  if (match === null) return null;
+
+  const [, hour, minute] = match;
+  if (hour === undefined || minute === undefined) return null;
+  if (Number(hour) > 23 || Number(minute) > 59) return null;
+
+  return `${hour.padStart(2, '0')}:${minute}`;
+}
+
 /** A posted checkbox: present and not "off" means checked. */
 function readBoolean(value: string | undefined): boolean {
   const trimmed = (value ?? '').trim().toLowerCase();
@@ -190,16 +209,17 @@ const DETAIL_SPECS: Readonly<Record<EntityKind, DetailSpec>> = Object.freeze({
   },
   event: {
     select:
-      'd.start_date, d.end_date, d.date_precision, d.start_precision, d.end_precision, ' +
-      'd.is_circa, d.body_markdown, d.place_item_id',
+      'd.start_date, d.end_date, d.start_time, d.end_time, d.date_precision, ' +
+      'd.start_precision, d.end_precision, d.is_circa, d.body_markdown, d.place_item_id',
     join: 'LEFT JOIN event_detail d ON d.content_item_id = ci.id',
     insert: `INSERT INTO event_detail
-               (content_item_id, start_date, end_date, date_precision, start_precision,
-                end_precision, is_circa, body_markdown, place_item_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               (content_item_id, start_date, end_date, start_time, end_time, date_precision,
+                start_precision, end_precision, is_circa, body_markdown, place_item_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     update: `UPDATE event_detail
-                SET start_date = ?, end_date = ?, date_precision = ?, start_precision = ?,
-                    end_precision = ?, is_circa = ?, body_markdown = ?, place_item_id = ?
+                SET start_date = ?, end_date = ?, start_time = ?, end_time = ?,
+                    date_precision = ?, start_precision = ?, end_precision = ?,
+                    is_circa = ?, body_markdown = ?, place_item_id = ?
               WHERE content_item_id = ?`,
     params: async (input, connection) => {
       const startPrecision = precisionOr(input.startPrecision ?? input.datePrecision);
@@ -225,11 +245,19 @@ const DETAIL_SPECS: Readonly<Record<EntityKind, DetailSpec>> = Object.freeze({
       const end = isoDate(input.endDate);
       // The CHECK constraint requires end >= start; swapping is friendlier
       // than refusing, and the operator sees the result immediately.
-      const ordered = start !== null && end !== null && end < start ? [end, start] : [start, end];
+      const swap = start !== null && end !== null && end < start;
+      const ordered = swap ? [end, start] : [start, end];
+      // The times travel with the dates they belong to, or the swap above
+      // would leave 14:30 attached to the wrong endpoint.
+      const startTime = clockTime(input.startTime);
+      const endTime = clockTime(input.endTime);
+      const orderedTimes = swap ? [endTime, startTime] : [startTime, endTime];
 
       return [
         ordered[0] ?? null,
         ordered[1] ?? null,
+        orderedTimes[0] ?? null,
+        orderedTimes[1] ?? null,
         // `date_precision` predates the per-endpoint pair and is still read by
         // anything written before them. Keeping it equal to the start's
         // precision keeps it a true answer to the question it always answered,
@@ -245,6 +273,9 @@ const DETAIL_SPECS: Readonly<Record<EntityKind, DetailSpec>> = Object.freeze({
     fromRow: (row) => ({
       startDate: row.start_date === null ? null : String(row.start_date).slice(0, 10),
       endDate: row.end_date === null ? null : String(row.end_date).slice(0, 10),
+      // TIME comes back as 'HH:MM:SS'; the form field takes 'HH:MM'.
+      startTime: row.start_time === null ? null : String(row.start_time).slice(0, 5),
+      endTime: row.end_time === null ? null : String(row.end_time).slice(0, 5),
       datePrecision: (row.date_precision as string) ?? 'unknown',
       startPrecision: (row.start_precision as string) ?? 'unknown',
       endPrecision: (row.end_precision as string) ?? 'unknown',
