@@ -381,13 +381,18 @@ both stay green — which two hand-kept copies could not actually guarantee.
 Maps (Leaflet is vendored and `place_detail` carries coordinates); public
 downloads of compiled documents (`manuscript_build.audience` is what makes
 that a config change rather than a rewrite); search beyond `LIKE`; an S3
-storage backend; Zotero sync.
+storage backend.
 
-The last two are the first genuine **side-cart** candidates — a search service
-such as Meilisearch, and a Zotero sync service. Nothing needs one today:
-Pandoc and Tectonic are already in the image and MySQL handles the graph
-queries at this scale. Reach for a separate service only when something truly
-cannot live in the application, not to avoid writing a query.
+A search service such as Meilisearch is the one remaining **side-cart**
+candidate, and nothing needs it today: Pandoc and Tectonic are already in the
+image and MySQL handles the graph queries at this scale. Reach for a separate
+service only when something truly cannot live in the application, not to avoid
+writing a query.
+
+Zotero sync used to be listed here as the other candidate. It shipped as a
+worker job instead -- one handler, one migration, no new service -- which is
+the precedent: the job queue and the worker are where an integration goes
+until it demonstrably cannot fit there.
 
 Each is its own change set. Keep them that way — the point of the content
 model is that they are additive.
