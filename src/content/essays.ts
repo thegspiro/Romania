@@ -232,7 +232,10 @@ export async function createEssay(pool: Pool, input: EssayInput): Promise<EssayW
     );
 
     // Same transaction as the body: the projections cannot describe an older
-    // version of the text than the one just stored.
+    // version of the text than the one just stored. The revision is written
+    // here for the same reason -- a history that is not atomic with the save
+    // can record text that was never committed.
+    await writeRevision(connection, id, 1, input, { source: 'save', restoredFrom: null });
     const references = await rebuildReferences(connection, id, input.bodyMarkdown);
     return { id, references };
   });
@@ -242,11 +245,20 @@ export async function updateEssay(
   pool: Pool,
   id: number,
   input: EssayInput,
+  provenance?: RevisionProvenance,
 ): Promise<EssayWriteResult | null> {
   return withTransaction(pool, async (connection) => {
-    const existing = await queryOne<RowDataPacket & { id: number }>(
+    // The lock this takes is what serialises revision numbering: two saves
+    // cannot both read the same highest number and claim it.
+    const existing = await queryOne<
+      RowDataPacket & { id: number; title: string; body_markdown: string; status: EssayStatus }
+    >(
       connection,
-      `SELECT id FROM content_item WHERE id = ? AND kind = 'essay' FOR UPDATE`,
+      `SELECT ci.id, ci.title, ed.body_markdown, ed.status
+         FROM content_item ci
+         JOIN essay_detail ed ON ed.content_item_id = ci.id
+        WHERE ci.id = ? AND ci.kind = 'essay'
+        FOR UPDATE`,
       [id],
     );
     if (existing === null) return null;
@@ -279,6 +291,22 @@ export async function updateEssay(
         WHERE content_item_id = ?`,
       [input.bodyMarkdown, input.status, countWords(input.bodyMarkdown), id],
     );
+
+    // Only a save that changed something the history records earns a
+    // revision. Pressing Save twice on an untouched form would otherwise
+    // fill the list with identical entries and bury the real edits.
+    const changed =
+      existing.title !== input.title.trim() ||
+      existing.body_markdown !== input.bodyMarkdown ||
+      existing.status !== input.status;
+
+    if (changed) {
+      const next = (await highestRevisionNumber(connection, id)) + 1;
+      await writeRevision(connection, id, next, input, {
+        source: provenance?.source ?? 'save',
+        restoredFrom: provenance?.restoredFrom ?? null,
+      });
+    }
 
     const references = await rebuildReferences(connection, id, input.bodyMarkdown);
     return { id, references };
@@ -329,4 +357,171 @@ export async function deleteEssay(
     );
     return result.affectedRows > 0 ? 'deleted' : 'not_found';
   });
+}
+
+// --- Revisions --------------------------------------------------------------
+
+/**
+ * Version history for essay prose.
+ *
+ * Prose is the only thing here that exists nowhere else. A source can be
+ * re-imported from Zotero and an artifact re-read from its file; a paragraph
+ * overwritten by accident is gone. Every save that changes the title, the body
+ * or the status appends a snapshot, in the same transaction as the change.
+ *
+ * Nothing updates or deletes a revision. Restoring one writes a *new* revision
+ * holding the old text, so both the mistake and its correction survive -- and
+ * because a restore goes through `updateEssay`, `rebuildReferences` runs over
+ * the restored prose like any other save.
+ *
+ * These reads take no `Viewer`. A revision is unpublished draft text by
+ * definition, the routes that reach them are behind the admin guard, and there
+ * is deliberately no public path to one: adding a viewer parameter would
+ * suggest there could be.
+ */
+export type RevisionSource = 'save' | 'restore';
+
+export interface RevisionProvenance {
+  source: RevisionSource;
+  /** For a restore, the revision number the text was taken from. */
+  restoredFrom: number | null;
+}
+
+export interface EssayRevision {
+  id: number;
+  essayId: number;
+  revisionNumber: number;
+  title: string;
+  bodyMarkdown: string;
+  status: EssayStatus;
+  wordCount: number;
+  source: RevisionSource;
+  restoredFrom: number | null;
+  createdAt: Date;
+}
+
+/** Everything but the body, for a listing that must not load a whole corpus. */
+export type EssayRevisionSummary = Omit<EssayRevision, 'bodyMarkdown'>;
+
+const REVISION_COLUMNS = `
+  id, content_item_id, revision_number, title, status, word_count,
+  source, restored_from, created_at
+`;
+
+function toRevisionSummary(row: RowDataPacket): EssayRevisionSummary {
+  return {
+    id: Number(row.id),
+    essayId: Number(row.content_item_id),
+    revisionNumber: Number(row.revision_number),
+    title: String(row.title),
+    status: row.status as EssayStatus,
+    wordCount: Number(row.word_count ?? 0),
+    source: row.source as RevisionSource,
+    restoredFrom: row.restored_from === null ? null : Number(row.restored_from),
+    createdAt: row.created_at as Date,
+  };
+}
+
+async function highestRevisionNumber(connection: PoolConnection, essayId: number): Promise<number> {
+  const row = await queryOne<RowDataPacket & { highest: number | null }>(
+    connection,
+    'SELECT MAX(revision_number) AS highest FROM essay_revision WHERE content_item_id = ?',
+    [essayId],
+  );
+  return Number(row?.highest ?? 0);
+}
+
+async function writeRevision(
+  connection: PoolConnection,
+  essayId: number,
+  revisionNumber: number,
+  input: EssayInput,
+  provenance: RevisionProvenance,
+): Promise<void> {
+  await execute(
+    connection,
+    `INSERT INTO essay_revision
+       (content_item_id, revision_number, title, body_markdown, status,
+        word_count, source, restored_from)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      essayId,
+      revisionNumber,
+      input.title.trim(),
+      input.bodyMarkdown,
+      input.status,
+      countWords(input.bodyMarkdown),
+      provenance.source,
+      provenance.restoredFrom,
+    ],
+  );
+}
+
+/** Newest first. The body is left out; a list of chapters would be megabytes. */
+export async function listEssayRevisions(
+  db: Pool | PoolConnection,
+  essayId: number,
+  limit = 100,
+): Promise<EssayRevisionSummary[]> {
+  const rows = await queryRows<RowDataPacket>(
+    db,
+    `SELECT ${REVISION_COLUMNS} FROM essay_revision
+      WHERE content_item_id = ?
+      ORDER BY revision_number DESC
+      ${limitOffsetClause(Math.min(Math.max(limit, 1), 500), 0)}`,
+    [essayId],
+  );
+  return rows.map(toRevisionSummary);
+}
+
+export async function countEssayRevisions(
+  db: Pool | PoolConnection,
+  essayId: number,
+): Promise<number> {
+  const row = await queryOne<RowDataPacket & { total: number }>(
+    db,
+    'SELECT COUNT(*) AS total FROM essay_revision WHERE content_item_id = ?',
+    [essayId],
+  );
+  return Number(row?.total ?? 0);
+}
+
+/** One revision, body included. Addressed by number, which is what the URL carries. */
+export async function findEssayRevision(
+  db: Pool | PoolConnection,
+  essayId: number,
+  revisionNumber: number,
+): Promise<EssayRevision | null> {
+  const row = await queryOne<RowDataPacket>(
+    db,
+    `SELECT ${REVISION_COLUMNS}, body_markdown FROM essay_revision
+      WHERE content_item_id = ? AND revision_number = ?`,
+    [essayId, revisionNumber],
+  );
+  if (row === null) return null;
+  return { ...toRevisionSummary(row), bodyMarkdown: String(row.body_markdown ?? '') };
+}
+
+/**
+ * The revision immediately before `revisionNumber`, for the comparison view.
+ *
+ * Not `revisionNumber - 1`: numbers are contiguous today, but reading the
+ * previous row by ordering keeps the comparison correct if a future change
+ * ever leaves a gap.
+ */
+export async function findPreviousRevision(
+  db: Pool | PoolConnection,
+  essayId: number,
+  revisionNumber: number,
+): Promise<EssayRevision | null> {
+  const row = await queryOne<RowDataPacket>(
+    db,
+    `SELECT ${REVISION_COLUMNS}, body_markdown FROM essay_revision
+      WHERE content_item_id = ? AND revision_number < ?
+      ORDER BY revision_number DESC
+      LIMIT 1`,
+    [essayId, revisionNumber],
+  );
+  if (row === null) return null;
+  return { ...toRevisionSummary(row), bodyMarkdown: String(row.body_markdown ?? '') };
 }

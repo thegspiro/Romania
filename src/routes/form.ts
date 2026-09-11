@@ -105,6 +105,10 @@ export const FLASH_MESSAGES: Readonly<Record<string, Flash>> = Object.freeze({
   essay_created: { kind: 'success', text: 'Essay created.' },
   essay_updated: { kind: 'success', text: 'Essay saved.' },
   essay_deleted: { kind: 'success', text: 'Essay deleted.' },
+  essay_restored: {
+    kind: 'success',
+    text: 'Revision restored as a new revision. The earlier text is still in the history.',
+  },
 
   artifact_created: { kind: 'success', text: 'Artifact created.' },
   artifact_updated: { kind: 'success', text: 'Artifact saved.' },

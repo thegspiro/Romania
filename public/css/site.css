@@ -315,6 +315,92 @@ h2 {
   margin: 0;
 }
 
+/* --- Revision comparison ------------------------------------------------- */
+
+.diff {
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  /* A long line of prose scrolls inside the diff rather than widening the
+     page. Only this container may scroll sideways. */
+  overflow-x: auto;
+}
+
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.diff-row td {
+  padding: 0 0.5rem;
+  vertical-align: top;
+}
+
+.diff-number {
+  width: 3rem;
+  text-align: right;
+  color: var(--ink-muted);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.diff-marker {
+  width: 1rem;
+  text-align: center;
+  user-select: none;
+}
+
+.diff-text {
+  width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diff-added {
+  background: var(--ok-soft);
+}
+
+.diff-removed {
+  background: var(--warn-soft);
+}
+
+.diff-skip {
+  margin: 0;
+  padding: 0.25rem 0.75rem;
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+  color: var(--ink-muted);
+  background: var(--accent-soft);
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+
+.diff-count {
+  font-family: var(--mono);
+  font-size: 0.875rem;
+}
+
+.diff-count-added {
+  color: var(--ok);
+}
+
+.diff-count-removed {
+  color: var(--warn);
+}
+
+.revision-body {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .flash {
   font-family: var(--sans);
   font-size: 0.9375rem;

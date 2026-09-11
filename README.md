@@ -27,6 +27,7 @@ What is built and working:
 | Schema for all entity types                                               | Complete (sources, artifacts, essays, people, organizations, places, events, relationships, citations, tags, files) |
 | **Sources** — admin CRUD, publish/unpublish, public pages                 | Complete                                                                                                            |
 | **Essays** — Markdown editor, reference picker, server-rendered preview   | Complete                                                                                                            |
+| **Revision history** — every save recorded, compared and restorable       | Complete (append-only; restoring writes a new revision)                                                             |
 | **People, organizations, places, events** — admin CRUD and public pages   | Complete                                                                                                            |
 | **Artifacts** — catalogue records, file upload, access-controlled serving | Complete                                                                                                            |
 | **Inline references and backlinks** — "everywhere this person is named"   | Complete (a backlink lands on the paragraph that named the subject)                                                 |
@@ -132,6 +133,36 @@ from an essay disappears from the subject's page immediately.
 Each person, organization, place and event page therefore shows its own
 fields, everywhere it is mentioned (with the surrounding sentence as context),
 its typed relationships, and a network graph of connections within two hops.
+
+### Revision history
+
+Prose is the only thing in this application that exists nowhere else. A source
+can be re-imported from Zotero and an artifact re-read from its file; a
+paragraph overwritten by accident is simply gone. So every save that changes an
+essay's title, body or status appends a snapshot, in the **same transaction** as
+the change — a history written separately could record text that was never
+committed.
+
+The history is on the editor, under **History**. Each revision compares against
+the one before it, line by line, with unchanged runs collapsed and the number of
+skipped lines shown rather than quietly closed up.
+
+A revision records the state **after** a save, so the newest revision is always
+the current text. That is what makes "restore revision 7" mean exactly what it
+looks like.
+
+**Restoring writes a new revision** rather than rewinding to an old one, so the
+mistake and its correction both survive, and nothing in the history is ever
+edited or deleted. Because a restore is an ordinary save, `rebuildReferences`
+runs over the restored prose like any other — the mention and citation listings
+follow the text back.
+
+> **Visibility is not restored.** Whether a piece of research is published is a
+> decision about now, never a property of old text. Restoring prose written
+> while an essay was public leaves the essay exactly as private as it is.
+
+Saving an unchanged form records nothing, so the list holds real edits rather
+than every time the button was pressed.
 
 ### Roles, positions and periods
 

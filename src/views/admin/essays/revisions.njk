@@ -1,0 +1,70 @@
+{% extends "layouts/admin.njk" %}
+
+{% block adminTitle %}History — {{ essay.title }}{% endblock %}
+
+{% block adminContent %}
+  <div class="page-heading">
+    <h1>History</h1>
+    <a class="button" href="/admin/essays/{{ essay.id }}/edit">Back to the essay</a>
+  </div>
+
+  <p class="muted">{{ essay.title }}</p>
+
+  {% if revisions.length == 0 %}
+    <p class="empty">No revisions recorded yet.</p>
+  {% else %}
+    <p class="muted">
+      {{ revisions.length }} revision{{ 's' if revisions.length != 1 }}, newest first.
+      Restoring one writes a new revision rather than rewinding, so nothing here is ever lost.
+    </p>
+
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th scope="col">Revision</th>
+          <th scope="col">Saved</th>
+          <th scope="col">Title</th>
+          <th scope="col">Status</th>
+          <th scope="col">Words</th>
+          <th scope="col"><span class="visually-hidden">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for revision in revisions %}
+          <tr>
+            <td>
+              <a href="/admin/essays/{{ essay.id }}/revisions/{{ revision.revisionNumber }}">
+                {{ revision.revisionNumber }}
+              </a>
+              {% if revision.revisionNumber == currentRevision %}
+                <span class="badge badge-public">Current</span>
+              {% endif %}
+              {% if revision.source == 'restore' %}
+                <div class="muted small">Restored from revision {{ revision.restoredFrom }}</div>
+              {% endif %}
+            </td>
+            <td class="muted small">
+              {{ revision.createdAt.toISOString().slice(0, 16) | replace('T', ' ') }}
+            </td>
+            <td>{{ revision.title }}</td>
+            <td>{{ revision.status | replace('_', ' ') }}</td>
+            <td class="numeric">{{ revision.wordCount }}</td>
+            <td class="row-actions">
+              <a href="/admin/essays/{{ essay.id }}/revisions/{{ revision.revisionNumber }}">Compare</a>
+              {% if revision.revisionNumber != currentRevision %}
+                <form
+                  method="post"
+                  action="/admin/essays/{{ essay.id }}/revisions/{{ revision.revisionNumber }}/restore"
+                  class="inline-form"
+                >
+                  <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+                  <button type="submit" class="link-button">Restore</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endblock %}
