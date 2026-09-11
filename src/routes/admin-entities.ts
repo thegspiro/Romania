@@ -31,7 +31,7 @@ import {
   MAX_ROLE_TITLE,
   createRelationship,
   deleteRelationship,
-  isDatePrecision,
+  isPeriodPrecision,
   listPredicates,
   listRelationshipsFor,
 } from '../content/relationships.js';
@@ -407,7 +407,7 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
       roleTitle,
       startDate: readString(request.body, 'startDate'),
       endDate: readString(request.body, 'endDate'),
-      datePrecision: isDatePrecision(datePrecision) ? datePrecision : 'unknown',
+      datePrecision: isPeriodPrecision(datePrecision) ? datePrecision : 'unknown',
       note: readString(request.body, 'note').trim() || null,
       visibility: isVisibility(visibility) ? visibility : 'private',
     });

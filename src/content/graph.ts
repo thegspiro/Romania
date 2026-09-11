@@ -27,7 +27,7 @@ import type { RowDataPacket } from 'mysql2/promise';
 import { queryRows, type Pool, type PoolConnection } from '../db/pool.js';
 import { visibilityFilter, type Viewer } from './visibility.js';
 import { referenceHref } from './references.js';
-import { columnToIsoDate, edgeLabel, formatPeriod, isDatePrecision } from './relationships.js';
+import { columnToIsoDate, edgeLabel, formatPeriod, isPeriodPrecision } from './relationships.js';
 
 export interface GraphNode {
   id: number;
@@ -256,7 +256,7 @@ export async function buildGraph(
       const period = formatPeriod({
         startDate: columnToIsoDate(row.start_date),
         endDate: columnToIsoDate(row.end_date),
-        precision: isDatePrecision(row.date_precision) ? row.date_precision : 'unknown',
+        precision: isPeriodPrecision(row.date_precision) ? row.date_precision : 'unknown',
       });
       const display = edgeLabel(row.label, row.role_title, period);
 

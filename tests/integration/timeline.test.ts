@@ -26,12 +26,15 @@ import { makeEntity, makeEssay, makeManuscript } from './fixtures.js';
 import { ANONYMOUS, adminViewer } from '../../src/content/visibility.js';
 import {
   findEventBoundSlugs,
+  findTimelineEntry,
+  listEventsAround,
   listEventsMentionedBy,
   listEventsRelatedTo,
   listTimeline,
   parseTimelineDirective,
   resolveTimelineDirectives,
   setEventBounds,
+  sortEntries,
 } from '../../src/content/timeline.js';
 import { createRelationship, listPredicates } from '../../src/content/relationships.js';
 import { deleteEntity, findEntityById, updateEntity } from '../../src/content/entities.js';
@@ -869,5 +872,221 @@ describe.skipIf(!available)('timeline', () => {
       adminViewer(harness.userId),
     );
     expect(adminBuild.markdown).toContain('Unpublished incident');
+  });
+  // --- Around this time -----------------------------------------------------
+
+  describe('around this time', () => {
+    /** The entry as an anonymous reader sees it, which is what the panel takes. */
+    async function entryFor(slug: string) {
+      const found = await findTimelineEntry(harness.pool, slug, ANONYMOUS);
+      if (found === null) throw new Error(`no event ${slug}`);
+      return found;
+    }
+
+    it('surveys the month around a day-precision event', async () => {
+      await makeEvent('The pogrom', 'public', {
+        startDate: '1941-06-29',
+        startPrecision: 'day',
+      });
+      await makeEvent('A raid the same month', 'public', {
+        startDate: '1941-06-15',
+        startPrecision: 'day',
+      });
+      await makeEvent('Something the next year', 'public', {
+        startDate: '1942-06-15',
+        startPrecision: 'day',
+      });
+
+      const around = await listEventsAround(harness.pool, await entryFor('the-pogrom'), ANONYMOUS);
+      expect(around.map((item) => item.slug)).toEqual(['a-raid-the-same-month']);
+    });
+
+    it('surveys the decade around a year-precision one', async () => {
+      // The question scales with how well the event is known.
+      await makeEvent('A year-precision event', 'public', { startDate: '1941-01-01' });
+      await makeEvent('Later in the decade', 'public', { startDate: '1945-01-01' });
+      await makeEvent('The next decade', 'public', { startDate: '1955-01-01' });
+
+      const around = await listEventsAround(
+        harness.pool,
+        await entryFor('a-year-precision-event'),
+        ANONYMOUS,
+      );
+      expect(around.map((item) => item.slug)).toEqual(['later-in-the-decade']);
+    });
+
+    it('never lists an event among its own neighbours', async () => {
+      await makeEvent('The pogrom', 'public', { startDate: '1941-06-29', startPrecision: 'day' });
+
+      const around = await listEventsAround(harness.pool, await entryFor('the-pogrom'), ANONYMOUS);
+      expect(around.map((item) => item.slug)).not.toContain('the-pogrom');
+    });
+
+    it('omits a private neighbour entirely', async () => {
+      await makeEvent('The pogrom', 'public', { startDate: '1941-06-29', startPrecision: 'day' });
+      await makeEvent('Unpublished incident', 'private', {
+        startDate: '1941-06-15',
+        startPrecision: 'day',
+      });
+
+      const around = await listEventsAround(harness.pool, await entryFor('the-pogrom'), ANONYMOUS);
+      // No gap and no placeholder: indistinguishable from never having existed.
+      expect(around).toHaveLength(0);
+
+      const page = await anonymous('/events/the-pogrom');
+      expect(page.body).not.toContain('Unpublished incident');
+      expect(page.body).not.toContain('unpublished-incident');
+
+      const asAdmin = await getPage(harness, '/events/the-pogrom', admin);
+      expect(asAdmin.body).toContain('Around this time');
+      expect(asAdmin.body).toContain('Unpublished incident');
+    });
+
+    it('offers nothing for an event nothing places', async () => {
+      await makeEvent('An undated event', 'public', { startPrecision: 'unknown' });
+
+      const around = await listEventsAround(
+        harness.pool,
+        await entryFor('an-undated-event'),
+        ANONYMOUS,
+      );
+      expect(around).toHaveLength(0);
+    });
+
+    it('shows the panel on the event page', async () => {
+      await makeEvent('The pogrom', 'public', { startDate: '1941-06-29', startPrecision: 'day' });
+      await makeEvent('A raid the same month', 'public', {
+        startDate: '1941-06-15',
+        startPrecision: 'day',
+      });
+
+      const page = await anonymous('/events/the-pogrom');
+      expect(page.body).toContain('Around this time');
+      expect(page.body).toContain('A raid the same month');
+    });
+  });
+
+  // --- Taking a chronology away ---------------------------------------------
+
+  describe('export', () => {
+    async function download(
+      url: string,
+      jar?: Map<string, string>,
+    ): Promise<{ statusCode: number; body: string; headers: Record<string, string> }> {
+      const page = await getPage(harness, url, jar ?? new Map<string, string>());
+      const response = await harness.app.inject({ method: 'GET', url });
+      return {
+        statusCode: page.statusCode,
+        body: page.body,
+        headers: response.headers as Record<string, string>,
+      };
+    }
+
+    it('carries a public event and no trace of a private one', async () => {
+      await makeEvent('The Iasi pogrom', 'public', { startDate: '1941-06-29' });
+      await makeEvent('Unpublished incident', 'private', { startDate: '1942-03-01' });
+
+      for (const url of ['/timeline.csv', '/timeline.ics']) {
+        const file = await download(url);
+        expect(file.statusCode).toBe(200);
+        expect(file.body).toContain('The Iasi pogrom');
+        // Not the title, and not the slug either: either one is the disclosure.
+        expect(file.body).not.toContain('Unpublished incident');
+        expect(file.body).not.toContain('unpublished-incident');
+      }
+    });
+
+    it('carries both for the administrator', async () => {
+      await makeEvent('Unpublished incident', 'private', { startDate: '1942-03-01' });
+
+      const csv = await getPage(harness, '/timeline.csv', admin);
+      expect(csv.body).toContain('Unpublished incident');
+      const ics = await getPage(harness, '/timeline.ics', admin);
+      expect(ics.body).toContain('Unpublished incident');
+    });
+
+    it('refuses a visibility filter from the query string', async () => {
+      // The export honours exactly what the page honours, which means it
+      // refuses exactly what the page refuses.
+      await makeEvent('Unpublished incident', 'private', { startDate: '1942-03-01' });
+
+      const file = await download('/timeline.csv?visibility=private');
+      expect(file.body).not.toContain('Unpublished incident');
+      expect(file.body).not.toContain('unpublished-incident');
+    });
+
+    it('withholds a private place from a public event', async () => {
+      const placeId = await makeEntity(harness.pool, 'place', 'Secret Location', 'private');
+      const eventId = await makeEvent('A public event', 'public', { startDate: '1941-01-01' });
+      await execute(
+        harness.pool,
+        'UPDATE event_detail SET place_item_id = ? WHERE content_item_id = ?',
+        [placeId, eventId],
+      );
+
+      for (const url of ['/timeline.csv', '/timeline.ics']) {
+        const file = await download(url);
+        expect(file.body).toContain('A public event');
+        expect(file.body).not.toContain('Secret Location');
+        expect(file.body).not.toContain('secret-location');
+      }
+    });
+
+    it('honours the same date filters the page does', async () => {
+      await makeEvent('In range', 'public', { startDate: '1943-01-01' });
+      await makeEvent('Out of range', 'public', { startDate: '1950-01-01' });
+
+      const file = await download('/timeline.csv?from=1943&to=1943');
+      expect(file.body).toContain('In range');
+      expect(file.body).not.toContain('Out of range');
+    });
+
+    it('is served as a download that no cache may keep', async () => {
+      await makeEvent('The Iasi pogrom', 'public', { startDate: '1941-06-29' });
+
+      const csv = await download('/timeline.csv');
+      expect(csv.headers['content-type']).toContain('text/csv');
+      expect(csv.headers['content-disposition']).toContain('attachment');
+      // A chronology an administrator exported may hold unpublished material.
+      expect(csv.headers['cache-control']).toContain('no-store');
+      expect(csv.headers['x-robots-tag']).toContain('noindex');
+
+      const ics = await download('/timeline.ics');
+      expect(ics.headers['content-type']).toContain('text/calendar');
+      expect(ics.body.startsWith('BEGIN:VCALENDAR')).toBe(true);
+    });
+  });
+
+  // --- Two implementations of one ordering ----------------------------------
+
+  it('orders rows the same way in SQL and in TypeScript', async () => {
+    // `CHRONOLOGICAL_ORDER` and `sortEntries` are one spec written twice, and
+    // they had already drifted: the SQL `FIELD(...)` list omitted 'unknown',
+    // which FIELD scores 0 -- first -- while `sortEntries` ranks it last.
+    await makeEvent('Decade', 'public', { startDate: '1940-01-01', startPrecision: 'decade' });
+    await makeEvent('Year', 'public', { startDate: '1940-01-01' });
+    await makeEvent('Month', 'public', { startDate: '1940-01-01', startPrecision: 'month' });
+    await makeEvent('Unstated', 'public', { startDate: '1940-01-01', startPrecision: 'unknown' });
+    await makeEvent('Morning', 'public', {
+      startDate: '1940-01-01',
+      startTime: '09:00',
+      startPrecision: 'minute',
+    });
+    await makeEvent('Evening', 'public', {
+      startDate: '1940-01-01',
+      startTime: '17:00',
+      startPrecision: 'minute',
+    });
+    await makeEvent('Later', 'public', { startDate: '1944-01-01' });
+    await makeEvent('Undated', 'public', { startPrecision: 'unknown' });
+
+    const viewer = adminViewer(harness.userId);
+    const listed = await listTimeline(harness.pool, viewer, { limit: 200 });
+    expect(listed.items.length).toBeGreaterThan(5);
+
+    // The database's order must already be a fixed point of the TypeScript one.
+    expect(sortEntries(listed.items).map((item) => item.id)).toEqual(
+      listed.items.map((item) => item.id),
+    );
   });
 });

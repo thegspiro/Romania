@@ -24,11 +24,20 @@ import { referenceHref } from './references.js';
 /** Longest role title the column accepts. */
 export const MAX_ROLE_TITLE = 255;
 
-export const DATE_PRECISIONS = ['day', 'month', 'year', 'decade', 'unknown'] as const;
-export type DatePrecision = (typeof DATE_PRECISIONS)[number];
+/**
+ * How precisely an office's period is known. Named apart from `timeline.ts`.
+ *
+ * The two vocabularies genuinely differ -- an office does not begin at 14:30,
+ * so this ladder stops at 'day' -- but until now both modules exported
+ * `DatePrecision`, `DATE_PRECISIONS` and `isDatePrecision` with different
+ * member sets, so `isDatePrecision('hour')` was true or false depending on
+ * which file you had imported. Two vocabularies, two names.
+ */
+export const PERIOD_PRECISIONS = ['day', 'month', 'year', 'decade', 'unknown'] as const;
+export type PeriodPrecision = (typeof PERIOD_PRECISIONS)[number];
 
-export function isDatePrecision(value: unknown): value is DatePrecision {
-  return typeof value === 'string' && (DATE_PRECISIONS as readonly string[]).includes(value);
+export function isPeriodPrecision(value: unknown): value is PeriodPrecision {
+  return typeof value === 'string' && (PERIOD_PRECISIONS as readonly string[]).includes(value);
 }
 
 /**
@@ -42,7 +51,7 @@ export interface RelationshipPeriod {
   /** ISO 8601 calendar date, or null. */
   startDate: string | null;
   endDate: string | null;
-  precision: DatePrecision;
+  precision: PeriodPrecision;
 }
 
 const MONTH_NAMES = [
@@ -82,7 +91,7 @@ export function columnToIsoDate(value: unknown): string | null {
 }
 
 /** One end of a period, rendered to the precision claimed for it. */
-function formatEndpoint(iso: string, precision: DatePrecision): string {
+function formatEndpoint(iso: string, precision: PeriodPrecision): string {
   const year = iso.slice(0, 4);
   const month = Number(iso.slice(5, 7));
   const day = Number(iso.slice(8, 10));
@@ -209,7 +218,7 @@ function toRelationshipView(row: RelationshipRow): RelationshipView {
   const period: RelationshipPeriod = {
     startDate: columnToIsoDate(row.start_date),
     endDate: columnToIsoDate(row.end_date),
-    precision: isDatePrecision(row.date_precision) ? row.date_precision : 'unknown',
+    precision: isPeriodPrecision(row.date_precision) ? row.date_precision : 'unknown',
   };
   const periodLabel = formatPeriod(period);
 
@@ -298,7 +307,7 @@ export interface CreateRelationshipInput {
   /** ISO 8601 calendar dates. Anything else is read as "not recorded". */
   startDate?: string | null;
   endDate?: string | null;
-  datePrecision?: DatePrecision;
+  datePrecision?: PeriodPrecision;
   note: string | null;
   visibility: Visibility;
 }
@@ -322,7 +331,7 @@ function normaliseQualifier(input: CreateRelationshipInput): {
   roleTitle: string | null;
   startDate: string | null;
   endDate: string | null;
-  precision: DatePrecision;
+  precision: PeriodPrecision;
 } {
   const roleTitle = (input.roleTitle ?? '').trim() || null;
   const start = isoDate(input.startDate);
@@ -333,7 +342,7 @@ function normaliseQualifier(input: CreateRelationshipInput): {
     roleTitle,
     startDate: reversed ? end : start,
     endDate: reversed ? start : end,
-    precision: isDatePrecision(input.datePrecision) ? input.datePrecision : 'unknown',
+    precision: isPeriodPrecision(input.datePrecision) ? input.datePrecision : 'unknown',
   };
 }
 

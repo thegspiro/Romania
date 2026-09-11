@@ -13,6 +13,7 @@ import {
   claimsTime,
   formatEventBounds,
   formatEventDate,
+  groupEntries,
   instantOf,
   isCalendarDate,
   layoutTimelineBand,
@@ -67,10 +68,11 @@ describe('formatEventDate', () => {
     );
   });
 
-  it('renders an unknown precision as the date as stored', () => {
-    // Which is also exactly what the event page showed before this module
-    // existed, so a row nobody has re-edited reads as it always did.
-    expect(formatEventDate(dates({ startDate: '1943-06-02' }))).toBe('1943-06-02');
+  it('renders an unknown precision as the year alone', () => {
+    // The year is the most a date of unstated precision can be read for: it
+    // does not vouch for its own month and day. `relationships.ts` has always
+    // rendered it this way, and both panels appear on one entity page.
+    expect(formatEventDate(dates({ startDate: '1943-06-02' }))).toBe('1943');
   });
 
   it('renders a range with a precision at each end', () => {
@@ -453,6 +455,69 @@ describe('sortEntries', () => {
     ];
     sortEntries(input);
     expect(input.map((item) => item.id)).toEqual([1, 2]);
+  });
+});
+
+describe('groupEntries', () => {
+  function at(id: number, iso: string, precision: EventDates['startPrecision']): TimelineEntry {
+    return entry(id, { dates: dates({ startDate: iso, startPrecision: precision }) });
+  }
+
+  it('heads a wide chronology by decade', () => {
+    const groups = groupEntries([
+      at(1, '1910-01-01', 'year'),
+      at(2, '1943-01-01', 'year'),
+      at(3, '1944-01-01', 'year'),
+    ]);
+    expect(groups.map((group) => group.label)).toEqual(['1910s', '1940s']);
+    expect(groups[1]?.entries).toHaveLength(2);
+  });
+
+  it('heads a narrow one by month', () => {
+    const groups = groupEntries([at(1, '1941-06-29', 'day'), at(2, '1941-07-06', 'day')]);
+    expect(groups.map((group) => group.label)).toEqual(['June 1941', 'July 1941']);
+  });
+
+  it('never cuts finer than the coarsest precision in the list', () => {
+    // A year-precision event filed under "January 1943" would be a heading
+    // claiming a month the record never gave.
+    const groups = groupEntries([at(1, '1943-01-01', 'year'), at(2, '1943-06-02', 'day')]);
+    expect(groups.map((group) => group.label)).toEqual(['1943']);
+  });
+
+  it('heads centuries when the material spans them', () => {
+    const groups = groupEntries([at(1, '1650-01-01', 'year'), at(2, '1943-01-01', 'year')]);
+    expect(groups.map((group) => group.label)).toEqual(['1600\u20131699', '1900\u20131999']);
+  });
+
+  it('files a bounded event at the start of its window', () => {
+    // The same key the sort uses, so it does not drop out of sequence under a
+    // heading it does not belong to.
+    const groups = groupEntries([
+      at(1, '1941-01-01', 'year'),
+      entry(2, { bounds: { after: [], before: [], earliest: '1941-06-29', latest: '1944-08-23' } }),
+      at(3, '1944-01-01', 'year'),
+    ]);
+    expect(groups.map((group) => group.label)).toEqual(['1941', '1944']);
+    expect(groups[0]?.entries.map((item) => item.id)).toEqual([1, 2]);
+  });
+
+  it('heads the undated rather than leaving a gap', () => {
+    // A heading over things that exist, not a marker where something was
+    // filtered out.
+    const groups = groupEntries([at(1, '1943-01-01', 'year'), entry(2)]);
+    expect(groups.map((group) => group.label)).toEqual(['1943', UNDATED_LABEL]);
+  });
+
+  it('gives one group back for one date, and none for nothing', () => {
+    expect(groupEntries([])).toEqual([]);
+    expect(groupEntries([at(1, '1943-06-02', 'day')])).toHaveLength(1);
+  });
+
+  it('keeps every entry it was given', () => {
+    const entries = [at(1, '1910-01-01', 'year'), at(2, '1943-01-01', 'year'), entry(3)];
+    const total = groupEntries(entries).reduce((sum, group) => sum + group.entries.length, 0);
+    expect(total).toBe(entries.length);
   });
 });
 

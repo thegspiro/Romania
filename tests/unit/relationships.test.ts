@@ -15,12 +15,12 @@ import {
   columnToIsoDate,
   edgeLabel,
   formatPeriod,
-  isDatePrecision,
+  isPeriodPrecision,
   isoDate,
-  type DatePrecision,
+  type PeriodPrecision,
 } from '../../src/content/relationships.js';
 
-function period(startDate: string | null, endDate: string | null, precision: DatePrecision) {
+function period(startDate: string | null, endDate: string | null, precision: PeriodPrecision) {
   return formatPeriod({ startDate, endDate, precision });
 }
 
@@ -123,16 +123,16 @@ describe('columnToIsoDate', () => {
   });
 });
 
-describe('isDatePrecision', () => {
+describe('isPeriodPrecision', () => {
   it('accepts exactly the enum the column declares', () => {
     for (const value of ['day', 'month', 'year', 'decade', 'unknown']) {
-      expect(isDatePrecision(value)).toBe(true);
+      expect(isPeriodPrecision(value)).toBe(true);
     }
   });
 
   it('rejects anything else, including near misses', () => {
     for (const value of ['days', 'Year', '', null, 1, undefined]) {
-      expect(isDatePrecision(value)).toBe(false);
+      expect(isPeriodPrecision(value)).toBe(false);
     }
   });
 });

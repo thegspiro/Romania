@@ -1096,6 +1096,22 @@ button.danger {
   padding: 0.6rem 0;
 }
 
+/* A heading over a run of the chronology. Quiet: it is a signpost through a
+   long list, not a section of the argument. */
+.chronology-group {
+  margin: 1.5rem 0 0.25rem;
+  font-family: var(--sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.chronology-group + .chronology-list {
+  border-top: 1px solid var(--rule);
+}
+
 /* The band. Geometry comes from layoutTimelineBand as SVG attributes; only
    colour is decided here, because the CSP forbids a style attribute. */
 .timeline-band {

@@ -132,6 +132,21 @@
     {% set chronologyHeading = 'In time' if kind == 'event' else 'Chronology' %}
     {% set chronologyEmpty = 'No connected events recorded yet.' %}
     {% include "partials/chronology.njk" %}
+
+    {#
+      What surrounded this event, over a window that widens with how coarsely
+      the event itself is dated: a day-precision event surveys its month, a
+      year-precision one its decade. Drawn with the same partial, so the two
+      chronologies on this page cannot render a date two different ways.
+    #}
+    {% if around.length > 0 %}
+      {% set chronology = around %}
+      {% set chronologyBand = aroundBand %}
+      {% set chronologyGroups = aroundGroups %}
+      {% set chronologyHeading = 'Around this time' %}
+      {% include "partials/chronology.njk" %}
+    {% endif %}
+
     {% include "partials/relationships.njk" %}
     {% include "partials/mentions.njk" %}
     {% include "partials/graph.njk" %}

@@ -69,6 +69,24 @@ export function isDatePrecision(value: unknown): value is DatePrecision {
   return typeof value === 'string' && (DATE_PRECISIONS as readonly string[]).includes(value);
 }
 
+/**
+ * The ladder as SQL, derived from the constant rather than retyped beside it.
+ *
+ * The two hand-kept copies had already drifted: the `FIELD(...)` list omitted
+ * 'unknown', and `FIELD` scores a value it does not contain as 0 -- *first* --
+ * while `sortEntries` ranks it last. A page's rows and a merged block's rows
+ * then disagreed about where an unknown-precision event belonged.
+ *
+ * These are this module's own frozen literals rather than input, but they are
+ * still asserted against a strict pattern before being interpolated: the rule
+ * this codebase keeps is that SQL text is only ever built where the check that
+ * makes it safe is written down beside it.
+ */
+const PRECISION_FIELD_LIST = DATE_PRECISIONS.map((precision) => {
+  if (!/^[a-z]+$/.test(precision)) throw new Error(`unsafe precision literal: ${precision}`);
+  return `'${precision}'`;
+}).join(', ');
+
 /** Shown where an event carries no date at all. */
 export const UNDATED_LABEL = 'Undated';
 
@@ -202,7 +220,12 @@ function formatEndpoint(
       return clock === null ? day() : `${day()}, ${clock}`;
     }
     case 'unknown':
-      return iso;
+      // The year, not the stored string. A date of unstated precision does not
+      // vouch for its own month and day, and printing `1943-06-02` claims both.
+      // `relationships.ts` has always read it this way, and both panels appear
+      // on one entity page -- so the same stored value now reads the same twice
+      // instead of two ways on one screen.
+      return String(parts.year);
   }
 }
 
@@ -661,7 +684,7 @@ const CHRONOLOGICAL_ORDER = `
   ORDER BY ${EFFECTIVE_SORT} IS NULL ASC,
            ${EFFECTIVE_SORT} ASC,
            d.sort_date IS NULL ASC,
-           FIELD(d.start_precision, 'decade', 'year', 'month', 'day', 'hour', 'minute') ASC,
+           FIELD(d.start_precision, ${PRECISION_FIELD_LIST}) ASC,
            d.start_time IS NULL ASC,
            d.start_time ASC,
            ci.title ASC,
@@ -1160,6 +1183,120 @@ export async function listEventsRelatedTo(
   );
 }
 
+/**
+ * What else was going on around an event.
+ *
+ * The window is the event's own span widened one rung coarser than the
+ * precision it carries: a day-precision event surveys its month, a
+ * year-precision one its decade. The question then scales with how well the
+ * event is known, rather than asking the same fixed-width question of a minute
+ * and of a decade.
+ *
+ * Nothing here decides visibility. The read goes through `listTimeline`, so it
+ * inherits the chokepoint, the place join and the ordering -- a neighbour the
+ * viewer may not see is simply not in the answer, with no gap where it was.
+ */
+export async function listEventsAround(
+  db: Pool | PoolConnection,
+  event: TimelineEntry,
+  viewer: Viewer,
+  limit = 12,
+): Promise<TimelineEntry[]> {
+  const window = surroundingWindow(event);
+  // Nothing places it, so there is no "around" to ask about.
+  if (window === null) return [];
+
+  // One extra, because the event itself is inside its own window.
+  const result = await listTimeline(db, viewer, {
+    from: window.from,
+    to: window.to,
+    limit: limit + 1,
+  });
+
+  return result.items.filter((item) => item.id !== event.id).slice(0, limit);
+}
+
+/** How far either side of an event to look, by the precision it claims. */
+type Surround = 'century' | 'decade' | 'year' | 'month' | 'day';
+
+const SURROUND_BY_PRECISION: Readonly<Record<DatePrecision, Surround>> = Object.freeze({
+  minute: 'day',
+  hour: 'day',
+  day: 'month',
+  month: 'year',
+  year: 'decade',
+  decade: 'century',
+  // `unknown` does not say how much of the stored value is meant, so the year
+  // is as far as it may be read -- and a decade is the window around a year.
+  unknown: 'decade',
+});
+
+function surroundingWindow(event: TimelineEntry): { from: string; to: string } | null {
+  const { dates } = event;
+  const dated = dates.startDate !== null || dates.endDate !== null;
+
+  const first = parseIsoDate(
+    dated ? (dates.startDate ?? dates.endDate) : (event.bounds?.earliest ?? null),
+  );
+  const last = parseIsoDate(
+    dated ? (dates.endDate ?? dates.startDate) : (event.bounds?.latest ?? null),
+  );
+  const from = first ?? last;
+  const to = last ?? first;
+  if (from === null || to === null) return null;
+
+  // A bounded event is already a window; widening it by its own "precision"
+  // would be reading a certainty off an anchor that is not the event's.
+  const surround = dated
+    ? SURROUND_BY_PRECISION[dates.startDate !== null ? dates.startPrecision : dates.endPrecision]
+    : 'year';
+
+  return { from: surroundFirst(from, surround), to: surroundLast(to, surround) };
+}
+
+function clampYear(year: number): number {
+  return Math.min(Math.max(year, MIN_YEAR), MAX_YEAR);
+}
+
+function isoOf(year: number, month: number, day: number): string {
+  const parts = [
+    String(clampYear(year)).padStart(4, '0'),
+    String(month).padStart(2, '0'),
+    String(day).padStart(2, '0'),
+  ];
+  return parts.join('-');
+}
+
+function surroundFirst(parts: DateParts, surround: Surround): string {
+  switch (surround) {
+    case 'century':
+      return isoOf(Math.floor(parts.year / 100) * 100, 1, 1);
+    case 'decade':
+      return isoOf(Math.floor(parts.year / 10) * 10, 1, 1);
+    case 'year':
+      return isoOf(parts.year, 1, 1);
+    case 'month':
+      return isoOf(parts.year, parts.month, 1);
+    case 'day':
+      return isoOf(parts.year, parts.month, parts.day);
+  }
+}
+
+function surroundLast(parts: DateParts, surround: Surround): string {
+  switch (surround) {
+    case 'century':
+      return isoOf(Math.floor(parts.year / 100) * 100 + 99, 12, 31);
+    case 'decade':
+      return isoOf(Math.floor(parts.year / 10) * 10 + 9, 12, 31);
+    case 'year':
+      return isoOf(parts.year, 12, 31);
+    case 'month':
+      return isoOf(parts.year, parts.month, daysInMonth(parts.year, parts.month));
+    case 'day':
+      return isoOf(parts.year, parts.month, parts.day);
+  }
+}
+
 /** The chronology panel for an essay: the events its prose names, in order. */
 export async function listEventsMentionedBy(
   db: Pool | PoolConnection,
@@ -1296,6 +1433,114 @@ function effectiveKey(entry: TimelineEntry): string | null {
     entry.bounds?.latest ??
     null
   );
+}
+
+// --- Headings over a long chronology ---------------------------------------
+
+export interface TimelineGroup {
+  /** "1940s", "June 1943", "Undated". Already formatted; templates print it. */
+  label: string;
+  entries: TimelineEntry[];
+}
+
+/** How much ground one heading covers. Coarse to fine. */
+type GroupGranularity = 'century' | 'decade' | 'year' | 'month';
+
+const GROUP_GRANULARITIES: readonly GroupGranularity[] = Object.freeze([
+  'century',
+  'decade',
+  'year',
+  'month',
+]);
+
+/**
+ * Breaks a chronology into headed runs.
+ *
+ * Grouped on the **same key the sort uses**, so a bounded event files at the
+ * start of its window rather than dropping out of sequence under a heading it
+ * does not belong to.
+ *
+ * Two things decide how wide a heading is. How much ground the list covers --
+ * five centuries want centuries and a fortnight wants months -- and, capping
+ * that, the coarsest precision anyone in it carries: a year-precision event
+ * filed under "January 1943" would be a heading claiming a month the record
+ * never gave. Whichever is coarser wins.
+ *
+ * A final `Undated` group is a heading over things that exist, not a gap where
+ * something was filtered out, so it does not breach the rule about absences.
+ *
+ * Runs are consecutive: entries arrive ordered, and grouping in the order given
+ * means an unordered list produces repeated headings rather than losing rows
+ * into a group that was already closed.
+ */
+export function groupEntries(entries: readonly TimelineEntry[]): TimelineGroup[] {
+  const years: number[] = [];
+  let finest: GroupGranularity = 'month';
+  for (const entry of entries) {
+    const parts = parseIsoDate(effectiveKey(entry));
+    if (parts === null) continue;
+    years.push(parts.year);
+    finest = coarserOf(finest, granularityCeiling(entry));
+  }
+
+  const span = years.length === 0 ? 0 : Math.max(...years) - Math.min(...years);
+  const bySpan: GroupGranularity =
+    span > 200 ? 'century' : span > 30 ? 'decade' : span > 3 ? 'year' : 'month';
+  const granularity = coarserOf(bySpan, finest);
+
+  const groups: TimelineGroup[] = [];
+  for (const entry of entries) {
+    const label = groupLabel(parseIsoDate(effectiveKey(entry)), granularity);
+    const last = groups[groups.length - 1];
+    if (last !== undefined && last.label === label) last.entries.push(entry);
+    else groups.push({ label, entries: [entry] });
+  }
+  return groups;
+}
+
+function coarserOf(left: GroupGranularity, right: GroupGranularity): GroupGranularity {
+  return GROUP_GRANULARITIES.indexOf(left) <= GROUP_GRANULARITIES.indexOf(right) ? left : right;
+}
+
+/** The finest heading this entry could honestly sit under. */
+function granularityCeiling(entry: TimelineEntry): GroupGranularity {
+  // A bounded event is somewhere in a window; naming its month would pick one.
+  if (entry.dates.startDate === null && entry.dates.endDate === null) return 'year';
+
+  const precision =
+    entry.dates.startDate !== null ? entry.dates.startPrecision : entry.dates.endPrecision;
+  switch (precision) {
+    case 'decade':
+      return 'decade';
+    // `unknown` does not say how much of the stored value is meant, so the
+    // year is as far as a heading may read it -- the same answer
+    // `formatEndpoint` gives.
+    case 'year':
+    case 'unknown':
+      return 'year';
+    default:
+      return 'month';
+  }
+}
+
+function groupLabel(parts: DateParts | null, granularity: GroupGranularity): string {
+  if (parts === null) return UNDATED_LABEL;
+
+  switch (granularity) {
+    case 'century': {
+      const first = Math.floor(parts.year / 100) * 100;
+      // En dash, and both ends spelled out: "1900s" would read as the decade.
+      return `${first}–${first + 99}`;
+    }
+    case 'decade':
+      return `${Math.floor(parts.year / 10) * 10}s`;
+    case 'year':
+      return String(parts.year);
+    case 'month': {
+      const month = MONTHS[parts.month - 1];
+      return month === undefined ? String(parts.year) : `${month} ${parts.year}`;
+    }
+  }
 }
 
 // --- Writing bounds --------------------------------------------------------

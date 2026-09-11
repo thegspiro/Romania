@@ -3,6 +3,20 @@
 
 {% block title %}Timeline — Dissertation Research{% endblock %}
 
+{% macro timelineItem(entry) %}
+  <li>
+    <span class="chronology-date">{{ entry.dateLabel }}</span>
+    <a href="{{ entry.href }}">{{ entry.title }}</a>
+    {% if entry.place %}
+      <span class="chronology-place">{{ entry.place.title }}</span>
+    {% endif %}
+    {{ ui.badge(entry.visibility) }}
+    {% if entry.summary %}
+      <div class="muted small">{{ entry.summary }}</div>
+    {% endif %}
+  </li>
+{% endmacro %}
+
 {% block content %}
   <h1>Timeline</h1>
   <p class="muted">
@@ -52,8 +66,18 @@
     </p>
   </form>
 
+  {#
+    Both exports honour exactly the filters this page honours -- the links carry
+    the validated query string, not the raw one -- and both go through
+    `listTimeline`, so a download can only hold what this viewer could already
+    read a page at a time.
+  #}
   <p class="muted small">
     {{ total }} {{ 'event' if total == 1 else 'events' }}.
+    Download this chronology as
+    <a href="/timeline.csv{% if filterQuery %}?{{ filterQuery }}{% endif %}">a spreadsheet</a>
+    or
+    <a href="/timeline.ics{% if filterQuery %}?{{ filterQuery }}{% endif %}">a calendar</a>.
   </p>
 
   {% include "partials/timeline-band.njk" %}
@@ -61,21 +85,24 @@
   {% if entries.length == 0 %}
     <p class="empty">Nothing matches those filters.</p>
   {% else %}
-    <ol class="chronology-list timeline-page-list">
-      {% for entry in entries %}
-        <li>
-          <span class="chronology-date">{{ entry.dateLabel }}</span>
-          <a href="{{ entry.href }}">{{ entry.title }}</a>
-          {% if entry.place %}
-            <span class="chronology-place">{{ entry.place.title }}</span>
-          {% endif %}
-          {{ ui.badge(entry.visibility) }}
-          {% if entry.summary %}
-            <div class="muted small">{{ entry.summary }}</div>
-          {% endif %}
-        </li>
+    {#
+      Headings from `groupEntries`, which decides how wide one may be: never
+      finer than the coarsest precision in the list, so a year-precision event
+      is never filed under a month the record did not give. A single heading
+      over everything says nothing, so it is not drawn.
+    #}
+    {% if groups.length > 1 %}
+      {% for group in groups %}
+        <h2 class="chronology-group">{{ group.label }}</h2>
+        <ol class="chronology-list timeline-page-list">
+          {% for entry in group.entries %}{{ timelineItem(entry) }}{% endfor %}
+        </ol>
       {% endfor %}
-    </ol>
+    {% else %}
+      <ol class="chronology-list timeline-page-list">
+        {% for entry in entries %}{{ timelineItem(entry) }}{% endfor %}
+      </ol>
+    {% endif %}
 
     {{ ui.pagination('/timeline', page, pageCount, search, filterQuery) }}
   {% endif %}

@@ -33,7 +33,9 @@ import { renderProse, renderFragment } from '../content/markdown.js';
 import { resolveForRender, resolveTimelines } from '../content/render-context.js';
 import {
   findTimelineEntry,
+  groupEntries,
   layoutTimelineBand,
+  listEventsAround,
   listEventsMentionedBy,
   listEventsRelatedTo,
 } from '../content/timeline.js';
@@ -96,6 +98,15 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
       // asserted edge or by prose, in date order.
       const chronology = await listEventsRelatedTo(pool, record.id, request.viewer);
 
+      // The event's own date label and place, resolved by the same read that
+      // resolves them for every listing -- so a private place is withheld here
+      // for the same reason and in the same way.
+      const event = kind === 'event' ? await findTimelineEntry(pool, slug, request.viewer) : null;
+
+      // ...and what else was going on around it, over a window that widens with
+      // how coarsely the event itself is dated.
+      const around = event === null ? [] : await listEventsAround(pool, event, request.viewer);
+
       return renderPage(
         config,
         request,
@@ -108,12 +119,13 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
           record,
           summaryHtml: record.summary === null ? null : renderFragment(record.summary),
           rendered,
-          // The event's own date label and place, resolved by the same read
-          // that resolves them for every listing -- so a private place is
-          // withheld here for the same reason and in the same way.
-          event: kind === 'event' ? await findTimelineEntry(pool, slug, request.viewer) : null,
+          event,
           chronology,
           chronologyBand: layoutTimelineBand(chronology),
+          chronologyGroups: groupEntries(chronology),
+          around,
+          aroundBand: layoutTimelineBand(around),
+          aroundGroups: groupEntries(around),
           // "the other places that they have been mentioned"
           mentions: await listMentionsOf(pool, record.id, request.viewer),
           relationships: await listRelationshipsFor(pool, record.id, request.viewer),
@@ -189,6 +201,7 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
         // alphabetical list of links.
         chronology,
         chronologyBand: layoutTimelineBand(chronology),
+        chronologyGroups: groupEntries(chronology),
         canonicalUrl: `${config.PUBLIC_BASE_URL}${essay.href}`,
       },
       { noindex: essay.noindex || essay.visibility !== 'public' },
