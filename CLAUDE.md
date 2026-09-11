@@ -121,6 +121,30 @@ absent one. The year is ANDed on top of `visibilityFilter`, never in place of
 it; a filter that could make a private node reachable would be a leak, and
 `tests/integration/graph.test.ts` pins that it cannot.
 
+**The export exists so the research can leave.** `src/content/export.ts`
+writes Markdown, CSL-JSON and a JSON catalogue -- deliberately nothing this
+application invented, because the risk to a five-year dissertation is not a
+bug, it is that nobody can build the image in 2031.
+
+- Reference syntax is exported **as written**. Resolving `[[cite:x]]` into a
+  link here would bake this application's idea of a reference into the copy
+  meant to outlive it. It is already readable text keyed to a slug.
+- Every read goes through a repository, so `visibilityFilter` applies. A
+  `--public` export is assembled with `ANONYMOUS` and is the same kind of
+  object as a `public` manuscript build: one file holding everything at once.
+  `tests/integration/export.test.ts` pins that it leaks no private prose, no
+  private artifact, and no storage key.
+- `artifactFileKeys` is the one read that goes around `ArtifactRecord`, because
+  no _page_ needs a storage key and an export does. It applies the filter like
+  anything else; keep it that way.
+
+`scripts/restore-rehearsal.sh` runs the whole drill and CI runs it on every
+pull request. Two things it is written to avoid, both of which bit this script
+before it worked: POSIX sh has no `pipefail` and `set -e` sees only the last
+command of a pipeline, so the export is captured to a file rather than piped
+into `sed`; and a failed count query must not fall back to `0`, because two
+zeroes compare equal and the check would pass having compared nothing.
+
 **Essay revisions are append-only, and written in the save transaction.**
 `essay_revision` holds whole snapshots, not diffs -- the row _is_ the text, so
 there is no reconstruction step that could be wrong. Three rules:
@@ -373,6 +397,7 @@ the properties being asserted actually live.
 | Reference syntax, context extraction   | `src/content/references.ts`         |
 | Prose → HTML, the visible/not decision | `src/content/markdown.ts`           |
 | Projections and backlinks              | `src/content/mentions.ts`           |
+| Corpus export, portable formats        | `src/content/export.ts`             |
 | Essay revisions, restore rules         | `src/content/essays.ts`             |
 | Line diff for the comparison view      | `src/content/diff.ts`               |
 | Outline, navigation, assembly          | `src/content/manuscripts.ts`        |

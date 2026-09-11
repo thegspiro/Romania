@@ -42,6 +42,7 @@ What is built and working:
 | Background worker — derivatives, bibliography import, geocoding, backups  | Complete                                                                                                            |
 | **Zotero sync** — pull a library in and keep it in step                   | Complete (incremental; deletions are flagged, never obeyed)                                                         |
 | Deployment — Docker, Compose, migrations, CLI                             | Complete                                                                                                            |
+| **Corpus export** — Markdown, CSL-JSON, and a rehearsed restore           | Complete                                                                                                            |
 | Maps                                                                      | **Not yet** (Leaflet is vendored; coordinates are in the schema)                                                    |
 | Public downloads of compiled documents                                    | **Not yet** (deliberately admin-only for now — see below)                                                           |
 | Search beyond `LIKE`                                                      | **Not yet** (a search service is the first side-cart candidate)                                                     |
@@ -520,6 +521,50 @@ If a build fails, its row carries Pandoc's stderr; the usual causes are a
 malformed YAML value on the manuscript's title-page fields and, for PDF, a TeX
 package Tectonic could not fetch because the container has no outbound
 network.
+
+### Exporting the corpus
+
+```sh
+docker compose exec web /app/scripts/entrypoint.sh admin export --out /data/backups/export
+```
+
+Writes the whole corpus in formats that do not need this application:
+prose as Markdown with YAML front matter, the bibliography as one CSL-JSON
+array that Zotero imports and Pandoc reads with `--bibliography`, the archival
+provenance CSL cannot carry as JSON beside it, and the artifact catalogue with
+each file's SHA-256 and storage key so the files inside a `files-*.tar.gz`
+can be matched back to the records describing them.
+
+Reference syntax is left exactly as written — `[[cite:hooligan-year|45-47]]`
+is readable as text and keyed to the slug in the front matter of the file it
+names, so it can be rewritten mechanically for another tool or simply read.
+
+> **A default export contains unpublished material.** It is assembled for an
+> administrator, so it holds every item regardless of visibility. The
+> directory is created `0700`. `--public` assembles it as an anonymous reader
+> instead, which is the copy that is safe to hand to somebody.
+
+### Rehearsing a restore
+
+A backup nobody has restored is a hypothesis. Once a year — or after any
+change to the schema you would not want to discover during a recovery — run
+the drill:
+
+```sh
+docker compose exec web /app/scripts/restore-rehearsal.sh
+```
+
+It takes a backup with the real backup handler, restores it into a scratch
+database, exports the restored corpus, and checks the row counts against the
+database it came from and that the bibliography parses as CSL-JSON. It reads
+the live database and writes only to the scratch database, so it is safe to
+run against the real thing — which is the point, since a rehearsal against an
+empty schema proves much less.
+
+`--keep-output` leaves the export in place to look at. CI runs the same script
+on every pull request against a seeded corpus, including Romanian diacritics,
+because a character set mismatch anywhere along dump → restore → export
+mangles them silently.
 
 ### Backups
 
