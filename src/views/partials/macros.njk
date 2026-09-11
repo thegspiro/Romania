@@ -108,15 +108,26 @@
   {% endif %}
 {% endmacro %}
 
-{% macro pagination(base, page, pageCount, search) %}
+{#
+  Paging links that keep the listing filtered.
+
+  `query` is the page's whole filter query string minus `page`, already encoded
+  by `filterQuery` in src/routes/form.ts. Without it a "Next" link dropped every
+  filter but the search box, so page 2 of a filtered chronology was an
+  unfiltered chronology under a filter form still showing the old values.
+
+  `search` stays as a fallback for callers that have only a search box, so the
+  existing call shape keeps working.
+#}
+{% macro pagination(base, page, pageCount, search, query='') %}
   {% if pageCount > 1 %}
     <nav class="pagination" aria-label="Pagination">
       {% if page > 1 %}
-        <a href="{{ base }}?page={{ page - 1 }}{% if search %}&amp;q={{ search | urlencode }}{% endif %}">Previous</a>
+        <a href="{{ base }}?page={{ page - 1 }}{% if query %}&amp;{{ query }}{% elif search %}&amp;q={{ search | urlencode }}{% endif %}">Previous</a>
       {% endif %}
       <span>Page {{ page }} of {{ pageCount }}</span>
       {% if page < pageCount %}
-        <a href="{{ base }}?page={{ page + 1 }}{% if search %}&amp;q={{ search | urlencode }}{% endif %}">Next</a>
+        <a href="{{ base }}?page={{ page + 1 }}{% if query %}&amp;{{ query }}{% elif search %}&amp;q={{ search | urlencode }}{% endif %}">Next</a>
       {% endif %}
     </nav>
   {% endif %}

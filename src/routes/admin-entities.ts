@@ -42,7 +42,7 @@ import {
   type EventBoundsInput,
 } from '../content/timeline.js';
 import { recordAudit } from '../content/audit.js';
-import { actorId, flashFor, parseId, readCheckbox, readString } from './form.js';
+import { actorId, filterQuery, flashFor, parseId, readCheckbox, readString } from './form.js';
 
 /** Detail fields each kind reads from its form. */
 const DETAIL_FIELDS: Readonly<Record<EntityKind, readonly string[]>> = Object.freeze({
@@ -175,6 +175,7 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
           pageCount: Math.max(Math.ceil(result.total / perPage), 1),
           search: query.q ?? '',
           visibilityFilter: visibility ?? '',
+          filterQuery: filterQuery({ q: query.q, visibility }),
         },
         { noindex: true, flash: flashFor(request) },
       );

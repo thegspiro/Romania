@@ -16,7 +16,8 @@ import type { AppContext } from '../http/server.js';
 import { renderPage } from '../http/context.js';
 import { ENTITY_KINDS, ENTITY_LABELS } from '../content/entities.js';
 import { KIND_PATHS } from '../content/references.js';
-import { layoutTimelineBand, listTimeline } from '../content/timeline.js';
+import { isCalendarDate, layoutTimelineBand, listTimeline } from '../content/timeline.js';
+import { filterQuery } from './form.js';
 
 const PER_PAGE = 50;
 
@@ -24,7 +25,10 @@ const PER_PAGE = 50;
 function boundary(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
-  return /^\d{4}$/.test(trimmed) || /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : undefined;
+  if (/^\d{4}$/.test(trimmed)) return trimmed;
+  // A real calendar date, not merely the shape of one: `1940-13-45` matches the
+  // pattern and would otherwise reach a MySQL DATE comparison.
+  return isCalendarDate(trimmed) ? trimmed : undefined;
 }
 
 function slug(value: unknown): string | undefined {
@@ -84,6 +88,16 @@ export function registerTimelineRoutes(app: FastifyInstance, context: AppContext
       to: to ?? '',
       place: place ?? '',
       related: subject === undefined ? '' : `${subject.kind}:${subject.slug}`,
+      // Everything a paging link must repeat. Built from the validated values,
+      // not echoed from the query string, so nothing unchecked reaches the
+      // href -- and so page 2 of a filtered chronology is still filtered.
+      filterQuery: filterQuery({
+        q: search,
+        from,
+        to,
+        place,
+        related: subject === undefined ? undefined : `${subject.kind}:${subject.slug}`,
+      }),
       entityKinds: ENTITY_KINDS.map((kind) => ({
         kind,
         label: ENTITY_LABELS[kind].singular,

@@ -108,13 +108,57 @@ interface DateParts {
   day: number;
 }
 
+/**
+ * The earliest and latest years this module will place on an axis.
+ *
+ * Not a claim about history: a guard. MySQL under a permissive `sql_mode` can
+ * hold `0000-00-00`, and one such row would drag a chronology's axis back to
+ * year zero and squeeze every real event into a sliver at the right-hand edge.
+ * Anything outside this window is treated as no date at all, which the page
+ * already has an honest affordance for.
+ */
+const MIN_YEAR = 1;
+const MAX_YEAR = 3000;
+
+/**
+ * A stored `YYYY-MM-DD`, validated against the calendar.
+ *
+ * The shape test alone is not enough: `1940-13-45` matches it, and passing that
+ * to a `DATE` comparison or to `Date.UTC` produces a silently wrong answer
+ * rather than an error. February is checked against the actual year, so
+ * `1943-02-29` is rejected and `1944-02-29` is not.
+ */
 function parseIsoDate(value: string | null): DateParts | null {
   if (value === null) return null;
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (match === null) return null;
-  const [, year, month, day] = match;
-  if (year === undefined || month === undefined || day === undefined) return null;
-  return { year: Number(year), month: Number(month), day: Number(day) };
+
+  const [, yearText, monthText, dayText] = match;
+  if (yearText === undefined || monthText === undefined || dayText === undefined) return null;
+
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+
+  if (year < MIN_YEAR || year > MAX_YEAR) return null;
+  if (month < 1 || month > 12) return null;
+  if (day < 1 || day > daysInMonth(year, month)) return null;
+
+  return { year, month, day };
+}
+
+function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) return isLeapYear(year) ? 29 : 28;
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+/** True when a string is a real calendar date this module will accept. */
+export function isCalendarDate(value: string): boolean {
+  return parseIsoDate(value) !== null;
 }
 
 /**
@@ -344,8 +388,13 @@ export function parseTimelineDirective(body: string): TimelineDirective {
  */
 export function normaliseBoundary(value: string, edge: 'start' | 'end'): string | null {
   const trimmed = value.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-  if (/^\d{4}$/.test(trimmed)) return edge === 'start' ? `${trimmed}-01-01` : `${trimmed}-12-31`;
+  // Validated against the calendar, not just the shape: `1940-13-45` matches
+  // the pattern and would reach a MySQL DATE comparison as nonsense.
+  if (isCalendarDate(trimmed)) return trimmed;
+  if (/^\d{4}$/.test(trimmed)) {
+    const bounded = edge === 'start' ? `${trimmed}-01-01` : `${trimmed}-12-31`;
+    return isCalendarDate(bounded) ? bounded : null;
+  }
   return null;
 }
 
@@ -459,8 +508,23 @@ function eventSource(viewer: Viewer): { sql: string; params: SqlParam[] } {
  *
  * A bounded event takes the earliest point it could have happened, so it lands
  * at the start of its window rather than drifting to the end of the list.
+ *
+ * This is also the START of the span a date filter must overlap.
  */
 const EFFECTIVE_SORT = `COALESCE(d.sort_date, lower_bound.earliest, upper_bound.latest)`;
+
+/**
+ * The END of that span -- the last moment the event could still be running.
+ *
+ * The fallback order matters and is not the mirror of `EFFECTIVE_SORT`. An
+ * event with a date of its own takes `end_date` and then `sort_date`, so its
+ * own dates always win and bounds are ignored -- matching `toEntry`, which
+ * treats bounds as meaningful only when nothing else places the event. A
+ * bounded event falls through to `upper_bound.latest` FIRST, because the end
+ * of its window is the event it is known to precede; reaching for
+ * `lower_bound.earliest` before that would end the span at its own beginning.
+ */
+const EFFECTIVE_END = `COALESCE(d.end_date, d.sort_date, upper_bound.latest, lower_bound.earliest)`;
 
 /**
  * Chronological ordering.
@@ -681,6 +745,15 @@ export interface TimelineFilters {
   /** Restrict to events connected to this item, by edge or by mention. */
   relatedKind?: string | undefined;
   relatedSlug?: string | undefined;
+  /**
+   * Restrict to these event ids.
+   *
+   * For a caller that has already resolved which events it wants -- a timeline
+   * block naming several subjects -- so the limit is applied once over the
+   * union rather than once per subject. It only ever narrows: the visibility
+   * filter is ANDed on top, so an id the viewer may not see stays unreadable.
+   */
+  eventIds?: readonly number[] | undefined;
   limit?: number;
   offset?: number;
 }
@@ -711,21 +784,35 @@ export async function listTimeline(
 
   // Overlap, not containment: an event running 1941-1945 belongs in a
   // chronology of 1943 even though neither of its endpoints is in that year.
+  //
+  // Both ends read the EFFECTIVE window, the same one the ordering uses. An
+  // event dated only as "after the pogrom, before the armistice" has no dates
+  // of its own, so filtering on `d.*` alone dropped it from the very range it
+  // is known to fall in -- the page placed it and the band drew it, and then a
+  // date filter made it vanish.
   const from = filters.from === undefined ? null : normaliseBoundary(filters.from, 'start');
   if (from !== null) {
-    conditions.push('COALESCE(d.end_date, d.sort_date) >= ?');
+    conditions.push(`${EFFECTIVE_END} >= ?`);
     params.push(from);
   }
 
   const to = filters.to === undefined ? null : normaliseBoundary(filters.to, 'end');
   if (to !== null) {
-    conditions.push('d.sort_date <= ?');
+    conditions.push(`${EFFECTIVE_SORT} <= ?`);
     params.push(to);
   }
 
   if (filters.placeSlug !== undefined && /^[a-z0-9-]{1,190}$/.test(filters.placeSlug)) {
     conditions.push('place.slug = ?');
     params.push(filters.placeSlug);
+  }
+
+  if (filters.eventIds !== undefined) {
+    // An empty list means "nothing qualified", which must return nothing --
+    // not everything, which is what an omitted condition would do.
+    if (filters.eventIds.length === 0) return { items: [], total: 0 };
+    conditions.push(`ci.id IN (${filters.eventIds.map(() => '?').join(', ')})`);
+    params.push(...filters.eventIds);
   }
 
   // Restricting to one subject's events resolves that subject under the
@@ -735,7 +822,7 @@ export async function listTimeline(
     const related = await findVisibleItem(db, filters.relatedKind, filters.relatedSlug, viewer);
     if (related === null) return { items: [], total: 0 };
 
-    const ids = await relatedEventIds(db, related.id, viewer);
+    const ids = await relatedEventIds(db, [related.id], viewer);
     if (ids.length === 0) return { items: [], total: 0 };
 
     conditions.push(`ci.id IN (${ids.map(() => '?').join(', ')})`);
@@ -825,17 +912,40 @@ async function findVisibleItem(
   slug: string,
   viewer: Viewer,
 ): Promise<{ id: number; kind: string } | null> {
-  if (!/^[a-z0-9-]{1,190}$/.test(slug) || !/^[a-z_]{1,20}$/.test(kind)) return null;
+  const [found] = await findVisibleItems(db, [{ kind, slug }], viewer);
+  return found ?? null;
+}
+
+/**
+ * Several subjects at once, under the viewer's filter.
+ *
+ * One query rather than one per subject, so a timeline block naming three
+ * people costs the same as one naming one. An unknown or invisible subject is
+ * simply absent from the result -- the caller contributes nothing for it,
+ * rather than learning that it exists.
+ */
+async function findVisibleItems(
+  db: Pool | PoolConnection,
+  refs: readonly { kind: string; slug: string }[],
+  viewer: Viewer,
+): Promise<{ id: number; kind: string }[]> {
+  const valid = refs.filter(
+    (ref) => /^[a-z0-9-]{1,190}$/.test(ref.slug) && /^[a-z_]{1,20}$/.test(ref.kind),
+  );
+  if (valid.length === 0) return [];
 
   const visible = visibilityFilter(viewer, 'ci');
-  const row = await queryOne<RowDataPacket & { id: number; kind: string }>(
+  // Placeholders only; every kind and slug is bound.
+  const pairs = valid.map(() => '(?, ?)').join(', ');
+
+  const rows = await queryRows<RowDataPacket & { id: number; kind: string }>(
     db,
     `SELECT ci.id, ci.kind FROM content_item ci
-      WHERE ci.kind = ? AND ci.slug = ? AND ${visible.sql}`,
-    [kind, slug, ...visible.params],
+      WHERE (ci.kind, ci.slug) IN (${pairs}) AND ${visible.sql}`,
+    [...valid.flatMap((ref) => [ref.kind, ref.slug]), ...visible.params],
   );
 
-  return row === null ? null : { id: Number(row.id), kind: String(row.kind) };
+  return rows.map((row) => ({ id: Number(row.id), kind: String(row.kind) }));
 }
 
 /**
@@ -849,9 +959,13 @@ async function findVisibleItem(
  */
 async function relatedEventIds(
   db: Pool | PoolConnection,
-  itemId: number,
+  itemIds: readonly number[],
   viewer: Viewer,
 ): Promise<number[]> {
+  if (itemIds.length === 0) return [];
+
+  // Placeholders only; every id is bound.
+  const ids = itemIds.map(() => '?').join(', ');
   const edge = visibilityFilter(viewer, 'r');
   const near = visibilityFilter(viewer, 'ci');
   const far = visibilityFilter(viewer, 'other');
@@ -862,45 +976,45 @@ async function relatedEventIds(
        FROM relationship r
        JOIN content_item ci ON ci.id = r.from_item_id
        JOIN content_item other ON other.id = r.to_item_id
-      WHERE r.from_item_id = ? AND other.kind = ?
+      WHERE r.from_item_id IN (${ids}) AND other.kind = ?
         AND ${edge.sql} AND ${near.sql} AND ${far.sql}
       UNION
      SELECT r.from_item_id AS event_id
        FROM relationship r
        JOIN content_item ci ON ci.id = r.to_item_id
        JOIN content_item other ON other.id = r.from_item_id
-      WHERE r.to_item_id = ? AND other.kind = ?
+      WHERE r.to_item_id IN (${ids}) AND other.kind = ?
         AND ${edge.sql} AND ${near.sql} AND ${far.sql}
       UNION
      SELECT m.to_item_id AS event_id
        FROM mention m
        JOIN content_item ci ON ci.id = m.from_item_id
        JOIN content_item other ON other.id = m.to_item_id
-      WHERE m.from_item_id = ? AND other.kind = ?
+      WHERE m.from_item_id IN (${ids}) AND other.kind = ?
         AND ${near.sql} AND ${far.sql}
       UNION
      SELECT m.from_item_id AS event_id
        FROM mention m
        JOIN content_item ci ON ci.id = m.to_item_id
        JOIN content_item other ON other.id = m.from_item_id
-      WHERE m.to_item_id = ? AND other.kind = ?
+      WHERE m.to_item_id IN (${ids}) AND other.kind = ?
         AND ${near.sql} AND ${far.sql}`,
     [
-      itemId,
+      ...itemIds,
       'event',
       ...edge.params,
       ...near.params,
       ...far.params,
-      itemId,
+      ...itemIds,
       'event',
       ...edge.params,
       ...near.params,
       ...far.params,
-      itemId,
+      ...itemIds,
       'event',
       ...near.params,
       ...far.params,
-      itemId,
+      ...itemIds,
       'event',
       ...near.params,
       ...far.params,
@@ -917,7 +1031,7 @@ export async function listEventsRelatedTo(
   viewer: Viewer,
   limit = 50,
 ): Promise<TimelineEntry[]> {
-  const ids = await relatedEventIds(db, itemId, viewer);
+  const ids = await relatedEventIds(db, [itemId], viewer);
   // An event page must not list itself among its own connections.
   return listEventsByIds(
     db,
@@ -985,18 +1099,29 @@ export async function resolveTimelineDirectives(
       });
       entries = result.items;
     } else {
-      const seen = new Map<number, TimelineEntry>();
-      for (const subject of directive.about) {
-        const result = await listTimeline(db, viewer, {
-          from: directive.from ?? undefined,
-          to: directive.to ?? undefined,
-          relatedKind: subject.kind,
-          relatedSlug: subject.slug,
-          limit: directive.limit,
-        });
-        for (const entry of result.items) seen.set(entry.id, entry);
-      }
-      entries = sortEntries([...seen.values()]).slice(0, directive.limit);
+      // Resolve every subject first, then ask once. Asking per subject and
+      // merging afterwards applied `limit` to each before the merge could see
+      // it, so a subject with more events than the limit lost its tail and the
+      // merged result was not the true top-N. It also cost four or five
+      // round-trips per subject.
+      const subjects = await findVisibleItems(db, directive.about, viewer);
+      const ids = [
+        ...new Set(
+          await relatedEventIds(
+            db,
+            subjects.map((subject) => subject.id),
+            viewer,
+          ),
+        ),
+      ];
+
+      const result = await listTimeline(db, viewer, {
+        from: directive.from ?? undefined,
+        to: directive.to ?? undefined,
+        eventIds: ids,
+        limit: directive.limit,
+      });
+      entries = result.items;
     }
 
     resolved.set(key, entries);

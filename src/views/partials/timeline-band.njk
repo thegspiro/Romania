@@ -17,8 +17,9 @@
   <figure class="timeline-band">
     <figcaption class="visually-hidden">
       A chronology from {{ band.firstYear }} to {{ band.lastYear }},
-      drawn as {{ band.spans.length }} spans. The list that follows carries the
-      same events.
+      drawn as {{ band.spans.length }}
+      {{ 'span' if band.spans.length == 1 else 'spans' }}.
+      The list that follows carries the same events.
     </figcaption>
 
     <svg

@@ -15,6 +15,7 @@ import {
   eventYear,
   formatEventBounds,
   formatEventDate,
+  isCalendarDate,
   layoutTimelineBand,
   normaliseBoundary,
   parseSlugList,
@@ -211,6 +212,32 @@ describe('formatEventBounds', () => {
 
   it('is null when nothing places the event', () => {
     expect(formatEventBounds({ after: [], before: [], earliest: null, latest: null })).toBeNull();
+  });
+});
+
+describe('normaliseBoundary and the calendar', () => {
+  it('rejects a date that matches the shape but not the calendar', () => {
+    // `1940-13-45` passes /^\d{4}-\d{2}-\d{2}$/ and would reach a MySQL DATE
+    // comparison as nonsense.
+    expect(isCalendarDate('1940-13-45')).toBe(false);
+    expect(normaliseBoundary('1940-13-45', 'start')).toBeNull();
+    expect(isCalendarDate('1943-02-29')).toBe(false);
+    expect(isCalendarDate('1944-02-29')).toBe(true);
+    expect(isCalendarDate('1940-04-31')).toBe(false);
+  });
+
+  it('rejects a year outside the window an axis can hold', () => {
+    // MySQL can store 0000-00-00 under a permissive sql_mode; one such row
+    // would drag a chronology's axis back to year zero.
+    expect(isCalendarDate('0000-00-00')).toBe(false);
+    expect(isCalendarDate('0000-01-01')).toBe(false);
+    expect(isCalendarDate('9999-01-01')).toBe(false);
+  });
+
+  it('still accepts real dates and bare years', () => {
+    expect(normaliseBoundary('1943-06-02', 'start')).toBe('1943-06-02');
+    expect(normaliseBoundary('1940', 'start')).toBe('1940-01-01');
+    expect(normaliseBoundary('1944', 'end')).toBe('1944-12-31');
   });
 });
 

@@ -77,6 +77,6 @@
       {% endfor %}
     </ol>
 
-    {{ ui.pagination('/timeline', page, pageCount, search) }}
+    {{ ui.pagination('/timeline', page, pageCount, search, filterQuery) }}
   {% endif %}
 {% endblock %}

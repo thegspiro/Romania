@@ -37,7 +37,7 @@ import { resolveForRender, resolveTimelines } from '../content/render-context.js
 import { searchAllEntities } from '../content/entities.js';
 import { listPlacementsOf } from '../content/manuscripts.js';
 import { recordAudit } from '../content/audit.js';
-import { actorId, flashFor, parseId, readCheckbox, readString } from './form.js';
+import { actorId, filterQuery, flashFor, parseId, readCheckbox, readString } from './form.js';
 
 function readEssayForm(body: unknown): { input: EssayInput; errors: string[] } {
   const errors: string[] = [];
@@ -94,6 +94,7 @@ export function registerAdminEssayRoutes(admin: FastifyInstance, context: AppCon
         pageCount: Math.max(Math.ceil(result.total / perPage), 1),
         search: query.q ?? '',
         visibilityFilter: visibility ?? '',
+        filterQuery: filterQuery({ q: query.q, visibility }),
       },
       { noindex: true, flash: flashFor(request) },
     );

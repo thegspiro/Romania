@@ -29,6 +29,8 @@ import {
   listEventsMentionedBy,
   listEventsRelatedTo,
   listTimeline,
+  parseTimelineDirective,
+  resolveTimelineDirectives,
   setEventBounds,
 } from '../../src/content/timeline.js';
 import { createRelationship, listPredicates } from '../../src/content/relationships.js';
@@ -631,6 +633,94 @@ describe.skipIf(!available)('timeline', () => {
     const contested = await makeEvent('A contested killing', 'public');
     await bound(contested, { after: ['a-contested-killing'] });
     expect((await findEventBoundSlugs(harness.pool, contested)).afterSlugs).toEqual([]);
+  });
+
+  // --- Defects #5 shipped ---------------------------------------------------
+
+  it('keeps a bounded event in a date range covering its window', async () => {
+    // The regression: the page places this event and the band draws it, and
+    // then a date filter over the very range it is known to fall in made it
+    // vanish -- because the filter read the event's own columns, which are
+    // empty, instead of the window its bounds allow.
+    await makeEvent('The pogrom', 'public', { startDate: '1941-06-29' });
+    await makeEvent('The armistice', 'public', { startDate: '1944-08-23' });
+    const contested = await makeEvent('A contested killing', 'public');
+    await bound(contested, { after: ['the-pogrom'], before: ['the-armistice'] });
+
+    const covering = await listTimeline(harness.pool, ANONYMOUS, { from: '1942', to: '1943' });
+    expect(covering.items.map((entry) => entry.title)).toContain('A contested killing');
+
+    const before = await listTimeline(harness.pool, ANONYMOUS, { from: '1930', to: '1935' });
+    expect(before.items.map((entry) => entry.title)).not.toContain('A contested killing');
+
+    const after = await listTimeline(harness.pool, ANONYMOUS, { from: '1950', to: '1955' });
+    expect(after.items.map((entry) => entry.title)).not.toContain('A contested killing');
+  });
+
+  it('keeps every filter on a paging link', async () => {
+    // Enough events to page, all in range, so the link is rendered.
+    for (let index = 0; index < 60; index += 1) {
+      await makeEvent(`Event ${String(index).padStart(3, '0')}`, 'public', {
+        startDate: '1941-06-29',
+      });
+    }
+
+    const page = await anonymous('/timeline?from=1940&to=1944&place=&q=Event');
+    // Previously this read `/timeline?page=2` and dropped from/to/q entirely.
+    expect(page.body).toContain('page=2');
+    expect(page.body).toContain('from=1940');
+    expect(page.body).toContain('to=1944');
+    expect(page.body).toContain('q=Event');
+  });
+
+  it('merges several subjects into one correct chronology', async () => {
+    // A regression guard for the refactor that made this one query instead of
+    // one per subject. NOT a bug fix: the old per-subject limit was lossless,
+    // because taking each subject's earliest N and merging still contains the
+    // global earliest N. What changed is the cost, and that duplicate subjects
+    // are now collapsed rather than queried twice.
+    const first = await makeEntity(harness.pool, 'person', 'First Subject', 'public');
+    const second = await makeEntity(harness.pool, 'person', 'Second Subject', 'public');
+    const participated = await predicateId('participated_in');
+
+    // Three events each. The earliest three overall belong to `second`, so a
+    // per-subject limit of 3 applied before the merge would wrongly keep
+    // `first`'s later events.
+    const connect = async (personId: number, titles: string[], year: number): Promise<void> => {
+      for (const [index, title] of titles.entries()) {
+        const eventId = await makeEvent(title, 'public', {
+          startDate: `${year + index}-01-01`,
+        });
+        await createRelationship(harness.pool, {
+          fromItemId: personId,
+          toItemId: eventId,
+          predicateId: participated,
+          note: null,
+          visibility: 'public',
+        });
+      }
+    };
+
+    await connect(first, ['Late A', 'Late B', 'Late C'], 1950);
+    await connect(second, ['Early A', 'Early B', 'Early C'], 1930);
+
+    const resolved = await resolveTimelineDirectives(
+      harness.pool,
+      [parseTimelineDirective('about: person:first-subject, person:second-subject\nlimit: 3')],
+      ANONYMOUS,
+    );
+
+    const [entries] = [...resolved.values()];
+    expect(entries?.map((entry) => entry.title)).toEqual(['Early A', 'Early B', 'Early C']);
+
+    // The same subject named twice contributes its events once.
+    const repeated = await resolveTimelineDirectives(
+      harness.pool,
+      [parseTimelineDirective('about: person:second-subject, person:second-subject')],
+      ANONYMOUS,
+    );
+    const [repeatedEntries] = [...repeated.values()];
+    expect(repeatedEntries?.map((entry) => entry.title)).toEqual(['Early A', 'Early B', 'Early C']);
   });
 
   // --- The admin form ------------------------------------------------------
