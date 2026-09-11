@@ -90,6 +90,18 @@ const OriginString = z.string().refine((value) => {
  */
 const PLACEHOLDER_SECRETS = new Set(['change-me', 'change-me-too']);
 
+/**
+ * Whether a host is the relying party or sits below it.
+ *
+ * This is the browser's own rule for a passkey ceremony, and it now governs
+ * two values, so it lives in one place: an origin that fails it is rejected
+ * by the browser, and a PUBLIC_BASE_URL that fails it sends visitors to a
+ * host where no ceremony can succeed.
+ */
+function isWithinRelyingParty(host: string, rpId: string): boolean {
+  return host === rpId || host.endsWith(`.${rpId}`);
+}
+
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']),
@@ -235,15 +247,27 @@ export function loadConfig(env: EnvSource = process.env): Config {
 
   for (const origin of parsed.WEBAUTHN_ORIGINS) {
     const host = new URL(origin).hostname;
-    const matchesRpId =
-      host === parsed.WEBAUTHN_RP_ID || host.endsWith(`.${parsed.WEBAUTHN_RP_ID}`);
-    if (!matchesRpId) {
+    if (!isWithinRelyingParty(host, parsed.WEBAUTHN_RP_ID)) {
       throw new ConfigError(
         `WEBAUTHN_ORIGIN "${origin}" is not valid for WEBAUTHN_RP_ID ` +
           `"${parsed.WEBAUTHN_RP_ID}". The origin's host must equal the RP ID or be a ` +
           'subdomain of it, or the browser will reject every passkey ceremony.',
       );
     }
+  }
+
+  // PUBLIC_BASE_URL builds every absolute link and validates redirects. Left
+  // pointing at a host the relying party does not cover, the site comes up,
+  // serves pages and then fails at the login form -- the one screen the
+  // operator reaches last. The origins above are already checked against the
+  // RP ID; this closes the gap where the canonical URL is not one of them.
+  const baseUrlHost = new URL(parsed.PUBLIC_BASE_URL).hostname;
+  if (!isWithinRelyingParty(baseUrlHost, parsed.WEBAUTHN_RP_ID)) {
+    throw new ConfigError(
+      `PUBLIC_BASE_URL "${parsed.PUBLIC_BASE_URL}" is not valid for WEBAUTHN_RP_ID ` +
+        `"${parsed.WEBAUTHN_RP_ID}". Its host must equal the RP ID or be a subdomain ` +
+        'of it, or visitors will be sent to a host where no passkey can be used.',
+    );
   }
 
   return Object.freeze({

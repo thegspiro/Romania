@@ -130,6 +130,46 @@ describe('loadConfig', () => {
     expect(config.DB_PASSWORD).toBe('change-me-please');
   });
 
+  it('rejects a PUBLIC_BASE_URL the relying party does not cover', () => {
+    // The origins can all be valid and the canonical URL still point
+    // somewhere else: the site comes up, serves pages, and fails at the login
+    // form -- the last screen the operator reaches.
+    expect(() =>
+      loadConfig(
+        env({
+          WEBAUTHN_RP_ID: 'example.org',
+          WEBAUTHN_ORIGIN: 'https://example.org',
+          PUBLIC_BASE_URL: 'https://staging.example.test',
+        }),
+      ),
+    ).toThrow(/PUBLIC_BASE_URL .* is not valid for WEBAUTHN_RP_ID/);
+  });
+
+  it('accepts a PUBLIC_BASE_URL on a subdomain of the RP ID', () => {
+    // The www-versus-apex case: a real deployment, and not a mistake.
+    const config = loadConfig(
+      env({
+        WEBAUTHN_RP_ID: 'example.org',
+        WEBAUTHN_ORIGIN: 'https://www.example.org',
+        PUBLIC_BASE_URL: 'https://www.example.org',
+      }),
+    );
+    expect(config.PUBLIC_BASE_URL).toBe('https://www.example.org');
+  });
+
+  it('accepts a PUBLIC_BASE_URL that is not the only origin', () => {
+    // During a domain migration several origins are live at once, and the
+    // canonical URL is one of them rather than all of them.
+    const config = loadConfig(
+      env({
+        WEBAUTHN_RP_ID: 'example.org',
+        WEBAUTHN_ORIGIN: 'https://example.org,https://old.example.org',
+        PUBLIC_BASE_URL: 'https://example.org',
+      }),
+    );
+    expect(config.WEBAUTHN_ORIGINS).toHaveLength(2);
+  });
+
   it('applies the __Host- cookie prefix only with secure cookies', () => {
     // Browsers reject the prefix without Secure, which would make the app
     // unusable over plain HTTP in development.

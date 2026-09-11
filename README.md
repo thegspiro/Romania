@@ -365,7 +365,18 @@ running with an unsafe default, so a mistake here is loud, not silent.
 docker compose up -d --build
 ```
 
-Migrations run automatically on start. Then create your account:
+Migrations run automatically on start. Check the install before going further:
+
+```sh
+docker compose exec web /app/scripts/entrypoint.sh preflight
+```
+
+It reports the configuration it loaded, the database, pending migrations, the
+data directories and whether an administrator exists — and exits non-zero if
+anything is actually broken. Reading the public URL and relying party back is
+the point: a value can be valid and still not be the one you meant.
+
+Then create your account:
 
 ```sh
 docker compose exec web /app/scripts/entrypoint.sh admin create-admin
@@ -454,6 +465,7 @@ docker compose exec web /app/scripts/entrypoint.sh <command>
 | `admin revoke-passkey --username u --id 3` | Remove one passkey                         |
 | `admin recovery-codes --username u`        | Generate a fresh set of codes              |
 | `admin sessions-revoke --username u`       | Sign out everywhere                        |
+| `preflight`                                | Report on the whole install and exit       |
 | `migrate status`                           | Show which migrations are applied          |
 | `migrate up`                               | Apply pending migrations                   |
 | `migrate down --to 2`                      | Roll back to version 2                     |
