@@ -121,6 +121,23 @@ absent one. The year is ANDed on top of `visibilityFilter`, never in place of
 it; a filter that could make a private node reachable would be a leak, and
 `tests/integration/graph.test.ts` pins that it cannot.
 
+**A file can be owned by an artifact or a source.** `FILE_OWNERS` in
+`src/files/repository.ts` is the one place that names them, so adding a third
+owner is editing that constant and nothing else. Two rules ride on it:
+
+- `findServableFile` is invariant 3 in one query. A `file_object` that **no**
+  item owns stays unreachable through `/files/:id/:variant` -- that is what
+  keeps a compiled manuscript build off this route, and it must survive any
+  change to the join.
+- Storage is content-addressed, so one file may have several owners. The rule
+  is **servable if any owning item is visible**: the bytes are one object, and
+  there is no coherent way for them to be public and private at once.
+  `tests/integration/source-files.test.ts` states that outright so it reads as
+  a decision rather than an accident of a `LIMIT 1`.
+
+Detaching a file clears the column and leaves `file_object` alone, because
+another item may still own it.
+
 **The export exists so the research can leave.** `src/content/export.ts`
 writes Markdown, CSL-JSON and a JSON catalogue -- deliberately nothing this
 application invented, because the risk to a five-year dissertation is not a
@@ -383,33 +400,33 @@ the properties being asserted actually live.
 
 ## Where things are
 
-| Concern                                | File                                |
-| -------------------------------------- | ----------------------------------- |
-| Who may see what                       | `src/content/visibility.ts`         |
-| Config validation                      | `src/config.ts`                     |
-| Chicago rendering, HTML sanitising     | `src/citations/render.ts`           |
-| CSL-JSON model, form mapping           | `src/citations/csl.ts`              |
-| Passkey ceremonies                     | `src/auth/webauthn.ts`              |
-| Sessions, CSRF comparison, IP packing  | `src/auth/session.ts`               |
-| Security headers, CSP, robots policy   | `src/http/security.ts`              |
-| Request lifecycle                      | `src/http/server.ts`                |
-| Slugs (mirrored in Python)             | `src/content/slug.ts`               |
-| Reference syntax, context extraction   | `src/content/references.ts`         |
-| Prose → HTML, the visible/not decision | `src/content/markdown.ts`           |
-| Projections and backlinks              | `src/content/mentions.ts`           |
-| Corpus export, portable formats        | `src/content/export.ts`             |
-| Essay revisions, restore rules         | `src/content/essays.ts`             |
-| Line diff for the comparison view      | `src/content/diff.ts`               |
-| Outline, navigation, assembly          | `src/content/manuscripts.ts`        |
-| Build records, staging, enqueue        | `src/content/builds.ts`             |
-| Graph traversal with per-hop filtering | `src/content/graph.ts`              |
-| Dates, chronological reads, the band   | `src/content/timeline.ts`           |
-| Path safety, magic bytes, hashing      | `src/files/storage.ts`              |
-| Access-checked file lookup             | `src/files/repository.ts`           |
-| Zotero sync, link and merge rules      | `worker/jobs/zotero_sync.py`        |
-| Sync queueing and state for the admin  | `src/content/zotero.ts`             |
-| Job runner                             | `worker/runner.py`                  |
-| Pandoc invocation                      | `worker/jobs/manuscript_compile.py` |
+| Concern                                 | File                                |
+| --------------------------------------- | ----------------------------------- |
+| Who may see what                        | `src/content/visibility.ts`         |
+| Config validation                       | `src/config.ts`                     |
+| Chicago rendering, HTML sanitising      | `src/citations/render.ts`           |
+| CSL-JSON model, form mapping            | `src/citations/csl.ts`              |
+| Passkey ceremonies                      | `src/auth/webauthn.ts`              |
+| Sessions, CSRF comparison, IP packing   | `src/auth/session.ts`               |
+| Security headers, CSP, robots policy    | `src/http/security.ts`              |
+| Request lifecycle                       | `src/http/server.ts`                |
+| Slugs (mirrored in Python)              | `src/content/slug.ts`               |
+| Reference syntax, context extraction    | `src/content/references.ts`         |
+| Prose → HTML, the visible/not decision  | `src/content/markdown.ts`           |
+| Projections and backlinks               | `src/content/mentions.ts`           |
+| Corpus export, portable formats         | `src/content/export.ts`             |
+| Essay revisions, restore rules          | `src/content/essays.ts`             |
+| Line diff for the comparison view       | `src/content/diff.ts`               |
+| Outline, navigation, assembly           | `src/content/manuscripts.ts`        |
+| Build records, staging, enqueue         | `src/content/builds.ts`             |
+| Graph traversal with per-hop filtering  | `src/content/graph.ts`              |
+| Dates, chronological reads, the band    | `src/content/timeline.ts`           |
+| Path safety, magic bytes, hashing       | `src/files/storage.ts`              |
+| Access-checked file lookup, file owners | `src/files/repository.ts`           |
+| Zotero sync, link and merge rules       | `worker/jobs/zotero_sync.py`        |
+| Sync queueing and state for the admin   | `src/content/zotero.ts`             |
+| Job runner                              | `worker/runner.py`                  |
+| Pandoc invocation                       | `worker/jobs/manuscript_compile.py` |
 
 ### Two implementations that must stay in step
 

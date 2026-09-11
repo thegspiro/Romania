@@ -199,7 +199,8 @@ async function exportSources(pool: Pool, viewer: Viewer, directory: string): Pro
         source.archive !== null ||
         source.archiveLocation !== null ||
         source.callNumber !== null ||
-        source.notes !== null
+        source.notes !== null ||
+        source.fileObjectId !== null
       ) {
         provenance.push({
           id: source.slug,
@@ -209,6 +210,17 @@ async function exportSources(pool: Pool, viewer: Viewer, directory: string): Pro
           call_number: source.callNumber,
           accessed_on: source.accessedOn,
           notes: source.notes,
+          // The scan of the work itself, if one is attached. Named the same
+          // way the artifact catalogue names its files, so one reader of this
+          // export learns one convention.
+          file:
+            source.fileObjectId === null
+              ? null
+              : {
+                  original_filename: source.originalFilename,
+                  mime_type: source.mimeType,
+                  byte_size: source.byteSize,
+                },
         });
       }
     }
