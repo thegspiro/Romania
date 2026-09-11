@@ -3,65 +3,86 @@
 
   Server-rendered SVG on purpose. The graph needed a layout engine and so needed
   Cytoscape; a band of dated spans does not, and `layoutTimelineBand` has
-  already computed every coordinate. So this needs no JavaScript, no vendored
-  library and no CSP exception, and it works in a text browser's fallback the
-  same way the list beneath it does.
+  already computed every coordinate -- including the y of the axis and of its
+  labels, so nothing here does arithmetic on a number the module produced.
 
   Geometry goes in x/y/width/height attributes; colour comes from classes in
   site.css. No `style=` attribute -- the CSP forbids inline styles, and
   check-invariants.mjs fails the build for one.
 
-  The list below this is the same data, not a fallback for it.
+  The drawing is `aria-hidden`, and its links are removed from the tab order.
+  `role="presentation"` does not propagate to focusable descendants, so before
+  this a keyboard user tabbed through fifty links inside an element declared
+  decorative and then met the same fifty again in the list below. The list is
+  the accessible content; a mouse click on a bar still works.
 #}
 {% if band %}
   <figure class="timeline-band">
     <figcaption class="visually-hidden">
-      A chronology from {{ band.firstYear }} to {{ band.lastYear }},
-      drawn as {{ band.spans.length }} spans. The list that follows carries the
-      same events.
+      A chronology covering {{ band.rangeLabel }}, drawn as {{ band.spans.length }}
+      {{ 'span' if band.spans.length == 1 else 'spans' }}.
+      The list that follows carries the same events.
     </figcaption>
 
     <svg
       class="band"
-      viewBox="0 -8 {{ band.width }} {{ band.height }}"
+      viewBox="{{ band.viewBox }}"
       width="100%"
       height="{{ band.height }}"
-      role="presentation"
+      aria-hidden="true"
       focusable="false"
       preserveAspectRatio="none"
     >
       {% for tick in band.ticks %}
-        <line
-          class="band-tick"
-          x1="{{ tick.x }}"
-          y1="-8"
-          x2="{{ tick.x }}"
-          y2="{{ band.height - 24 }}"
-        />
-        <text class="band-tick-label" x="{{ tick.x }}" y="{{ band.height - 8 }}">
-          {{ tick.year }}
+        <line class="band-tick" x1="{{ tick.x }}" y1="{{ band.tickY }}" x2="{{ tick.x }}" y2="{{ band.axisY }}" />
+        <text
+          class="band-tick-label{% if loop.first %} band-tick-label-first{% endif %}{% if loop.last %} band-tick-label-last{% endif %}"
+          x="{{ tick.x }}"
+          y="{{ band.labelY }}"
+        >
+          {{ tick.label }}
         </text>
       {% endfor %}
 
       {#
-        An uncertain span is the window an event could have fallen in, not the
-        period it occupied, so it is drawn as an outline rather than a solid
-        bar. A reader must not mistake a bounded guess for a dated fact.
+        Three marks, three meanings. A bar's width is how long the event lasted
+        and nothing else: a width that meant "known only to the year" would
+        assert a duration the record does not carry. An uncertain span is the
+        window an event could have fallen in, so it is outlined rather than
+        filled -- a reader must not mistake a bounded guess for a dated fact.
       #}
       {% for span in band.spans %}
-        <a href="{{ span.href }}">
+        <a href="{{ span.href }}" tabindex="-1">
           <title>{{ span.dateLabel }} — {{ span.title }}</title>
           <rect
-            class="band-span{% if span.uncertain %} band-span-uncertain{% endif %}{% if span.visibility != 'public' %} band-span-private{% endif %}"
+            class="band-span{% if span.point %} band-span-point{% endif %}{% if span.uncertain %} band-span-uncertain{% endif %}{% if span.visibility != 'public' %} band-span-private{% endif %}"
             x="{{ span.x }}"
             y="{{ span.y }}"
             width="{{ span.width }}"
-            height="14"
+            height="{{ band.spanHeight }}"
             rx="3"
           />
         </a>
       {% endfor %}
     </svg>
+
+    {#
+      The figcaption is visually hidden, so without this a sighted reader has no
+      way to learn that a dashed outline means something different from a bar.
+    #}
+    <ul class="band-legend">
+      <li><span class="band-key band-key-period"></span>A recorded period</li>
+      <li><span class="band-key band-key-point"></span>A single date, at the precision known</li>
+      <li><span class="band-key band-key-uncertain"></span>A window between other events</li>
+    </ul>
+
+    {% if band.overflow > 0 %}
+      <p class="muted small">
+        {{ band.overflow }} further
+        {{ 'event is' if band.overflow == 1 else 'events are' }}
+        listed below but did not fit on the band.
+      </p>
+    {% endif %}
 
     {% if band.undated > 0 %}
       <p class="muted small">

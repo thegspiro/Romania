@@ -49,6 +49,6 @@
       </tbody>
     </table>
 
-    {{ ui.pagination('/admin/' + path, page, pageCount, search) }}
+    {{ ui.pagination('/admin/' + path, page, pageCount, search, filterQuery) }}
   {% endif %}
 {% endblock %}

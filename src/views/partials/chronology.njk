@@ -7,8 +7,23 @@
   out: an absence has to be indistinguishable from never having existed.
 
   `dateLabel` was formatted by `formatEventDate`, which is the only thing that
-  knows what a stored date's precision means. Nothing is re-derived here.
+  knows what a stored date's precision means, and `chronologyGroups` was cut by
+  `groupEntries`, which knows how wide a heading may honestly be. Nothing is
+  re-derived here.
 #}
+{% macro chronologyItem(entry) %}
+  <li>
+    <span class="chronology-date">{{ entry.dateLabel }}</span>
+    <a href="{{ entry.href }}">{{ entry.title }}</a>
+    {% if entry.place %}
+      <span class="chronology-place">{{ entry.place.title }}</span>
+    {% endif %}
+    {% if entry.visibility != 'public' %}
+      <span class="badge badge-private">Private</span>
+    {% endif %}
+  </li>
+{% endmacro %}
+
 <section class="chronology">
   <h2>{{ chronologyHeading | default('Chronology') }}</h2>
 
@@ -18,19 +33,20 @@
     {% set band = chronologyBand %}
     {% include "partials/timeline-band.njk" %}
 
-    <ol class="chronology-list">
-      {% for entry in chronology %}
-        <li>
-          <span class="chronology-date">{{ entry.dateLabel }}</span>
-          <a href="{{ entry.href }}">{{ entry.title }}</a>
-          {% if entry.place %}
-            <span class="chronology-place">{{ entry.place.title }}</span>
-          {% endif %}
-          {% if entry.visibility != 'public' %}
-            <span class="badge badge-private">Private</span>
-          {% endif %}
-        </li>
+    {#
+      A single heading over the whole list says nothing, so it is not drawn.
+    #}
+    {% if chronologyGroups and chronologyGroups.length > 1 %}
+      {% for group in chronologyGroups %}
+        <h3 class="chronology-group">{{ group.label }}</h3>
+        <ol class="chronology-list">
+          {% for entry in group.entries %}{{ chronologyItem(entry) }}{% endfor %}
+        </ol>
       {% endfor %}
-    </ol>
+    {% else %}
+      <ol class="chronology-list">
+        {% for entry in chronology %}{{ chronologyItem(entry) }}{% endfor %}
+      </ol>
+    {% endif %}
   {% endif %}
 </section>

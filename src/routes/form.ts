@@ -24,6 +24,25 @@ export function readInteger(body: unknown, field: string, fallback: number): num
   return Number.isSafeInteger(parsed) ? parsed : fallback;
 }
 
+/**
+ * The query string a paging link must carry, minus `page` itself.
+ *
+ * A listing's filters live in the query string, so a "Next" link that does not
+ * repeat them silently returns an unfiltered page under a filter form still
+ * showing the old values. Blank and undefined values are dropped so the link
+ * stays short, and every value is encoded.
+ *
+ * Returns '' when nothing is filtered, which is what the pagination macro
+ * treats as "no extra parameters".
+ */
+export function filterQuery(params: Record<string, string | undefined>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value === 'string' && value.trim() !== '') search.set(key, value);
+  }
+  return search.toString();
+}
+
 /** Reads a positive integer route parameter, 404ing on anything else. */
 export function parseId(request: FastifyRequest, parameter = 'id'): number {
   const raw = (request.params as Record<string, string | undefined>)[parameter] ?? '';

@@ -23,7 +23,7 @@ import { listMentionsOf } from '../content/mentions.js';
 import { UnsupportedFileTypeError, UploadTooLargeError, storeStream } from '../files/storage.js';
 import { enqueueDerivatives, insertFileObject } from '../files/repository.js';
 import { recordAudit } from '../content/audit.js';
-import { actorId, flashFor, parseId, readCheckbox, readString } from './form.js';
+import { actorId, filterQuery, flashFor, parseId, readCheckbox, readString } from './form.js';
 
 function readArtifactForm(body: unknown): { input: ArtifactInput; errors: string[] } {
   const errors: string[] = [];
@@ -81,6 +81,7 @@ export function registerAdminArtifactRoutes(admin: FastifyInstance, context: App
         pageCount: Math.max(Math.ceil(result.total / perPage), 1),
         search: query.q ?? '',
         visibilityFilter: visibility ?? '',
+        filterQuery: filterQuery({ q: query.q, visibility }),
       },
       { noindex: true, flash: flashFor(request) },
     );
