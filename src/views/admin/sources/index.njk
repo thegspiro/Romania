@@ -8,6 +8,32 @@
     <a class="button" href="/admin/sources/new">Add source</a>
   </div>
 
+  {% if zotero %}
+    <section class="zotero-sync">
+      <form method="post" action="/admin/sources/zotero-sync" class="inline-form">
+        <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+        <button type="submit">Sync from Zotero</button>
+        <label for="zotero-full">
+          <input type="checkbox" id="zotero-full" name="full" value="on" />
+          Full resync
+        </label>
+      </form>
+      <p class="muted small">
+        {{ zotero.libraryType | capitalize }} library {{ zotero.libraryId }}.
+        {% if zotero.state and zotero.state.lastSyncedAt %}
+          Last synced
+          {{ zotero.state.lastSyncedAt.toISOString().slice(0, 16) | replace('T', ' ') }}
+          at library version {{ zotero.state.lastVersion }} —
+          {{ zotero.state.createdCount }} added,
+          {{ zotero.state.linkedCount }} linked to existing,
+          {{ zotero.state.updatedCount }} updated.
+        {% else %}
+          Never synced. The first sync imports the whole library as private sources.
+        {% endif %}
+      </p>
+    </section>
+  {% endif %}
+
   <form method="get" action="/admin/sources" class="filter-form" role="search">
     <label for="q">Search</label>
     <input type="search" id="q" name="q" value="{{ search }}" placeholder="Title, archive, call number" />
@@ -41,6 +67,9 @@
           <tr>
             <td>
               <a href="/admin/sources/{{ source.id }}/edit">{{ source.title }}</a>
+              {% if source.id in zoteroDeletedIds %}
+                <span class="badge badge-alert">Deleted in Zotero</span>
+              {% endif %}
               {% if source.archive %}<div class="muted small">{{ source.archive }}</div>{% endif %}
             </td>
             <td>{{ source.cslType }}</td>

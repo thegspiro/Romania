@@ -295,6 +295,26 @@ h2 {
   color: var(--ok);
 }
 
+/* Outlined rather than filled: it marks something to look at, not a state the
+   item is in, and the shape distinguishes it without a fourth colour. */
+.badge-alert {
+  background: transparent;
+  color: var(--warn);
+  border: 1px solid currentColor;
+}
+
+.zotero-sync {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+  margin-bottom: 1.5rem;
+}
+
+.zotero-sync p {
+  margin: 0;
+}
+
 .flash {
   font-family: var(--sans);
   font-size: 0.9375rem;
