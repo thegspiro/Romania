@@ -1107,12 +1107,39 @@ button.danger {
   overflow: visible;
 }
 
+/* `preserveAspectRatio: none` scales x but not y, so on a phone the band is
+   squeezed to a third of its width and every tick label with it. Below the
+   breakpoint the drawing keeps its natural width and the figure scrolls
+   sideways instead, which needs neither an inline style nor a script. */
+@media (max-width: 62rem) {
+  .timeline-band {
+    overflow-x: auto;
+  }
+
+  .timeline-band .band {
+    width: 960px;
+  }
+}
+
 .band-span {
   fill: var(--accent);
 }
 
+/* A single date, drawn at its instant. Softer than a recorded period, because
+   it is a point on the axis and not a claim about how long anything took. */
+.band-span-point {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 1;
+}
+
 .band-span-private {
   fill: var(--ink-muted);
+}
+
+.band-span-point.band-span-private {
+  fill: var(--rule);
+  stroke: var(--ink-muted);
 }
 
 /* The window a bounded event could have fallen in, not a period it occupied.
@@ -1149,6 +1176,52 @@ button.danger {
   font-family: var(--sans);
   font-size: 11px;
   text-anchor: middle;
+}
+
+/* Centred on the first and last ticks, half of each label would hang outside
+   the viewBox. Anchor the outermost two inwards instead. */
+.band-tick-label-first {
+  text-anchor: start;
+}
+
+.band-tick-label-last {
+  text-anchor: end;
+}
+
+/* What the three marks mean. The figcaption says so too, but it is hidden from
+   sighted readers, who otherwise have nothing to read the drawing against. */
+.band-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  font-family: var(--sans);
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+}
+
+.band-key {
+  display: inline-block;
+  width: 1.5rem;
+  height: 0.65rem;
+  margin-right: 0.4rem;
+  vertical-align: -0.1rem;
+  border-radius: 2px;
+}
+
+.band-key-period {
+  background: var(--accent);
+}
+
+.band-key-point {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+}
+
+.band-key-uncertain {
+  border: 1px dashed var(--accent);
 }
 
 /* A timeline block embedded in prose. */

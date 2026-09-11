@@ -234,6 +234,140 @@ export function formatEventDate(dates: EventDates): string {
   return `${circa}${start} – ${end}`;
 }
 
+// --- Instants on an axis ---------------------------------------------------
+
+/*
+ * A caveat this module cannot fix, and should not hide.
+ *
+ * Everything below is proleptic Gregorian, because that is what JavaScript's
+ * Date arithmetic is. Romania kept the Julian calendar until 1919, so an Old
+ * Style date transcribed verbatim from a pre-1919 source will be placed about
+ * thirteen days from where a Gregorian reader expects it. That was harmless
+ * while the band was year-granular; now that a day is a position, it is worth
+ * stating. Converting calendars is its own change set, and would need the
+ * record to say which calendar a date was written in -- which it does not.
+ */
+
+const MS_PER_MINUTE = 60_000;
+const MS_PER_HOUR = 60 * MS_PER_MINUTE;
+const MS_PER_DAY = 24 * MS_PER_HOUR;
+
+/**
+ * A UTC instant, built the only safe way.
+ *
+ * Not `Date.UTC`, which maps years 0-99 to 1900+y: one `0042-01-01` would drag
+ * a chronology's axis back two millennia. Not `new Date(string)` or
+ * `Date.parse` either -- `new Date('1943-06-02T14:30')` carries no zone and is
+ * read as *local*, which is invisible on a UTC machine and wrong on the
+ * operator's.
+ *
+ * Out-of-range month and day values normalise the way the calendar does, which
+ * is what the tick generator relies on to step from December into January.
+ */
+function utcInstant(year: number, month: number, day: number, hour = 0, minute = 0): number {
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(hour, minute, 0, 0);
+  return date.getTime();
+}
+
+/** The calendar parts of an instant, UTC. The inverse of `utcInstant`. */
+function partsOfInstant(instant: number): DateParts {
+  const date = new Date(instant);
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+  };
+}
+
+/**
+ * The half-open interval a stored endpoint actually names.
+ *
+ * Half-open so adjacent units abut with no seam: 1943 ends where 1944 begins,
+ * and a minute-precision event still has a non-zero extent.
+ */
+interface EndpointUnit {
+  start: number;
+  /** Exclusive. Equal to `start` at `unknown`, which names no interval. */
+  end: number;
+}
+
+function endpointUnit(
+  iso: string | null,
+  time: string | null,
+  precision: DatePrecision,
+): EndpointUnit | null {
+  const parts = parseIsoDate(iso);
+  if (parts === null) return null;
+  const { year, month, day } = parts;
+
+  switch (precision) {
+    case 'decade': {
+      const first = Math.floor(year / 10) * 10;
+      return { start: utcInstant(first, 1, 1), end: utcInstant(first + 10, 1, 1) };
+    }
+    case 'year':
+      return { start: utcInstant(year, 1, 1), end: utcInstant(year + 1, 1, 1) };
+    case 'month':
+      return { start: utcInstant(year, month, 1), end: utcInstant(year, month + 1, 1) };
+    case 'day':
+      return { start: utcInstant(year, month, day), end: utcInstant(year, month, day + 1) };
+    case 'hour':
+    case 'minute': {
+      const clock = parseClock(time, precision);
+      // The precision claims a time the column does not carry. Fall back to the
+      // day, which is exactly what `formatEndpoint` prints in that case, so the
+      // drawing and the label cannot disagree.
+      if (clock === null) {
+        return { start: utcInstant(year, month, day), end: utcInstant(year, month, day + 1) };
+      }
+      const start = utcInstant(year, month, day, clock.hour, clock.minute);
+      return { start, end: start + (precision === 'minute' ? MS_PER_MINUTE : MS_PER_HOUR) };
+    }
+    case 'unknown': {
+      // Not one day. `unknown` says the record does not vouch for how much of
+      // the stored value is meant; a day-wide bar would assert the day.
+      const start = utcInstant(year, month, day);
+      return { start, end: start };
+    }
+  }
+}
+
+/** 'HH:MM' from the column as numbers, truncated to the precision claimed. */
+function parseClock(
+  value: string | null,
+  precision: DatePrecision,
+): { hour: number; minute: number } | null {
+  if (value === null) return null;
+  const match = /^(\d{2}):(\d{2})/.exec(value);
+  if (match === null) return null;
+  const [, hourText, minuteText] = match;
+  if (hourText === undefined || minuteText === undefined) return null;
+
+  const hour = Number(hourText);
+  const minute = precision === 'minute' ? Number(minuteText) : 0;
+  if (hour > 23 || minute > 59) return null;
+  return { hour, minute };
+}
+
+/**
+ * Milliseconds from the Unix epoch for one edge of an event, UTC only.
+ *
+ * `start` is where the first known endpoint's unit opens; `end` is where the
+ * last known endpoint's unit closes, exclusive. Either falls back to the other,
+ * so "until 1945" still has a position. Null when nothing places the event.
+ *
+ * This is the whole conversion surface. Everything downstream is arithmetic on
+ * a number, so there is no second place to get a time zone wrong.
+ */
+export function instantOf(dates: EventDates, edge: 'start' | 'end'): number | null {
+  const start = endpointUnit(dates.startDate, dates.startTime, dates.startPrecision);
+  const end = endpointUnit(dates.endDate, dates.endTime, dates.endPrecision);
+  if (edge === 'start') return (start ?? end)?.start ?? null;
+  return (end ?? start)?.end ?? null;
+}
+
 // --- Relative dating -------------------------------------------------------
 
 /**
@@ -280,21 +414,6 @@ export function formatEventBounds(bounds: EventBounds): string | null {
   if (after !== undefined) parts.push(`after ${after.title}`);
   if (before !== undefined) parts.push(`before ${before.title}`);
   return parts.length === 0 ? null : parts.join(', ');
-}
-
-/** The year a timeline places this event at, or null when it carries no date. */
-export function eventYear(dates: EventDates): number | null {
-  const parts = parseIsoDate(dates.startDate) ?? parseIsoDate(dates.endDate);
-  return parts?.year ?? null;
-}
-
-/** The last year the event still runs through, for a span on the band. */
-export function eventEndYear(dates: EventDates): number | null {
-  const parts = parseIsoDate(dates.endDate) ?? parseIsoDate(dates.startDate);
-  if (parts === null) return null;
-  // A decade-precision endpoint runs to the end of its decade.
-  const precision = dates.endDate === null ? dates.startPrecision : dates.endPrecision;
-  return precision === 'decade' ? Math.floor(parts.year / 10) * 10 + 9 : parts.year;
 }
 
 // --- The timeline block directive ------------------------------------------
@@ -1321,14 +1440,34 @@ export function parseSlugList(value: string | undefined): string[] {
 
 // --- The visual band -------------------------------------------------------
 
+/**
+ * One event, drawn.
+ *
+ * The axis is milliseconds, so a chronology confined to a single afternoon and
+ * one covering five centuries are the same drawing at different scales. A bar's
+ * **width is duration and nothing else**. Precision is carried by `point` and
+ * `uncertain` instead, and drawn as a difference in fill rather than in length:
+ * a width that meant "known only to the year" would be a duration claim the
+ * record does not make, which is the same error `formatEventDate` exists to
+ * prevent, committed in pixels instead of words.
+ *
+ * Three marks, three meanings:
+ *
+ * - a solid bar is a documented period, with both endpoints recorded;
+ * - a soft fill (`point`) is an instant known to its stated precision;
+ * - a dashed outline (`uncertain`) is a window derived from relative bounds.
+ */
 export interface BandSpan {
   id: number;
   title: string;
   href: string;
   visibility: Visibility;
   dateLabel: string;
-  startYear: number;
-  endYear: number;
+  /** The extent the span stands for, as UTC instants. `end` is exclusive. */
+  startInstant: number;
+  endInstant: number;
+  /** A single endpoint rather than a recorded period: drawn at a fixed width. */
+  point: boolean;
   /**
    * True when the span is the window the event could have fallen in, derived
    * from its bounds, rather than the period it is known to have occupied. The
@@ -1343,24 +1482,53 @@ export interface BandSpan {
 }
 
 export interface BandTick {
-  year: number;
+  /** Already formatted by `formatEndpoint`. The template prints it. */
+  label: string;
   x: number;
 }
 
 export interface BandLayout {
   width: number;
   height: number;
-  firstYear: number;
-  lastYear: number;
+  /** Every y the template needs, so it computes none of them itself. */
+  viewBox: string;
+  tickY: number;
+  axisY: number;
+  spanHeight: number;
+  labelY: number;
+  /** The axis, after padding. Not what the events claim -- see `rangeLabel`. */
+  firstInstant: number;
+  lastInstant: number;
+  /**
+   * The range the *entries* cover, for the caption.
+   *
+   * Built from the endpoints themselves, never from the padded exclusive axis:
+   * a chronology whose last event ends in 1943 must not caption as "to 1944",
+   * which is a date the record does not carry.
+   */
+  rangeLabel: string;
   spans: BandSpan[];
   ticks: BandTick[];
   /** Events with no date at all: listed below, absent from the drawing. */
   undated: number;
+  /**
+   * Placed events the drawing ran out of rows for.
+   *
+   * Reported rather than crammed into the last row. Overlapping bars would let
+   * a covering `<a>` steal another event's tooltip and click target, so a
+   * reader could hover one bar and be shown a different event's title.
+   */
+  overflow: number;
 }
 
 const BAND_WIDTH = 960;
 const BAND_ROW_HEIGHT = 22;
+const BAND_SPAN_HEIGHT = 14;
+/** Room above y=0 for the tick lines to overhang the first row. */
+const BAND_TOP_PAD = 8;
+/** Room below the rows for a tick label, with its descenders clear of the edge. */
 const BAND_AXIS_HEIGHT = 24;
+const BAND_LABEL_BASELINE = 14;
 const BAND_MIN_SPAN = 4;
 const BAND_MAX_ROWS = 24;
 
@@ -1369,20 +1537,57 @@ function round(value: number): number {
 }
 
 /**
- * The years an entry occupies on the band, and whether that is a claim or a
- * window.
+ * Coordinates are asserted rather than trusted.
  *
- * A dated event spans the period it ran for. A bounded one spans everything
- * between its anchors -- which is the honest drawing, because the event is
- * somewhere in there and the sources do not say where. An event with only one
- * bound gets a window running to that bound and no further.
+ * A `NaN` reaching an SVG attribute is discarded by the browser, and the bar
+ * simply is not drawn -- an event that vanishes from a chronology with no trace,
+ * which is the one failure this application treats as unacceptable. Better a
+ * loud error in a test than a silent omission on a page.
  */
-function placement(entry: TimelineEntry): { from: number; to: number; uncertain: boolean } | null {
-  const start = eventYear(entry.dates);
-  if (start !== null) {
+function finite(value: number, what: string): number {
+  if (!Number.isFinite(value)) throw new Error(`timeline band: ${what} is not a finite number`);
+  return value;
+}
+
+/**
+ * Where an entry sits on the axis, and what kind of claim that is.
+ *
+ * A dated event with both endpoints spans the period it ran for. A single
+ * endpoint is a point: it is drawn at the instant its unit opens, at a fixed
+ * width, because how long the unit is says nothing about how long the event
+ * took. A bounded one spans everything between its anchors -- the honest
+ * drawing, because the event is somewhere in there and the sources do not say
+ * where.
+ */
+interface Placement {
+  /** Where the drawn bar starts. */
+  from: number;
+  /** Where the drawn bar ends, exclusive. Equal to `from` for a point. */
+  to: number;
+  /** Where what the record claims ends, exclusive. Used for the caption only. */
+  extentEnd: number;
+  point: boolean;
+  uncertain: boolean;
+}
+
+function placement(entry: TimelineEntry): Placement | null {
+  const { dates } = entry;
+  const start = endpointUnit(dates.startDate, dates.startTime, dates.startPrecision);
+  const end = endpointUnit(dates.endDate, dates.endTime, dates.endPrecision);
+
+  const first = start ?? end;
+  const last = end ?? start;
+  if (first !== null && last !== null) {
+    // One endpoint recorded is an instant; two are a period.
+    const point = dates.startDate === null || dates.endDate === null;
+    // `start > end` is permitted by the schema, and so is a same-day pair of
+    // times in the wrong order. Clamp rather than draw a negative width.
+    const extentEnd = Math.max(last.end, first.start);
     return {
-      from: start,
-      to: Math.max(eventEndYear(entry.dates) ?? start, start),
+      from: first.start,
+      to: point ? first.start : extentEnd,
+      extentEnd,
+      point,
       uncertain: false,
     };
   }
@@ -1390,17 +1595,15 @@ function placement(entry: TimelineEntry): { from: number; to: number; uncertain:
   const bounds = entry.bounds;
   if (bounds === null) return null;
 
-  const earliest = yearOf(bounds.earliest);
-  const latest = yearOf(bounds.latest);
-  if (earliest === null && latest === null) return null;
+  const earliest = parseIsoDate(bounds.earliest) ?? parseIsoDate(bounds.latest);
+  const latest = parseIsoDate(bounds.latest) ?? parseIsoDate(bounds.earliest);
+  if (earliest === null || latest === null) return null;
 
-  const from = earliest ?? latest ?? 0;
-  const to = latest ?? earliest ?? 0;
-  return { from: Math.min(from, to), to: Math.max(from, to), uncertain: true };
-}
-
-function yearOf(iso: string | null): number | null {
-  return parseIsoDate(iso)?.year ?? null;
+  const windowStart = utcInstant(earliest.year, earliest.month, earliest.day);
+  const windowEnd = utcInstant(latest.year, latest.month, latest.day + 1);
+  const from = Math.min(windowStart, windowEnd);
+  const to = Math.max(windowStart, windowEnd);
+  return { from, to, extentEnd: to, point: false, uncertain: true };
 }
 
 /**
@@ -1414,37 +1617,70 @@ function yearOf(iso: string | null): number | null {
  * a drawing that says nothing.
  */
 export function layoutTimelineBand(entries: readonly TimelineEntry[]): BandLayout | null {
-  const placed = entries.filter((entry) => placement(entry) !== null);
+  const placements = new Map<number, Placement>();
+  const placed: TimelineEntry[] = [];
+  for (const entry of entries) {
+    const where = placement(entry);
+    if (where === null) continue;
+    placements.set(entry.id, where);
+    placed.push(entry);
+  }
+
   const undated = entries.length - placed.length;
+  // `Math.min()` of nothing is Infinity, which would make every coordinate NaN.
+  // The guard and the spread stay in one function so they cannot drift apart.
   if (placed.length === 0) return null;
 
-  const windows = placed.map((entry) => placement(entry) ?? { from: 0, to: 0, uncertain: false });
-  const firstYear = Math.min(...windows.map((window) => window.from));
-  const lastYear = Math.max(...windows.map((window) => window.to));
-  // A single-year chronology still needs a non-zero span to divide by.
-  const range = Math.max(lastYear - firstYear, 1);
+  const windows = [...placements.values()];
+  const first = Math.min(...windows.map((window) => window.from));
+  const last = Math.max(...windows.map((window) => window.to));
 
-  const scale = (year: number): number => ((year - firstYear) / range) * BAND_WIDTH;
+  /*
+   * The axis is a quarter wider than the events need, split evenly, so the
+   * first and last bars sit inside the drawing rather than flush against its
+   * edges. A chronology with no natural width at all -- one event, or several
+   * at the same instant -- is surveyed at the widest unit anyone claims, and at
+   * least a day either way, because a point on its own implies no scale.
+   */
+  const natural = last - first;
+  const units = windows.map((window) => window.extentEnd - window.from);
+  const range = Math.max(
+    natural > 0 ? natural * 1.25 : Math.max(MS_PER_DAY, ...units),
+    MS_PER_MINUTE,
+  );
+  const pad = (range - natural) / 2;
+  const axisFrom = finite(first - pad, 'axis start');
+  const axisTo = finite(last + pad, 'axis end');
+
+  const scale = (instant: number): number => ((instant - axisFrom) / range) * BAND_WIDTH;
 
   // Greedy row packing: a span goes in the first row whose last span ends
   // before it starts, so overlapping events stack instead of colliding.
   const rowEnds: number[] = [];
   const spans: BandSpan[] = [];
+  let overflow = 0;
 
   for (const entry of sortEntries(placed)) {
-    const window = placement(entry);
-    if (window === null) continue;
+    const window = placements.get(entry.id);
+    if (window === undefined) continue;
 
-    const x = scale(window.from);
-    const width = Math.max(scale(window.to) - x, BAND_MIN_SPAN);
+    const x = finite(scale(window.from), 'span x');
+    const width = finite(
+      window.point ? BAND_MIN_SPAN : Math.max(scale(window.to) - x, BAND_MIN_SPAN),
+      'span width',
+    );
 
     let row = rowEnds.findIndex((end) => end <= x);
     if (row === -1) {
-      if (rowEnds.length >= BAND_MAX_ROWS) row = rowEnds.length - 1;
-      else {
-        rowEnds.push(0);
-        row = rowEnds.length - 1;
+      if (rowEnds.length >= BAND_MAX_ROWS) {
+        // Reported beneath the drawing rather than stacked on top of another
+        // event's link. The cut falls in date order, which is the one ordering
+        // uncorrelated with visibility.
+        overflow += 1;
+        continue;
       }
+      rowEnds.push(0);
+      row = rowEnds.length - 1;
     }
     rowEnds[row] = x + width + BAND_MIN_SPAN;
 
@@ -1454,10 +1690,9 @@ export function layoutTimelineBand(entries: readonly TimelineEntry[]): BandLayou
       href: entry.href,
       visibility: entry.visibility,
       dateLabel: entry.dateLabel,
-      startYear: window.from,
-      endYear: window.to,
-      // Drawn differently, because it means something different: this is the
-      // window the event could have fallen in, not the span it occupied.
+      startInstant: window.from,
+      endInstant: window.extentEnd,
+      point: window.point,
       uncertain: window.uncertain,
       x: round(x),
       width: round(width),
@@ -1465,33 +1700,260 @@ export function layoutTimelineBand(entries: readonly TimelineEntry[]): BandLayou
     });
   }
 
+  const rows = Math.max(rowEnds.length, 1);
+  const axisY = rows * BAND_ROW_HEIGHT;
+  const height = BAND_TOP_PAD + axisY + BAND_AXIS_HEIGHT;
+
+  // The last instant the record actually reaches, not the exclusive end of the
+  // unit after it: a chronology ending in 1943 must not caption as "to 1944".
+  const lastClaimed = Math.max(
+    ...windows.map((window) =>
+      window.extentEnd > window.from ? window.extentEnd - 1 : window.from,
+    ),
+  );
+
   return {
     width: BAND_WIDTH,
-    height: Math.max(rowEnds.length, 1) * BAND_ROW_HEIGHT + BAND_AXIS_HEIGHT,
-    firstYear,
-    lastYear,
+    height,
+    viewBox: `0 ${-BAND_TOP_PAD} ${BAND_WIDTH} ${height}`,
+    tickY: -BAND_TOP_PAD,
+    axisY,
+    spanHeight: BAND_SPAN_HEIGHT,
+    labelY: axisY + BAND_LABEL_BASELINE,
+    firstInstant: axisFrom,
+    lastInstant: axisTo,
+    rangeLabel: rangeLabel(first, lastClaimed),
     spans,
-    ticks: axisTicks(firstYear, lastYear, scale),
+    ticks: axisTicks(axisFrom, axisTo, first, scale),
     undated,
+    overflow,
   };
 }
 
-/** Round-numbered years across the axis, at most a readable handful. */
+/** "1943", or "1940 to 1944". Years only: a caption, not a claim about days. */
+function rangeLabel(from: number, to: number): string {
+  const firstYear = partsOfInstant(from).year;
+  const lastYear = partsOfInstant(to).year;
+  return firstYear === lastYear ? String(firstYear) : `${firstYear} to ${lastYear}`;
+}
+
+// --- The tick ladder -------------------------------------------------------
+
+type TickUnit = 'minute' | 'hour' | 'day' | 'month' | 'year';
+
+interface TickRung {
+  unit: TickUnit;
+  multiple: number;
+  /** How a tick on this rung is spelled -- `formatEndpoint` does the spelling. */
+  precision: DatePrecision;
+  /** Nominal length, for *choosing* a rung. Never used to place a tick. */
+  approx: number;
+  /**
+   * Characters the *qualified* label takes, for budgeting how many will fit.
+   *
+   * The full form, not the short one: the first tick always prints it and so
+   * does every rollover, so budgeting on "July" would crowd the axis the
+   * moment it had to say "July 1943".
+   */
+  labelChars: number;
+}
+
+function rung(unit: TickUnit, multiple: number): TickRung {
+  switch (unit) {
+    case 'minute':
+      return {
+        unit,
+        multiple,
+        precision: 'minute',
+        approx: multiple * MS_PER_MINUTE,
+        labelChars: 18,
+      };
+    case 'hour':
+      return { unit, multiple, precision: 'hour', approx: multiple * MS_PER_HOUR, labelChars: 18 };
+    case 'day':
+      return { unit, multiple, precision: 'day', approx: multiple * MS_PER_DAY, labelChars: 16 };
+    case 'month':
+      return {
+        unit,
+        multiple,
+        precision: 'month',
+        approx: multiple * 30.44 * MS_PER_DAY,
+        labelChars: 12,
+      };
+    case 'year':
+      return {
+        unit,
+        multiple,
+        precision: 'year',
+        approx: multiple * 365.25 * MS_PER_DAY,
+        labelChars: 4,
+      };
+  }
+}
+
+/**
+ * Rungs *and* multiples, coarsening.
+ *
+ * Bare rungs are not enough: a thirty-year axis would get either thirty ticks
+ * or three, depending on which side of the year/decade boundary it fell.
+ */
+const TICK_RUNGS: readonly TickRung[] = Object.freeze([
+  ...[1, 5, 15, 30].map((multiple) => rung('minute', multiple)),
+  ...[1, 3, 6, 12].map((multiple) => rung('hour', multiple)),
+  ...[1, 2, 7, 14].map((multiple) => rung('day', multiple)),
+  ...[1, 3, 6].map((multiple) => rung('month', multiple)),
+  ...[1, 2, 5, 10, 25, 50, 100, 250, 500].map((multiple) => rung('year', multiple)),
+]);
+
+const COARSEST_RUNG = rung('year', 1000);
+/** A stop against a runaway loop if a rung is ever mis-sized. */
+const TICK_HARD_CAP = 200;
+/** Rough advance of the band's 11px sans label, in user units. */
+const TICK_CHAR_WIDTH = 6.5;
+const TICK_LABEL_GAP = 24;
+
+function maxTicks(candidate: TickRung): number {
+  return Math.max(
+    Math.floor(BAND_WIDTH / (candidate.labelChars * TICK_CHAR_WIDTH + TICK_LABEL_GAP)),
+    2,
+  );
+}
+
+/** The finest rung whose labels still fit across the band. */
+function chooseRung(range: number): TickRung {
+  for (const candidate of TICK_RUNGS) {
+    if (range / candidate.approx <= maxTicks(candidate)) return candidate;
+  }
+  return COARSEST_RUNG;
+}
+
+/**
+ * Round instants across the axis, labelled at the rung they mark.
+ *
+ * Month and coarser rungs step through the *calendar*, never by adding a
+ * nominal number of milliseconds: a year approximated as 365.25 days drifts by
+ * days over a long axis, and the tick line then visibly misses the bar it
+ * labels. Minute, hour and day are exact in UTC, where no day is 23 hours long.
+ */
 function axisTicks(
-  firstYear: number,
-  lastYear: number,
-  scale: (year: number) => number,
+  axisFrom: number,
+  axisTo: number,
+  fallback: number,
+  scale: (instant: number) => number,
 ): BandTick[] {
-  const range = Math.max(lastYear - firstYear, 1);
-  const steps = [1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000];
-  const step = steps.find((candidate) => range / candidate <= 10) ?? 1000;
+  const chosen = chooseRung(Math.max(axisTo - axisFrom, 1));
+  const instants = tickInstants(chosen, axisFrom, axisTo).filter((instant) => {
+    const year = partsOfInstant(instant).year;
+    return year >= MIN_YEAR && year <= MAX_YEAR;
+  });
+
+  // An axis narrower than one step of the coarsest rung would draw nothing at
+  // all. Mark where the earliest event sits instead -- always a real date.
+  if (instants.length === 0) instants.push(fallback);
 
   const ticks: BandTick[] = [];
-  const start = Math.ceil(firstYear / step) * step;
-  for (let year = start; year <= lastYear; year += step) {
-    ticks.push({ year, x: round(scale(year)) });
+  let previousQualifier: string | null = null;
+  for (const instant of instants) {
+    const current = qualifierOf(instant, chosen);
+    ticks.push({
+      label: tickLabel(instant, chosen, previousQualifier !== current),
+      x: round(finite(scale(instant), 'tick x')),
+    });
+    previousQualifier = current;
   }
-  // A range narrower than one step would otherwise draw no tick at all.
-  if (ticks.length === 0) ticks.push({ year: firstYear, x: 0 });
   return ticks;
+}
+
+function tickInstants(chosen: TickRung, from: number, to: number): number[] {
+  const instants: number[] = [];
+  const parts = partsOfInstant(from);
+
+  if (chosen.unit === 'month' || chosen.unit === 'year') {
+    let year = parts.year;
+    let month = 1;
+    if (chosen.unit === 'month') {
+      // Counted from January, so a three-month rung lands on Jan/Apr/Jul/Oct.
+      month = Math.floor((parts.month - 1) / chosen.multiple) * chosen.multiple + 1;
+    } else {
+      year = Math.floor(year / chosen.multiple) * chosen.multiple;
+    }
+
+    for (let step = 0; step < TICK_HARD_CAP; step += 1) {
+      const instant = utcInstant(year, month, 1);
+      if (instant > to) break;
+      if (instant >= from) instants.push(instant);
+      if (chosen.unit === 'month') month += chosen.multiple;
+      else year += chosen.multiple;
+    }
+    return instants;
+  }
+
+  // Anchored one rung coarser than it steps, so the values read round: days
+  // from the first of the month, hours from midnight, minutes from the hour.
+  const anchor =
+    chosen.unit === 'day'
+      ? utcInstant(parts.year, parts.month, 1)
+      : chosen.unit === 'hour'
+        ? utcInstant(parts.year, parts.month, parts.day)
+        : new Date(from).setUTCMinutes(0, 0, 0);
+  const step = chosen.approx;
+
+  let instant = anchor + Math.ceil((from - anchor) / step) * step;
+  for (let count = 0; instant <= to && count < TICK_HARD_CAP; count += 1) {
+    instants.push(instant);
+    instant += step;
+  }
+  return instants;
+}
+
+/**
+ * The component a reader would otherwise have to infer.
+ *
+ * A label is printed in full whenever this changes, so an axis crossing new
+ * year reads `24 December`, `31 December`, `7 January 1945` rather than an
+ * ambiguous `7 January`.
+ */
+function qualifierOf(instant: number, chosen: TickRung): string {
+  const parts = partsOfInstant(instant);
+  switch (chosen.unit) {
+    case 'minute':
+    case 'hour':
+      return `${parts.year}-${parts.month}-${parts.day}`;
+    case 'day':
+    case 'month':
+      return String(parts.year);
+    case 'year':
+      return '';
+  }
+}
+
+function tickLabel(instant: number, chosen: TickRung, qualify: boolean): string {
+  const parts = partsOfInstant(instant);
+  const iso = `${String(parts.year).padStart(4, '0')}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+  const date = new Date(instant);
+  const time = `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}`;
+
+  // Through the module's one formatter, so a tick and an event cannot spell the
+  // same date two ways.
+  const full = formatEndpoint(iso, time, chosen.precision);
+  if (full === null) return '';
+  if (qualify) return full;
+
+  // The short form is the full label with the part the reader already has
+  // trimmed off -- derived from it rather than formatted afresh, so the two
+  // cannot drift.
+  switch (chosen.unit) {
+    case 'minute':
+    case 'hour': {
+      const comma = full.lastIndexOf(', ');
+      return comma === -1 ? full : full.slice(comma + 2);
+    }
+    case 'day':
+    case 'month': {
+      const suffix = ` ${parts.year}`;
+      return full.endsWith(suffix) ? full.slice(0, -suffix.length) : full;
+    }
+    case 'year':
+      return full;
+  }
 }
