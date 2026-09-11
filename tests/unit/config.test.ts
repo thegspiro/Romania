@@ -93,6 +93,43 @@ describe('loadConfig', () => {
     ).toThrow(/SESSION_SECURE_COOKIES must be true in production/);
   });
 
+  it('refuses the .env.example database password in production', () => {
+    // The placeholder is published in this repository, so a deployment still
+    // carrying it has no database password at all.
+    expect(() =>
+      loadConfig(
+        env({
+          NODE_ENV: 'production',
+          DB_PASSWORD: 'change-me',
+          WEBAUTHN_RP_ID: 'example.org',
+          WEBAUTHN_ORIGIN: 'https://example.org',
+          PUBLIC_BASE_URL: 'https://example.org',
+        }),
+      ),
+    ).toThrow(/still the placeholder/);
+  });
+
+  it('allows the placeholder password outside production', () => {
+    // Development and CI copy .env.example verbatim on purpose; refusing here
+    // would break the documented local setup to protect a throwaway database.
+    expect(loadConfig(env({ DB_PASSWORD: 'change-me' })).DB_PASSWORD).toBe('change-me');
+  });
+
+  it('accepts a generated password in production', () => {
+    // The check is an exact match against the shipped placeholders, not a
+    // strength rule -- anything else is the operator's call.
+    const config = loadConfig(
+      env({
+        NODE_ENV: 'production',
+        DB_PASSWORD: 'change-me-please',
+        WEBAUTHN_RP_ID: 'example.org',
+        WEBAUTHN_ORIGIN: 'https://example.org',
+        PUBLIC_BASE_URL: 'https://example.org',
+      }),
+    );
+    expect(config.DB_PASSWORD).toBe('change-me-please');
+  });
+
   it('applies the __Host- cookie prefix only with secure cookies', () => {
     // Browsers reject the prefix without Secure, which would make the app
     // unusable over plain HTTP in development.

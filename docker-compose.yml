@@ -1,8 +1,10 @@
 # Production-shaped composition: web, worker, database.
 #
 # On Unraid, replace the named volumes with paths under /mnt/user/appdata and
-# your array shares (see README.md). On a cloud host, point DB_HOST at the
-# managed database and remove the `db` service entirely -- nothing else changes.
+# your array shares (see README.md). On a cloud host, set DB_HOST in .env to
+# the managed database and remove the `db` service -- along with the two
+# `depends_on: db` blocks that reference it, or Compose refuses to start on an
+# undefined service.
 
 name: dissertation
 
@@ -16,9 +18,12 @@ services:
     command: ['web']
     env_file: [.env]
     environment:
-      # Inside the compose network the database is reachable by service name,
-      # whatever .env says for a host-based deployment.
-      DB_HOST: db
+      # Defaults to the bundled service, which is reachable by name inside the
+      # compose network. Interpolated rather than hard-coded so that pointing
+      # DB_HOST at RDS in .env is enough: a literal here would silently
+      # override .env and send every connection back to a container that a
+      # cloud deployment has deleted.
+      DB_HOST: ${DB_HOST:-db}
       HTTP_HOST: 0.0.0.0
       HTTP_PORT: '8080'
       STORAGE_ROOT: /data/files
@@ -47,12 +52,19 @@ services:
       options: { max-size: '10m', max-file: '5' }
 
   worker:
+    # The same build as `web`, declared again rather than relying on `web` to
+    # produce the tag. Without it Compose treats dissertation-platform:latest
+    # as an image to pull and fails on a host that has never built it. The two
+    # builds share a context and a Dockerfile, so BuildKit does the work once.
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: dissertation-platform:latest
     restart: unless-stopped
     command: ['worker']
     env_file: [.env]
     environment:
-      DB_HOST: db
+      DB_HOST: ${DB_HOST:-db}
       STORAGE_ROOT: /data/files
       BACKUP_ROOT: /data/backups
       # Migrations belong to the web role; see scripts/entrypoint.sh.

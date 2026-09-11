@@ -6,17 +6,17 @@
   "license": "GPL-3.0-or-later",
   "type": "module",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.9.0"
   },
   "scripts": {
     "vendor": "node scripts/vendor-assets.mjs",
     "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs && npm run vendor",
-    "start": "node dist/index.js",
-    "dev": "tsx watch src/index.ts",
-    "migrate": "node dist/db/migrate.js",
-    "migrate:dev": "tsx src/db/migrate.ts",
-    "admin": "node dist/cli/admin.js",
-    "admin:dev": "tsx src/cli/admin.ts",
+    "start": "node --env-file-if-exists=.env dist/index.js",
+    "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
+    "migrate": "node --env-file-if-exists=.env dist/db/migrate.js",
+    "migrate:dev": "tsx --env-file-if-exists=.env src/db/migrate.ts",
+    "admin": "node --env-file-if-exists=.env dist/cli/admin.js",
+    "admin:dev": "tsx --env-file-if-exists=.env src/cli/admin.ts",
     "typecheck": "tsc -p tsconfig.typecheck.json",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
