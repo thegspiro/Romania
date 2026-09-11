@@ -344,7 +344,10 @@ async function run(argv: string[]): Promise<number> {
         console.log(`Exported to ${summary.directory}`);
         console.log(`  essays      ${summary.essays}`);
         console.log(`  sources     ${summary.sources}`);
-        console.log(`  artifacts   ${summary.artifacts} (${summary.artifactFiles} with a file)`);
+        console.log(
+          `  artifacts   ${summary.artifacts} ` +
+            `(${summary.artifactFiles} with a file, ${summary.transcriptions} transcribed)`,
+        );
         for (const [kind, count] of Object.entries(summary.entities)) {
           console.log(`  ${kind.padEnd(11)} ${count}`);
         }

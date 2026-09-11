@@ -29,7 +29,7 @@ What is built and working:
 | **Essays** — Markdown editor, reference picker, server-rendered preview   | Complete                                                                                                            |
 | **Revision history** — every save recorded, compared and restorable       | Complete (append-only; restoring writes a new revision)                                                             |
 | **People, organizations, places, events** — admin CRUD and public pages   | Complete                                                                                                            |
-| **Artifacts** — catalogue records, file upload, access-controlled serving | Complete                                                                                                            |
+| **Artifacts** — catalogue records, file upload, access-controlled serving | Complete (with a transcription, which is prose and links like any other)                                            |
 | **Inline references and backlinks** — "everywhere this person is named"   | Complete (a backlink lands on the paragraph that named the subject)                                                 |
 | **Timeline** — chronology page, per-subject chronologies, blocks in prose | Complete (optional times; a contested event placed by "after X, before Y")                                          |
 | **Manuscripts** — nested outline, prev/next navigation, reusable sections | Complete                                                                                                            |
@@ -225,6 +225,27 @@ public build is assembled with an **anonymous viewer**, so it can only contain
 what an anonymous reader could already read one page at a time. Downloads
 require an authenticated administrator; the column is what makes opening them
 up later a configuration change rather than a rewrite.
+
+### Transcriptions
+
+An artifact can carry the text of the document it photographs. A photograph is
+otherwise unsearchable, unquotable and uncitable by page; the transcription is
+what makes it reachable by the rest of the application.
+
+It is **prose**, in the same sense an essay body is. A reference written inside
+it — `[[person:ion-antonescu|Antonescu]]` — is projected into `mention` by
+`rebuildReferences` in the same transaction as the save, so a photographed
+order naming somebody appears on that person's page with the surrounding
+sentence as context. It inherits the renderer's rule too: a reference to
+something the reader may not see comes back as escaped display text, with no
+href and no slug.
+
+The `LIKE` search matches against it, so typing out a report is what lets you
+find it again in year four by a phrase you remember.
+
+`transcription_language` is separate from the record's language on purpose. A
+German order held in a Romanian archive has a Romanian catalogue entry and a
+German text, and the page has to say which is which for a screen reader.
 
 ### A source can hold its own file
 

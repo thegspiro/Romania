@@ -20,6 +20,7 @@ import {
 import { slugify, uniqueSlug } from './slug.js';
 import { visibilityFilter, type Viewer, type Visibility } from './visibility.js';
 import { referenceHref } from './references.js';
+import { rebuildReferences } from './mentions.js';
 
 export interface ArtifactRecord {
   id: number;
@@ -38,6 +39,16 @@ export interface ArtifactRecord {
   dateCreated: string | null;
   creditLine: string | null;
   rightsStatement: string | null;
+  /**
+   * The document's own words, typed from the image.
+   *
+   * Prose, not a plain string: references written here are projected into
+   * `mention` by `rebuildReferences`, so a transcription naming someone
+   * surfaces on that person's page like any other writing.
+   */
+  transcription: string | null;
+  /** The language of the text, which need not be the record's. */
+  transcriptionLanguage: string | null;
   fileObjectId: number | null;
   mimeType: string | null;
   byteSize: number | null;
@@ -51,7 +62,8 @@ const COLUMNS = `
   ci.id, ci.slug, ci.title, ci.title_original, ci.language, ci.summary,
   ci.visibility, ci.noindex, ci.created_at, ci.updated_at,
   ad.provenance, ad.repository_name, ad.physical_location, ad.date_created,
-  ad.credit_line, ad.rights_statement, ad.file_object_id,
+  ad.credit_line, ad.rights_statement, ad.transcription, ad.transcription_language,
+  ad.file_object_id,
   fo.mime_type, fo.byte_size, fo.original_filename
 `;
 
@@ -79,6 +91,8 @@ function toRecord(row: RowDataPacket, variants: string[] = []): ArtifactRecord {
     dateCreated: (row.date_created as string | null) ?? null,
     creditLine: (row.credit_line as string | null) ?? null,
     rightsStatement: (row.rights_statement as string | null) ?? null,
+    transcription: (row.transcription as string | null) ?? null,
+    transcriptionLanguage: (row.transcription_language as string | null) ?? null,
     fileObjectId: row.file_object_id === null ? null : Number(row.file_object_id),
     mimeType: (row.mime_type as string | null) ?? null,
     byteSize: row.byte_size === null ? null : Number(row.byte_size),
@@ -168,9 +182,10 @@ export async function listArtifacts(
     const pattern = `%${escapeLike(search)}%`;
     conditions.push(
       `(ci.title LIKE ? ESCAPE '\\\\' OR ci.summary LIKE ? ESCAPE '\\\\'
-        OR ad.repository_name LIKE ? ESCAPE '\\\\' OR ad.physical_location LIKE ? ESCAPE '\\\\')`,
+        OR ad.repository_name LIKE ? ESCAPE '\\\\' OR ad.physical_location LIKE ? ESCAPE '\\\\'
+        OR ad.transcription LIKE ? ESCAPE '\\\\')`,
     );
-    params.push(pattern, pattern, pattern, pattern);
+    params.push(pattern, pattern, pattern, pattern, pattern);
   }
 
   if (options.visibility !== undefined && viewer.kind === 'admin') {
@@ -206,6 +221,14 @@ export interface ArtifactInput {
   dateCreated: string;
   creditLine: string;
   rightsStatement: string;
+  /**
+   * Optional so that adding them did not change the shape every existing
+   * caller already builds. The admin form always posts both; a caller that
+   * omits them is saying "no transcription", which is what an artifact
+   * created before this column had.
+   */
+  transcription?: string;
+  transcriptionLanguage?: string;
 }
 
 function detailParams(input: ArtifactInput): (string | null)[] {
@@ -216,6 +239,8 @@ function detailParams(input: ArtifactInput): (string | null)[] {
     text(input.dateCreated),
     text(input.creditLine),
     text(input.rightsStatement),
+    text(input.transcription ?? ''),
+    text(input.transcriptionLanguage ?? ''),
   ];
 }
 
@@ -256,10 +281,15 @@ export async function createArtifact(pool: Pool, input: ArtifactInput): Promise<
       connection,
       `INSERT INTO artifact_detail
          (content_item_id, provenance, repository_name, physical_location, date_created,
-          credit_line, rights_statement)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          credit_line, rights_statement, transcription, transcription_language)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, ...detailParams(input)],
     );
+
+    // Same transaction as the text: the projection cannot describe a version
+    // of the transcription that was never committed. The artifact's one prose
+    // column, as an essay's body is its.
+    await rebuildReferences(connection, id, input.transcription ?? '');
     return id;
   });
 }
@@ -303,10 +333,13 @@ export async function updateArtifact(
       connection,
       `UPDATE artifact_detail
           SET provenance = ?, repository_name = ?, physical_location = ?, date_created = ?,
-              credit_line = ?, rights_statement = ?
+              credit_line = ?, rights_statement = ?,
+              transcription = ?, transcription_language = ?
         WHERE content_item_id = ?`,
       [...detailParams(input), id],
     );
+
+    await rebuildReferences(connection, id, input.transcription ?? '');
     return true;
   });
 }

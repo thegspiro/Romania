@@ -44,6 +44,7 @@ export interface ExportSummary {
   sources: number;
   artifacts: number;
   artifactFiles: number;
+  transcriptions: number;
   entities: Record<EntityKind, number>;
   /** What the viewer could see, so the summary cannot overstate the export. */
   audience: 'admin' | 'public';
@@ -100,7 +101,7 @@ export async function exportCorpus(
 
   const essays = await exportEssays(pool, viewer, directory);
   const sources = await exportSources(pool, viewer, directory);
-  const { records, files } = await exportArtifacts(pool, viewer, directory);
+  const { records, files, transcriptions } = await exportArtifacts(pool, viewer, directory);
   const entities = await exportEntities(pool, viewer, directory);
 
   const summary: ExportSummary = {
@@ -109,6 +110,7 @@ export async function exportCorpus(
     sources,
     artifacts: records,
     artifactFiles: files,
+    transcriptions,
     entities,
     audience: viewer.kind === 'admin' ? 'admin' : 'public',
   };
@@ -275,13 +277,14 @@ async function exportArtifacts(
   pool: Pool,
   viewer: Viewer,
   directory: string,
-): Promise<{ records: number; files: number }> {
+): Promise<{ records: number; files: number; transcriptions: number }> {
   const target = join(directory, 'artifacts');
   await mkdir(target, { recursive: true, mode: 0o700 });
 
   const keys = await artifactFileKeys(pool, viewer);
   const catalogue: Record<string, unknown>[] = [];
   let files = 0;
+  let transcriptions = 0;
 
   for (let offset = 0; ; offset += PAGE) {
     const page = await listArtifacts(pool, viewer, { limit: PAGE, offset });
@@ -290,6 +293,28 @@ async function exportArtifacts(
     for (const artifact of page.items) {
       const file = keys.get(artifact.id);
       if (file !== undefined) files += 1;
+
+      // A transcription is prose and can be long, so it goes beside the
+      // catalogue as Markdown rather than inside a JSON string -- the same
+      // shape an essay takes, so a reader of this export learns one
+      // convention rather than two.
+      const hasText = artifact.transcription !== null && artifact.transcription.trim() !== '';
+      if (hasText) {
+        transcriptions += 1;
+        const header = frontMatter([
+          ['title', artifact.title],
+          ['slug', artifact.slug],
+          ['kind', 'artifact'],
+          ['language', artifact.transcriptionLanguage],
+          ['visibility', artifact.visibility],
+          ['repository', artifact.repositoryName],
+          ['date_created', artifact.dateCreated],
+        ]);
+        await writeUtf8(
+          join(target, `${safeSlug(artifact.slug)}.md`),
+          `${header}\n\n${artifact.transcription ?? ''}`,
+        );
+      }
 
       catalogue.push({
         slug: artifact.slug,
@@ -303,6 +328,7 @@ async function exportArtifacts(
         date_created: artifact.dateCreated,
         credit_line: artifact.creditLine,
         rights: artifact.rightsStatement,
+        transcription_file: hasText ? `${artifact.slug}.md` : null,
         file:
           file === undefined
             ? null
@@ -321,7 +347,7 @@ async function exportArtifacts(
   }
 
   await writeUtf8(join(target, 'artifacts.json'), JSON.stringify(catalogue, null, 2));
-  return { records: catalogue.length, files };
+  return { records: catalogue.length, files, transcriptions };
 }
 
 async function exportEntities(
@@ -389,6 +415,7 @@ application that produced them.
 | \`sources/provenance.json\`  | Archive, call number and notes, which CSL cannot carry |
 | \`entities/<kind>/*.md\`     | People, organizations, places and events              |
 | \`artifacts/artifacts.json\` | The artifact catalogue, with each file's SHA-256 and storage key |
+| \`artifacts/*.md\`           | Transcriptions, where one has been typed               |
 | \`manifest.json\`            | Counts and the format version                         |
 
 Artifact *files* are not in here. They are in the \`files-*.tar.gz\` written by

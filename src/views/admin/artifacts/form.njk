@@ -34,6 +34,35 @@
 
     {{ ui.visibilityFields(values) }}
 
+    <fieldset>
+      <legend>Transcription</legend>
+      <p class="field">
+        <label for="transcription">The document's text</label>
+        <textarea id="transcription" name="transcription" rows="16">{{ values.transcription | default('') }}</textarea>
+        <span class="hint">
+          Markdown, and the same reference syntax as an essay —
+          <code>[[person:ion-antonescu]]</code> inside a transcription puts this
+          artifact on that person's page. Typing it here is what makes a
+          photograph searchable and quotable.
+        </span>
+      </p>
+      <p class="field">
+        <label for="transcriptionLanguage">Language of the text</label>
+        <input
+          type="text"
+          id="transcriptionLanguage"
+          name="transcriptionLanguage"
+          value="{{ values.transcriptionLanguage | default('') }}"
+          maxlength="20"
+          placeholder="ro"
+        />
+        <span class="hint">
+          A BCP-47 tag. Need not match the record's language: a German order in
+          a Romanian archive has a Romanian catalogue entry and a German text.
+        </span>
+      </p>
+    </fieldset>
+
     <div class="form-actions">
       <button type="submit">{{ 'Save changes' if mode == 'edit' else 'Create artifact' }}</button>
       <a href="/admin/artifacts">Cancel</a>

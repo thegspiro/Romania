@@ -121,6 +121,22 @@ absent one. The year is ANDed on top of `visibilityFilter`, never in place of
 it; a filter that could make a private node reachable would be a leak, and
 `tests/integration/graph.test.ts` pins that it cannot.
 
+**An artifact's transcription is its prose column.** Like an essay's body and
+an agent's biography, it goes through `rebuildReferences` in the save
+transaction -- `createArtifact` and `updateArtifact` both call it, and nothing
+else writes `mention`. One prose column per kind, for the reason the entity
+specs give: the projection is rebuilt wholesale from one string, and a
+mention's context and paragraph anchor have to point somewhere definite.
+
+It renders through `renderProse` with the request's viewer, so the
+visible/not-visible decision stays in the renderer rather than being made again
+on the page. `transcriptionHtml` is on the `| safe` allowlist for that reason
+and no other.
+
+`transcription_language` is deliberately not `content_item.language`: one
+describes the text, the other the catalogue record, and a German order in a
+Romanian archive needs both.
+
 **A file can be owned by an artifact or a source.** `FILE_OWNERS` in
 `src/files/repository.ts` is the one place that names them, so adding a third
 owner is editing that constant and nothing else. Two rules ride on it:
