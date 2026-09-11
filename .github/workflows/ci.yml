@@ -216,14 +216,30 @@ jobs:
           pip-audit --strict --requirement /tmp/shipped.txt
 
   docker:
-    name: docker
+    name: docker (${{ matrix.platform }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # arm64 builds under emulation, which is several times slower than the
+    # native one. 30 minutes was comfortable for amd64 alone and is not here.
+    timeout-minutes: 60
+
+    strategy:
+      # One architecture failing should not hide the other's result.
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
 
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      # The Dockerfile has always carried an aarch64 branch with its own pinned
+      # pandoc and tectonic digests, and nothing ever executed it. binfmt lets
+      # this job both build that branch and run the smoke test against it, so
+      # "arm64 is supported" is a claim CI checks rather than one the Dockerfile
+      # merely asserts.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
 
       # Third-party actions are pinned to a commit, not a tag: a tag is a
       # mutable reference, and this repository's whole point is that
@@ -235,16 +251,22 @@ jobs:
         uses: docker/build-push-action@67a2d409c0a876cbe6b11854e3e25193efe4e62d # v6.12.0
         with:
           context: .
-          # amd64 only: Unraid and the AWS target are x86_64, and the
-          # Dockerfile's aarch64 path is untested.
-          platforms: linux/amd64
+          platforms: ${{ matrix.platform }}
           tags: dissertation-platform:ci
+          # One platform per job, so the build still produces a single image
+          # that `load` can put into the daemon -- a manifest list could not be
+          # loaded, and an image that is not loaded cannot be smoke-tested.
           load: true
           # `load` cannot consume the manifest list an attestation build
           # produces.
           provenance: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Scoped per platform: the two builds share no layers, and a single
+          # scope would have them evicting each other's cache on every run.
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
 
+      # Runs the arm64 binaries through binfmt. Slower than the native case,
+      # and the only thing that proves the aarch64 pandoc and tectonic
+      # downloads are the right architecture rather than merely the right size.
       - name: Smoke test the image
         run: .github/scripts/smoke-test-image.sh dissertation-platform:ci

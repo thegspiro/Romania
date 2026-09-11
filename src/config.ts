@@ -82,6 +82,14 @@ const OriginString = z.string().refine((value) => {
   );
 }, 'must be an absolute http(s) origin such as https://example.org (no trailing path)');
 
+/**
+ * The secrets `.env.example` ships. They exist to be replaced, and they are
+ * published in this repository, so a deployment still carrying one has a
+ * database password that anybody can read. Checked only in production: the
+ * development and test paths copy `.env.example` verbatim on purpose.
+ */
+const PLACEHOLDER_SECRETS = new Set(['change-me', 'change-me-too']);
+
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']),
@@ -201,6 +209,14 @@ export function loadConfig(env: EnvSource = process.env): Config {
     throw new ConfigError(
       'SESSION_SECURE_COOKIES must be true in production: without it the session ' +
         'cookie is sent over plain HTTP and can be captured in transit.',
+    );
+  }
+
+  if (parsed.NODE_ENV === 'production' && PLACEHOLDER_SECRETS.has(parsed.DB_PASSWORD)) {
+    throw new ConfigError(
+      `DB_PASSWORD is still the placeholder "${parsed.DB_PASSWORD}" from .env.example. ` +
+        'That value is published in this repository, so the database is effectively ' +
+        'unprotected. Generate one instead, for example `openssl rand -base64 24`.',
     );
   }
 

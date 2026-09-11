@@ -304,6 +304,10 @@ DB_PASSWORD=$(openssl rand -base64 24)
 DB_ROOT_PASSWORD=$(openssl rand -base64 24)
 ```
 
+Those two must be real values. The application refuses to start in production
+while `DB_PASSWORD` is still the `change-me` placeholder, because that string
+is published in this repository.
+
 > **`WEBAUTHN_RP_ID` is effectively permanent.** Passkeys are bound to that
 > domain. Changing it after registration invalidates every passkey, and you
 > would need your password plus a recovery code to get back in. Decide on the
@@ -372,10 +376,22 @@ that true if you split the roles across hosts.
 
 ### On AWS or another cloud host
 
-Point `DB_HOST` at RDS for MySQL 8 and delete the `db` service from
-`docker-compose.yml`. Nothing else changes: the schema uses no MySQL features
-RDS lacks. Storage stays on a mounted volume (EBS or EFS); an S3 backend is a
-contained change behind the storage interface, not yet built.
+Set `DB_HOST` in `.env` to your RDS endpoint. The compose file reads that value
+rather than pinning the bundled service name, so nothing else in it needs
+editing for the application to connect.
+
+Then remove the bundled database, which is two edits in `docker-compose.yml`:
+
+1. Delete the `db` service.
+2. Delete the `depends_on: db` block from **both** `web` and `worker`. Compose
+   refuses to start a composition that depends on a service which no longer
+   exists, so leaving these behind fails immediately.
+
+`DB_ROOT_PASSWORD` becomes unused — it only ever fed the bundled container.
+
+The schema uses no MySQL features RDS lacks. Storage stays on a mounted volume
+(EBS or EFS); an S3 backend is a contained change behind the storage interface,
+not yet built.
 
 ---
 
@@ -446,18 +462,36 @@ nightly, add a cron entry on the host that issues the same statement.
 
 ## Development
 
-Requires Node 22+, Python 3.11+ and a MySQL 8 server.
+Requires Node 22.9+, Python 3.11+ and a MySQL 8 server.
 
 ```sh
 npm install
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
-cp .env.example .env      # WEBAUTHN_RP_ID=localhost for local work
+cp .env.example .env
 npm run build
 npm run migrate
 npm run admin -- create-admin
 npm run dev               # http://localhost:8080
 ```
+
+`.env.example` is the **production** template, so four values need changing for
+local work:
+
+| Value                      | Why                                                                               |
+| -------------------------- | --------------------------------------------------------------------------------- |
+| `NODE_ENV=development`     | Production refuses the placeholder password and insecure cookies                  |
+| `DB_HOST=127.0.0.1`        | `db` is the compose service name; it resolves to nothing outside Docker           |
+| `DB_PASSWORD=…`            | Whatever your local MySQL account uses                                            |
+| `WEBAUTHN_RP_ID=localhost` | Already the default, and the only host a browser treats as secure over plain HTTP |
+
+`start`, `dev`, `migrate` and `admin` load `.env` through Node's
+`--env-file-if-exists`, which is why the minimum is 22.9 rather than 22.0.
+Variables already set in the environment win over the file, so
+`DB_HOST=other npm run migrate` still works. `npm test` deliberately does
+**not** load it: the integration suites drop every table in the database they
+are given, and they read `TEST_DB_*`, so pulling `.env` in would be a way to
+lose a development database to a typo.
 
 Browsers treat `http://localhost` as a secure context, so passkeys work
 locally without TLS — but only for the exact host `localhost`, not
@@ -492,18 +526,21 @@ skipped every visibility test is green and proves nothing — so set
 `.github/workflows/ci.yml` runs the same gate on every pull request, in three
 independent jobs:
 
-| Job          | Runs                                                                                                                                                                          |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node`       | format, typecheck, lint, build, then vitest against a MySQL 8.4 service container with `REQUIRE_TEST_DB=1`                                                                    |
-| `python`     | the pinned pandoc, then ruff and pytest                                                                                                                                       |
-| `migrations` | refuses a change that edits or deletes a migration already on `main`                                                                                                          |
-| `docker`     | builds the image and smoke-tests it — runs as uid 1000, pandoc and tectonic present, every declared Python dependency installed, built assets landed, dev dependencies pruned |
+| Job          | Runs                                                                                                                                                                                                |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node`       | format, typecheck, lint, build, then vitest against a MySQL 8.4 service container with `REQUIRE_TEST_DB=1`                                                                                          |
+| `python`     | the pinned pandoc, then ruff and pytest                                                                                                                                                             |
+| `migrations` | refuses a change that edits or deletes a migration already on `main`                                                                                                                                |
+| `docker`     | builds the image for amd64 and arm64 and smoke-tests each — runs as uid 1000, pandoc and tectonic present, every declared Python dependency installed, built assets landed, dev dependencies pruned |
 
 A separate `codeql` workflow runs static analysis on both languages, and again
 weekly on `main` — advisories arrive after a merge as well as before one.
 
 `docker` reaches out to Debian mirrors and GitHub releases, so it can go red
-without a code change; nothing depends on it.
+without a code change; nothing depends on it. It runs once per architecture:
+the arm64 job builds and executes under QEMU, which is slow but is the only
+thing that proves the Dockerfile's aarch64 pandoc and tectonic downloads are
+the right binaries rather than merely the right size.
 
 The `node` job also enforces the rules that used to live only in `CLAUDE.md`:
 what may bypass template autoescaping, the CSP's ban on inline styles and
