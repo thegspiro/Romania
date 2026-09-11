@@ -22,12 +22,43 @@ import type { SqlParam } from '../db/pool.js';
 import { referenceHref } from './references.js';
 
 export type Viewer =
-  { readonly kind: 'anonymous' } | { readonly kind: 'admin'; readonly userId: number };
+  | { readonly kind: 'anonymous' }
+  | { readonly kind: 'admin'; readonly userId: number }
+  /**
+   * Someone holding a valid share link for exactly one essay.
+   *
+   * This is the only way anything unpublished becomes readable without
+   * signing in, and it is expressed **here** rather than as a bypass
+   * somewhere else on purpose. If a share were served by a read that skipped
+   * `visibilityFilter`, there would be two answers to "may this viewer see
+   * this item?" in the codebase, and only one of them auditable.
+   *
+   * The widening is one id. A private person named in the shared chapter, a
+   * private source it cites, another unpublished essay it links to -- all
+   * stay withheld from the holder exactly as they would from any visitor,
+   * because the filter below says `public OR this id` and nothing more.
+   */
+  | { readonly kind: 'share'; readonly essayId: number };
 
 export const ANONYMOUS: Viewer = Object.freeze({ kind: 'anonymous' });
 
 export function adminViewer(userId: number): Viewer {
   return Object.freeze({ kind: 'admin', userId });
+}
+
+/**
+ * A viewer for one shared essay.
+ *
+ * `essayId` must come from a share row that was looked up by token hash and
+ * checked for expiry and revocation. Nothing downstream re-checks that: this
+ * function is where a validated token becomes an access decision, so the
+ * caller is responsible for the validation.
+ */
+export function shareViewer(essayId: number): Viewer {
+  if (!Number.isSafeInteger(essayId) || essayId <= 0) {
+    throw new TypeError(`Invalid essay id for a share viewer: ${String(essayId)}`);
+  }
+  return Object.freeze({ kind: 'share', essayId });
 }
 
 export function isAdmin(viewer: Viewer): viewer is { kind: 'admin'; userId: number } {
@@ -65,10 +96,28 @@ export function visibilityFilter(viewer: Viewer, alias = 'ci'): SqlFragment {
     return { sql: '1 = 1', params: [] };
   }
 
+  if (viewer.kind === 'share') {
+    // Everything public, plus the single item the link was issued for. The id
+    // is bound, never interpolated, and the predicate is parenthesised so a
+    // caller ANDing it cannot accidentally widen it by operator precedence.
+    return {
+      sql: `(${alias}.visibility = 'public' OR ${alias}.id = ?)`,
+      params: [viewer.essayId],
+    };
+  }
+
   return { sql: `${alias}.visibility = 'public'`, params: [] };
 }
 
-/** True when the viewer may see an item with this visibility. */
+/**
+ * True when the viewer may see an item with this visibility.
+ *
+ * A share viewer is deliberately **not** given its one extra id here. This
+ * function is asked about reference targets -- "may you follow this link?" --
+ * and the answer for a link holder is the same as for any visitor: only if it
+ * is published. The essay they were sent is reached through
+ * `visibilityFilter`, not through this.
+ */
 export function canView(viewer: Viewer, visibility: Visibility): boolean {
   return isAdmin(viewer) || visibility === 'public';
 }

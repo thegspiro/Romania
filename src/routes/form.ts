@@ -124,6 +124,17 @@ export const FLASH_MESSAGES: Readonly<Record<string, Flash>> = Object.freeze({
   essay_created: { kind: 'success', text: 'Essay created.' },
   essay_updated: { kind: 'success', text: 'Essay saved.' },
   essay_deleted: { kind: 'success', text: 'Essay deleted.' },
+  comment_added: { kind: 'success', text: 'Your comment was sent to the author.' },
+  share_issued: {
+    kind: 'success',
+    text: 'Link created. Copy it now — it is shown once and cannot be recovered.',
+  },
+  share_revoked: {
+    kind: 'success',
+    text: 'Link revoked. It stops working on the next request.',
+  },
+  comment_resolved: { kind: 'success', text: 'Comment marked as dealt with.' },
+  comment_reopened: { kind: 'success', text: 'Comment reopened.' },
   essay_restored: {
     kind: 'success',
     text: 'Revision restored as a new revision. The earlier text is still in the history.',

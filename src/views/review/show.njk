@@ -1,0 +1,94 @@
+{% extends "layouts/base.njk" %}
+
+{% block title %}{{ essay.title }} — for review{% endblock %}
+
+{% block content %}
+  <article class="review">
+    <header>
+      <p class="kicker">Draft for review</p>
+      <h1>{{ essay.title }}</h1>
+      <p class="muted">
+        Shared with you by the author. This link expires on
+        {{ expiresAt.toISOString().slice(0, 10) }}.
+      </p>
+      <p class="hint">
+        Please do not forward it — anyone holding the link can read this
+        chapter, and it is unpublished work.
+      </p>
+    </header>
+
+    {#
+      renderProse output, built by markdown-it with HTML disabled and resolved
+      against a share viewer. A reference to anything that is not published —
+      and not this chapter — is already escaped text by the time it is here.
+    #}
+    <div class="prose">{{ rendered.html | safe }}</div>
+
+    {% if rendered.footnotes.length > 0 %}
+      <section class="footnotes-section">
+        <h2>Notes</h2>
+        <ol class="footnotes">
+          {% for note in rendered.footnotes %}
+            <li id="fn-{{ note.number }}">
+              {# citeproc output, already through sanitizeCitationHtml. #}
+              {{ note.html | safe }}
+              <a href="#fnref-{{ note.number }}" class="footnote-back" aria-label="Back to text">↩</a>
+            </li>
+          {% endfor %}
+        </ol>
+      </section>
+    {% endif %}
+
+    <section class="review-comments">
+      <h2>Leave a comment</h2>
+
+      <form method="post" action="/review/{{ token }}/comments" class="stacked-form">
+        <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+        <p class="field">
+          <label for="blockIndex">Which paragraph?</label>
+          <input
+            type="number"
+            id="blockIndex"
+            name="blockIndex"
+            min="0"
+            step="1"
+            value="0"
+          />
+          <span class="hint">
+            The number beside a paragraph, or 0 for the chapter as a whole.
+          </span>
+        </p>
+        <p class="field">
+          <label for="body">Comment</label>
+          <textarea
+            id="body"
+            name="body"
+            rows="6"
+            maxlength="{{ maxCommentLength }}"
+            required
+          ></textarea>
+        </p>
+        <button type="submit">Send to the author</button>
+      </form>
+
+      {% if comments.length > 0 %}
+        <h2>Your comments so far</h2>
+        <ol class="comment-list">
+          {% for comment in comments %}
+            <li>
+              <p class="muted small">
+                {% if comment.blockIndex %}
+                  On paragraph {{ comment.blockIndex }}
+                {% else %}
+                  On the chapter
+                {% endif %}
+                · {{ comment.createdAt.toISOString().slice(0, 16) | replace('T', ' ') }}
+              </p>
+              <p>{{ comment.body }}</p>
+            </li>
+          {% endfor %}
+        </ol>
+      {% endif %}
+    </section>
+  </article>
+{% endblock %}

@@ -90,6 +90,9 @@ export function robotsTxt(config: Config): string {
     'Disallow: /login',
     'Disallow: /logout',
     'Disallow: /auth/',
+    // Share links carry a credential in the path and serve unpublished
+    // chapters. Even with indexing switched on, these are never crawlable.
+    'Disallow: /review/',
     '',
     `Sitemap: ${config.PUBLIC_BASE_URL}/sitemap.xml`,
     '',
