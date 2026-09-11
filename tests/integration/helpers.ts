@@ -152,6 +152,8 @@ export async function truncateContent(pool: Pool): Promise<void> {
   for (const table of [
     'manuscript_build',
     'manuscript_section',
+    'source_zotero_link',
+    'zotero_library_state',
     'manuscript_detail',
     'mention',
     'citation',

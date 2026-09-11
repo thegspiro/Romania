@@ -58,6 +58,18 @@ export const FLASH_MESSAGES: Readonly<Record<string, Flash>> = Object.freeze({
   source_deleted: { kind: 'success', text: 'Source deleted.' },
   source_published: { kind: 'success', text: 'Source is now public.' },
   source_unpublished: { kind: 'success', text: 'Source is now private.' },
+  zotero_queued: {
+    kind: 'success',
+    text: 'Zotero sync queued. Refresh in a moment for the result.',
+  },
+  zotero_already_queued: {
+    kind: 'info',
+    text: 'A Zotero sync is already waiting to run.',
+  },
+  zotero_unconfigured: {
+    kind: 'error',
+    text: 'Set ZOTERO_LIBRARY_ID and ZOTERO_API_KEY before syncing a library.',
+  },
   source_cited: {
     kind: 'error',
     text: 'That source is still cited by other items, so it was not deleted. Remove the citations first.',

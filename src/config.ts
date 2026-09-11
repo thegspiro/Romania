@@ -125,6 +125,16 @@ const schema = z.object({
   UPLOAD_MAX_BYTES: IntegerString(1, 10_737_418_240),
 
   ALLOW_SEARCH_INDEXING: BooleanString,
+
+  // The web service enqueues a Zotero sync but never calls the API itself, so
+  // it needs to know which library is configured and nothing more. The API key
+  // is read by the worker alone -- there is no reason for the process facing
+  // the internet to hold a credential it cannot use.
+  ZOTERO_LIBRARY_TYPE: z.enum(['user', 'group']),
+  ZOTERO_LIBRARY_ID: z
+    .string()
+    .regex(/^\d+$/, 'must be the numeric library id shown on zotero.org')
+    .optional(),
 });
 
 export type Config = Readonly<
@@ -184,6 +194,9 @@ export function loadConfig(env: EnvSource = process.env): Config {
     UPLOAD_MAX_BYTES: read(env, 'UPLOAD_MAX_BYTES', '209715200'),
 
     ALLOW_SEARCH_INDEXING: read(env, 'ALLOW_SEARCH_INDEXING', 'false'),
+
+    ZOTERO_LIBRARY_TYPE: read(env, 'ZOTERO_LIBRARY_TYPE', 'user'),
+    ZOTERO_LIBRARY_ID: read(env, 'ZOTERO_LIBRARY_ID'),
   };
 
   const result = schema.safeParse(candidate);

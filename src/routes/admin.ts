@@ -33,6 +33,12 @@ import {
 import { renderBibliographyEntry, renderNote } from '../citations/render.js';
 import { recordAudit } from '../content/audit.js';
 import {
+  configuredLibrary,
+  findSyncState,
+  listZoteroDeletedSourceIds,
+  requestZoteroSync,
+} from '../content/zotero.js';
+import {
   countUnusedRecoveryCodes,
   deleteCredential,
   findUserById,
@@ -216,6 +222,13 @@ export async function registerAdminRoutes(
           offset: (pageNumber - 1) * perPage,
         });
 
+        // Only queried when a library is configured, so a site that does not
+        // use Zotero pays nothing for the feature being present.
+        const library = configuredLibrary(config);
+        const zotero =
+          library === null ? null : { ...library, state: await findSyncState(pool, library) };
+        const zoteroDeletedIds = library === null ? [] : await listZoteroDeletedSourceIds(pool);
+
         return renderPage(
           config,
           request,
@@ -229,8 +242,39 @@ export async function registerAdminRoutes(
             pageCount: Math.max(Math.ceil(result.total / perPage), 1),
             search: query.q ?? '',
             visibilityFilter: visibility ?? '',
+            zotero,
+            zoteroDeletedIds,
           },
           { noindex: true, flash: flashFor(request) },
+        );
+      });
+
+      // Registered before '/admin/sources/:id' for readability; Fastify would
+      // prefer the static segment either way.
+      admin.post('/admin/sources/zotero-sync', async (request, reply) => {
+        const library = configuredLibrary(config);
+        if (library === null) {
+          return reply.redirect('/admin/sources?msg=zotero_unconfigured');
+        }
+
+        const full = readCheckbox(request.body, 'full');
+        const outcome = await requestZoteroSync(pool, { full });
+
+        if (outcome === 'queued') {
+          await recordAudit(
+            pool,
+            {
+              actor: actorId(request),
+              action: full ? 'zotero.sync.full' : 'zotero.sync',
+              itemId: null,
+              ip: request.ip,
+            },
+            request.log,
+          );
+        }
+
+        return reply.redirect(
+          `/admin/sources?msg=${outcome === 'queued' ? 'zotero_queued' : 'zotero_already_queued'}`,
         );
       });
 

@@ -82,11 +82,35 @@ class Config:
 
     log_level: str
 
+    # Defaulted, and last, so that adding them did not change the constructor
+    # every existing caller and test already uses. Zotero sync is off until
+    # both the library and the key are set.
+    zotero_base_url: str = "https://api.zotero.org"
+    zotero_library_type: str = "user"
+    zotero_library_id: str | None = None
+    zotero_api_key: str | None = None
+
+    @property
+    def zotero_configured(self) -> bool:
+        return self.zotero_library_id is not None and self.zotero_api_key is not None
+
 
 def load_config() -> Config:
     password = _read_secret("DB_PASSWORD")
     if password is None:
         raise ConfigError("DB_PASSWORD (or DB_PASSWORD_FILE) is required.")
+
+    library_type = (_read("ZOTERO_LIBRARY_TYPE", "user") or "user").lower()
+    if library_type not in ("user", "group"):
+        raise ConfigError(
+            f"ZOTERO_LIBRARY_TYPE must be 'user' or 'group', got {library_type!r}."
+        )
+
+    library_id = _read("ZOTERO_LIBRARY_ID")
+    if library_id is not None and not library_id.isdigit():
+        # Zotero library ids are numeric. Catching it here beats discovering it
+        # as a 404 from the API halfway through a sync.
+        raise ConfigError(f"ZOTERO_LIBRARY_ID must be numeric, got {library_id!r}.")
 
     return Config(
         db_host=_read("DB_HOST", "db") or "db",
@@ -105,5 +129,11 @@ def load_config() -> Config:
             or "https://nominatim.openstreetmap.org"
         ),
         geocoder_user_agent=_read("GEOCODER_USER_AGENT"),
+        zotero_base_url=(
+            _read("ZOTERO_BASE_URL", "https://api.zotero.org") or "https://api.zotero.org"
+        ),
+        zotero_library_type=library_type,
+        zotero_library_id=library_id,
+        zotero_api_key=_read_secret("ZOTERO_API_KEY"),
         log_level=(_read("LOG_LEVEL", "info") or "info").upper(),
     )

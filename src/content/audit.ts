@@ -28,7 +28,9 @@ export type AuditAction =
   | 'source.update'
   | 'source.delete'
   | 'source.publish'
-  | 'source.unpublish';
+  | 'source.unpublish'
+  | 'zotero.sync'
+  | 'zotero.sync.full';
 
 export interface AuditEntry {
   actor: string;

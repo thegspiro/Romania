@@ -39,6 +39,7 @@ What is built and working:
 | Authentication — password + passkey, recovery codes                       | Complete                                                                                                            |
 | Public/private enforcement                                                | Complete and tested                                                                                                 |
 | Background worker — derivatives, bibliography import, geocoding, backups  | Complete                                                                                                            |
+| **Zotero sync** — pull a library in and keep it in step                   | Complete (incremental; deletions are flagged, never obeyed)                                                         |
 | Deployment — Docker, Compose, migrations, CLI                             | Complete                                                                                                            |
 | Maps                                                                      | **Not yet** (Leaflet is vendored; coordinates are in the schema)                                                    |
 | Public downloads of compiled documents                                    | **Not yet** (deliberately admin-only for now — see below)                                                           |
@@ -192,6 +193,48 @@ public build is assembled with an **anonymous viewer**, so it can only contain
 what an anonymous reader could already read one page at a time. Downloads
 require an authenticated administrator; the column is what makes opening them
 up later a configuration change rather than a rewrite.
+
+### Zotero
+
+Zotero stays the bibliography of record. Set `ZOTERO_LIBRARY_ID` and
+`ZOTERO_API_KEY` and `/admin/sources` grows a **Sync from Zotero** button; the
+worker pulls the library in and keeps it in step. Nothing is ever pushed back,
+and the key needs read access only.
+
+Sync is incremental. Each run stores the library version it reached and asks
+Zotero only for what changed since, so a routine sync is one request. **Full
+resync** starts again from zero — useful after editing many records at once, or
+after rolling the schema back.
+
+What each side owns is fixed, and is the whole reason the sync is safe to run
+repeatedly:
+
+| Zotero owns                            | This side owns                                             |
+| -------------------------------------- | ---------------------------------------------------------- |
+| The bibliographic record (`csl_json`)  | `visibility` — imports are private, always                 |
+| Title, container, year, URL, DOI, ISBN | The slug, and therefore every `[[cite:…]]` already written |
+| Item type                              | Archive, archive location, call number, accessed date      |
+|                                        | Summary and notes                                          |
+
+The archival fields are the subtle half. They live in `csl_json` as well as in
+their own columns, and Chicago renders them from the JSON — so a sync that took
+Zotero's record wholesale would strip a fond and dosar reference out of every
+footnote while the column beside it still held the value. A field already
+recorded here always wins; one Zotero supplies and this side lacks is taken.
+
+**The first sync adopts what is already here** rather than duplicating it. An
+unlinked source is matched on DOI, then on ISBN, then on an exact title and
+year — and anything that matches more than one candidate is imported as new and
+named in the job log, because a wrong link would silently overwrite a record on
+every future sync.
+
+**A deletion in Zotero is reported, not obeyed.** The link is flagged and the
+source is listed with a _Deleted in Zotero_ badge. It may already be cited, and
+removing it would leave a dangling reference in finished prose, so the decision
+stays with the operator.
+
+The worker needs outbound HTTPS to `api.zotero.org`. If it has none, the job
+fails with the reason on its row and nothing is half-applied.
 
 ### Citations
 

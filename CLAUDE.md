@@ -121,6 +121,26 @@ absent one. The year is ANDed on top of `visibilityFilter`, never in place of
 it; a filter that could make a private node reachable would be a leak, and
 `tests/integration/graph.test.ts` pins that it cannot.
 
+**Zotero sync pulls; it never pushes.** `worker/jobs/zotero_sync.py` is the
+only thing that talks to the API, and the web service never holds the key --
+it enqueues `zotero.sync` and reads the state back for the listing. Two
+invariants make a repeated sync safe:
+
+- `source_zotero_link` is unique on `(library_type, library_id, item_key)`.
+  That is what makes the sync an upsert rather than an append, and why a run
+  that failed halfway can simply be retried.
+- **The slug is set once, at creation.** References are keyed to it, so a title
+  corrected in Zotero updates the title and never the URL.
+
+`_merge_local_fields` carries `archive`, `archive_location`, `call-number` and
+`accessed` forward from the stored record. Those live in `csl_json` _and_ in a
+column, and Chicago renders them from the JSON -- dropping the merge would take
+a call number out of every footnote while the column still showed it. Do not
+"simplify" the update into a straight replacement.
+
+A deletion in Zotero sets `deleted_in_zotero_at` and stops. Deleting the source
+would leave a dangling `[[cite:...]]` in prose already written.
+
 **Manuscripts are a flat ordered list with a depth column**, not a
 self-referencing tree. Ordering, prev/next, subtree moves and compilation are
 all simple walks over it, and MySQL's self-referencing foreign keys have
@@ -338,6 +358,8 @@ the properties being asserted actually live.
 | Dates, chronological reads, the band   | `src/content/timeline.ts`           |
 | Path safety, magic bytes, hashing      | `src/files/storage.ts`              |
 | Access-checked file lookup             | `src/files/repository.ts`           |
+| Zotero sync, link and merge rules      | `worker/jobs/zotero_sync.py`        |
+| Sync queueing and state for the admin  | `src/content/zotero.ts`             |
 | Job runner                             | `worker/runner.py`                  |
 | Pandoc invocation                      | `worker/jobs/manuscript_compile.py` |
 
@@ -359,13 +381,18 @@ both stay green — which two hand-kept copies could not actually guarantee.
 Maps (Leaflet is vendored and `place_detail` carries coordinates); public
 downloads of compiled documents (`manuscript_build.audience` is what makes
 that a config change rather than a rewrite); search beyond `LIKE`; an S3
-storage backend; Zotero sync.
+storage backend.
 
-The last two are the first genuine **side-cart** candidates — a search service
-such as Meilisearch, and a Zotero sync service. Nothing needs one today:
-Pandoc and Tectonic are already in the image and MySQL handles the graph
-queries at this scale. Reach for a separate service only when something truly
-cannot live in the application, not to avoid writing a query.
+A search service such as Meilisearch is the one remaining **side-cart**
+candidate, and nothing needs it today: Pandoc and Tectonic are already in the
+image and MySQL handles the graph queries at this scale. Reach for a separate
+service only when something truly cannot live in the application, not to avoid
+writing a query.
+
+Zotero sync used to be listed here as the other candidate. It shipped as a
+worker job instead -- one handler, one migration, no new service -- which is
+the precedent: the job queue and the worker are where an integration goes
+until it demonstrably cannot fit there.
 
 Each is its own change set. Keep them that way — the point of the content
 model is that they are additive.
