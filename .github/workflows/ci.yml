@@ -180,6 +180,12 @@ jobs:
       DB_USER: dissertation
       DB_PASSWORD: testpass
       REHEARSAL_DB_NAME: rehearsal_restored
+      # The drill CREATEs and DROPs the scratch database. The service container
+      # grants `dissertation` rights on MYSQL_DATABASE and nothing else, which
+      # is how a well-configured deployment looks too -- so the scratch database
+      # gets its own credentials rather than widening the application user's.
+      REHEARSAL_DB_USER: root
+      REHEARSAL_DB_PASSWORD: ci-root-not-a-secret
       BACKUP_ROOT: /tmp/rehearsal-backups
       STORAGE_ROOT: /tmp/rehearsal-files
       # The export loads the application's own config, which validates every

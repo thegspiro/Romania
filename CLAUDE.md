@@ -172,11 +172,14 @@ bug, it is that nobody can build the image in 2031.
   anything else; keep it that way.
 
 `scripts/restore-rehearsal.sh` runs the whole drill and CI runs it on every
-pull request. Two things it is written to avoid, both of which bit this script
+pull request. Three things it is written to avoid, all of which bit this script
 before it worked: POSIX sh has no `pipefail` and `set -e` sees only the last
 command of a pipeline, so the export is captured to a file rather than piped
-into `sed`; and a failed count query must not fall back to `0`, because two
-zeroes compare equal and the check would pass having compared nothing.
+into `sed`; a failed count query must not fall back to `0`, because two zeroes
+compare equal and the check would pass having compared nothing; and the drill
+creates a scratch database, which the application's user is not expected to be
+allowed to do -- hence `REHEARSAL_DB_USER`, and a step 0 that proves the
+privilege before a backup has been written.
 
 **Essay revisions are append-only, and written in the save transaction.**
 `essay_revision` holds whole snapshots, not diffs -- the row _is_ the text, so

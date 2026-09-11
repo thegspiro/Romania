@@ -605,6 +605,20 @@ the live database and writes only to the scratch database, so it is safe to
 run against the real thing — which is the point, since a rehearsal against an
 empty schema proves much less.
 
+The drill **creates and drops a scratch database**, which the application's own
+user usually may not do — a well-configured deployment grants it rights on its
+own schema and nothing else. Give the scratch database its own credentials:
+
+```sh
+REHEARSAL_DB_USER=root REHEARSAL_DB_PASSWORD=… \
+  docker compose exec web /app/scripts/restore-rehearsal.sh
+```
+
+They default to `DB_USER`/`DB_PASSWORD`, and step 0 proves the account can
+create and drop before anything else runs — so a missing privilege is a clear
+message up front rather than an "Access denied" halfway through, after a backup
+has already been written.
+
 `--keep-output` leaves the export in place to look at. CI runs the same script
 on every pull request against a seeded corpus, including Romanian diacritics,
 because a character set mismatch anywhere along dump → restore → export

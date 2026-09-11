@@ -22,6 +22,18 @@
 # Environment (all have the same defaults as the application):
 #   DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD
 #   REHEARSAL_DB_NAME   scratch database to restore into (default: <DB_NAME>_rehearsal)
+#
+# The drill CREATEs and DROPs the scratch database, which the application's own
+# user usually cannot do -- a well-configured deployment grants it rights on its
+# own schema and nothing else. So the scratch database is handled with separate
+# credentials:
+#
+#   REHEARSAL_DB_USER       default: DB_USER
+#   REHEARSAL_DB_PASSWORD   default: DB_PASSWORD
+#
+# Point those at an account that may CREATE and DROP a database. Step 0 proves
+# it can before anything else runs, rather than failing halfway with a raw
+# MySQL error.
 #   BACKUP_ROOT         where the backup is written (default: /data/backups)
 #   STORAGE_ROOT        artifact files (default: /data/files)
 #   PYTHON              interpreter with the worker's dependencies (default: .venv/bin/python)
@@ -34,6 +46,8 @@ DB_PORT="${DB_PORT:-3306}"
 DB_NAME="${DB_NAME:-dissertation}"
 DB_USER="${DB_USER:-dissertation}"
 REHEARSAL_DB_NAME="${REHEARSAL_DB_NAME:-${DB_NAME}_rehearsal}"
+REHEARSAL_DB_USER="${REHEARSAL_DB_USER:-$DB_USER}"
+REHEARSAL_DB_PASSWORD="${REHEARSAL_DB_PASSWORD:-${DB_PASSWORD:-}}"
 BACKUP_ROOT="${BACKUP_ROOT:-/data/backups}"
 STORAGE_ROOT="${STORAGE_ROOT:-/data/files}"
 PYTHON="${PYTHON:-.venv/bin/python}"
@@ -75,6 +89,9 @@ WORK_DIR="$(mktemp -d)"
 # through /proc; a file is not.
 chmod 700 "$WORK_DIR"
 DEFAULTS_FILE="$WORK_DIR/client.cnf"
+# A second identity, for the operations the application's user is not expected
+# to be allowed: creating and dropping the scratch database.
+ADMIN_DEFAULTS_FILE="$WORK_DIR/admin.cnf"
 OUTPUT_DIR="${REHEARSAL_OUTPUT_DIR:-$WORK_DIR/export}"
 
 cleanup() {
@@ -97,14 +114,38 @@ host=$DB_HOST
 port=$DB_PORT
 EOF
 
+cat >"$ADMIN_DEFAULTS_FILE" <<EOF
+[client]
+user=$REHEARSAL_DB_USER
+password=$REHEARSAL_DB_PASSWORD
+host=$DB_HOST
+port=$DB_PORT
+EOF
+
 mysql_do() {
   mysql --defaults-extra-file="$DEFAULTS_FILE" --batch --skip-column-names "$@"
+}
+
+# Everything touching the scratch database. Kept separate so the privileges the
+# drill needs are visible at a glance rather than implied.
+mysql_admin() {
+  mysql --defaults-extra-file="$ADMIN_DEFAULTS_FILE" --batch --skip-column-names "$@"
 }
 
 count_in() {
   # $1 database, $2 SQL expression returning one number.
   # A failed query must not fall back to 0: two zeroes compare equal, so a
   # typo would report a passing check over a comparison that never ran.
+  # The scratch database is read with the admin identity: the application user
+  # may have no rights on it at all.
+  if [ "$1" = "$REHEARSAL_DB_NAME" ]; then
+    if ! result="$(mysql_admin "$1" -e "$2")"; then
+      printf 'Query failed against %s: %s\n' "$1" "$2" >&2
+      exit 1
+    fi
+    printf '%s\n' "$result"
+    return 0
+  fi
   if ! result="$(mysql_do "$1" -e "$2")"; then
     printf 'Query failed against %s: %s\n' "$1" "$2" >&2
     exit 1
@@ -128,6 +169,23 @@ require("./dist/config.js").loadConfig();
   exit 2
 fi
 printf '   ok       configuration loads\n'
+
+# The failure this replaces was a raw "Access denied ... to database" in the
+# middle of step 2, after a backup had already been written. Proving the
+# privilege up front costs one statement and names the requirement.
+if ! mysql_admin -e "CREATE DATABASE IF NOT EXISTS \`$REHEARSAL_DB_NAME\`;
+                     DROP DATABASE \`$REHEARSAL_DB_NAME\`;" >/dev/null 2>&1; then
+  printf 'User %s cannot create and drop the scratch database %s.\n' \
+    "$REHEARSAL_DB_USER" "$REHEARSAL_DB_NAME" >&2
+  printf 'The drill restores into a scratch database, which the application user\n' >&2
+  printf 'usually may not create. Set REHEARSAL_DB_USER and REHEARSAL_DB_PASSWORD to\n' >&2
+  printf 'an account that may CREATE and DROP a database, or grant it:\n' >&2
+  printf "  GRANT ALL PRIVILEGES ON \`%s\`.* TO '%s'@'%%';\n" \
+    "$REHEARSAL_DB_NAME" "$DB_USER" >&2
+  printf "  GRANT CREATE, DROP ON *.* TO '%s'@'%%';\n" "$DB_USER" >&2
+  exit 2
+fi
+printf '   ok       can create the scratch database\n'
 
 printf '== 1. backing up %s\n' "$DB_NAME"
 BACKUP_ROOT="$BACKUP_ROOT" \
@@ -153,10 +211,10 @@ fi
 printf '   using %s (%s bytes)\n' "$DUMP" "$(wc -c <"$DUMP" | tr -d ' ')"
 
 printf '== 2. restoring into %s\n' "$REHEARSAL_DB_NAME"
-mysql_do -e "DROP DATABASE IF EXISTS \`$REHEARSAL_DB_NAME\`;
-             CREATE DATABASE \`$REHEARSAL_DB_NAME\`
-               CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;"
-gzip -dc "$DUMP" | mysql --defaults-extra-file="$DEFAULTS_FILE" "$REHEARSAL_DB_NAME"
+mysql_admin -e "DROP DATABASE IF EXISTS \`$REHEARSAL_DB_NAME\`;
+                CREATE DATABASE \`$REHEARSAL_DB_NAME\`
+                  CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;"
+gzip -dc "$DUMP" | mysql --defaults-extra-file="$ADMIN_DEFAULTS_FILE" "$REHEARSAL_DB_NAME"
 
 printf '== 3. exporting the restored corpus\n'
 # Not piped into sed: POSIX sh has no pipefail, and `set -e` sees only the
@@ -164,7 +222,8 @@ printf '== 3. exporting the restored corpus\n'
 # successful indent. Capture, then indent.
 EXPORT_LOG="$WORK_DIR/export.log"
 if ! DB_NAME="$REHEARSAL_DB_NAME" \
-  DB_HOST="$DB_HOST" DB_PORT="$DB_PORT" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" \
+  DB_HOST="$DB_HOST" DB_PORT="$DB_PORT" \
+  DB_USER="$REHEARSAL_DB_USER" DB_PASSWORD="$REHEARSAL_DB_PASSWORD" \
   STORAGE_ROOT="$STORAGE_ROOT" \
   "$NODE" dist/cli/admin.js export --out "$OUTPUT_DIR" >"$EXPORT_LOG" 2>&1; then
   sed 's/^/   /' <"$EXPORT_LOG" >&2
@@ -236,7 +295,7 @@ if [ "$KEEP_OUTPUT" -eq 1 ]; then
 fi
 
 printf '== 5. cleaning up the scratch database\n'
-mysql_do -e "DROP DATABASE IF EXISTS \`$REHEARSAL_DB_NAME\`;"
+mysql_admin -e "DROP DATABASE IF EXISTS \`$REHEARSAL_DB_NAME\`;"
 
 if [ "$FAILURES" -gt 0 ]; then
   printf '\nRehearsal FAILED: %s check(s) did not pass.\n' "$FAILURES" >&2
