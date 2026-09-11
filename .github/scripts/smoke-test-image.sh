@@ -3,9 +3,9 @@
 #
 # --entrypoint is mandatory. scripts/entrypoint.sh calls wait-for-db.sh before
 # its case statement, so it runs for every role including the fallthrough that
-# execs an arbitrary command -- and wait-for-db.sh only short-circuits when
-# mysqladmin is missing, which it is not. A plain `docker run` here would block
-# for DB_WAIT_TIMEOUT and then exit 1.
+# execs an arbitrary command -- and wait-for-db.sh only short-circuits when the
+# mysql client is missing, which it is not. A plain `docker run` here would
+# block for DB_WAIT_TIMEOUT and then exit 1.
 #
 # Everything below checks something no other job can: the node and python jobs
 # test the source tree, not the artifact that gets deployed.
@@ -69,6 +69,8 @@ python3 -c "import PIL, pypdfium2, pymysql, bibtexparser, rispy, requests"
 # checks their output survived COPY --from=build into the runtime image.
 test -f dist/index.js
 test -f dist/db/migrate.js
+test -f dist/cli/admin.js
+test -f dist/cli/preflight.js
 test -d dist/views
 test -d dist/citations/styles
 test -f public/vendor/leaflet/leaflet.js
@@ -83,7 +85,18 @@ test ! -d node_modules/typescript
 # deploy time.
 test -x scripts/entrypoint.sh
 test -x scripts/wait-for-db.sh
+test -x scripts/check-storage.sh
 test -x scripts/healthcheck.sh
+
+# The wait now proves the credentials work rather than that a port answers,
+# which needs the client binary rather than just mysqladmin.
+command -v mysql >/dev/null
+
+# The image's own data directories, which check-storage.sh asserts at start.
+# Without a bind mount these are what the container actually writes to, so a
+# regression in the Dockerfile's mkdir/chown would strand every role here.
+test -w /data/files
+test -w /data/backups
 
 echo "image smoke test passed"
 INNER
