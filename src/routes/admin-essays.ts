@@ -12,15 +12,20 @@ import { badRequest, notFound } from '../http/errors.js';
 import { isVisibility } from '../content/visibility.js';
 import {
   ESSAY_STATUSES,
+  countEssayRevisions,
   createEssay,
   deleteEssay,
   findEssayById,
+  findEssayRevision,
+  findPreviousRevision,
   isEssayStatus,
+  listEssayRevisions,
   listEssays,
   setEssayVisibility,
   updateEssay,
   type EssayInput,
 } from '../content/essays.js';
+import { collapseUnchanged, diffLines } from '../content/diff.js';
 import { renderProse } from '../content/markdown.js';
 import {
   parseReferences,
@@ -181,6 +186,7 @@ export function registerAdminEssayRoutes(admin: FastifyInstance, context: AppCon
         unresolved: [...new Set(unresolved)],
         privateCitations: [...new Set(privateCitations)],
         placements: await listPlacementsOf(pool, id, request.viewer),
+        revisionCount: await countEssayRevisions(pool, id),
       },
       { noindex: true, flash: flashFor(request) },
     );
@@ -273,6 +279,136 @@ export function registerAdminEssayRoutes(admin: FastifyInstance, context: AppCon
       request.log,
     );
     return reply.redirect('/admin/essays?msg=essay_deleted');
+  });
+
+  // --- Revisions -----------------------------------------------------------
+
+  /**
+   * The history of one essay.
+   *
+   * `findEssayById` runs first and with the request's viewer, so a revision
+   * listing is reachable only for an essay that viewer could already open.
+   * The revision reads themselves take no viewer, and this is the check that
+   * makes that safe.
+   */
+  admin.get('/admin/essays/:id/revisions', async (request, reply) => {
+    const id = parseId(request);
+    const essay = await findEssayById(pool, id, request.viewer);
+    if (essay === null) throw notFound(`essay ${id}`);
+
+    const revisions = await listEssayRevisions(pool, id);
+
+    return renderPage(
+      config,
+      request,
+      reply,
+      'admin/essays/revisions',
+      {
+        essay,
+        revisions,
+        // The newest revision is the current text, so there is nothing to
+        // restore it to and the listing says so rather than offering a
+        // button that would do nothing.
+        currentRevision: revisions[0]?.revisionNumber ?? null,
+      },
+      { noindex: true, flash: flashFor(request) },
+    );
+  });
+
+  /** One revision, compared against the one before it. */
+  admin.get('/admin/essays/:id/revisions/:revision', async (request, reply) => {
+    const id = parseId(request);
+    const number = parseId(request, 'revision');
+
+    const essay = await findEssayById(pool, id, request.viewer);
+    if (essay === null) throw notFound(`essay ${id}`);
+
+    const revision = await findEssayRevision(pool, id, number);
+    if (revision === null) throw notFound(`essay ${id} revision ${number}`);
+
+    const previous = await findPreviousRevision(pool, id, number);
+    // The first revision has nothing before it, so it is shown whole rather
+    // than as a diff against an empty document that would mark every line new.
+    const diff = previous === null ? null : diffLines(previous.bodyMarkdown, revision.bodyMarkdown);
+
+    return renderPage(
+      config,
+      request,
+      reply,
+      'admin/essays/revision',
+      {
+        essay,
+        revision,
+        previous,
+        summary: diff?.summary ?? null,
+        hunks: diff === null ? null : collapseUnchanged(diff.lines),
+        titleChanged: previous !== null && previous.title !== revision.title,
+        statusChanged: previous !== null && previous.status !== revision.status,
+        isCurrent: revision.revisionNumber === (await countEssayRevisions(pool, id)),
+      },
+      { noindex: true },
+    );
+  });
+
+  /**
+   * Restores an earlier revision.
+   *
+   * Deliberately an ordinary save: it goes through `updateEssay`, so
+   * `rebuildReferences` runs over the restored prose and a *new* revision is
+   * appended recording where the text came from. Nothing rewinds, and nothing
+   * in the history is rewritten -- the mistake and its correction both stay.
+   *
+   * What is restored is the title, the body and the status. Visibility is not:
+   * whether a piece of research is published is a decision about now, never a
+   * property of old text, and silently republishing something by restoring a
+   * revision is exactly the disclosure this application exists to prevent.
+   */
+  admin.post('/admin/essays/:id/revisions/:revision/restore', async (request, reply) => {
+    const id = parseId(request);
+    const number = parseId(request, 'revision');
+
+    const essay = await findEssayById(pool, id, request.viewer);
+    if (essay === null) throw notFound(`essay ${id}`);
+
+    const revision = await findEssayRevision(pool, id, number);
+    if (revision === null) throw notFound(`essay ${id} revision ${number}`);
+
+    const input: EssayInput = {
+      title: revision.title,
+      bodyMarkdown: revision.bodyMarkdown,
+      status: revision.status,
+      // Carried from the essay as it stands, not from the revision.
+      titleOriginal: essay.titleOriginal ?? '',
+      language: essay.language ?? '',
+      summary: essay.summary ?? '',
+      visibility: essay.visibility,
+      noindex: essay.noindex,
+    };
+
+    const result = await updateEssay(pool, id, input, {
+      source: 'restore',
+      restoredFrom: number,
+    });
+    if (result === null) throw notFound(`essay ${id}`);
+
+    await recordAudit(
+      pool,
+      {
+        actor: actorId(request),
+        action: 'source.update',
+        itemId: id,
+        detail: {
+          kind: 'essay',
+          restoredFrom: number,
+          mentions: result.references.mentions,
+          citations: result.references.citations,
+        },
+        ip: request.ip,
+      },
+      request.log,
+    );
+
+    return reply.redirect(`/admin/essays/${id}/edit?msg=essay_restored`);
   });
 
   // --- Editor support ------------------------------------------------------

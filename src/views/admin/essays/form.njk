@@ -34,6 +34,13 @@
     </p>
   {% endif %}
 
+  {% if mode == 'edit' and revisionCount > 0 %}
+    <p class="muted">
+      <a href="/admin/essays/{{ essay.id }}/revisions">History</a>
+      — {{ revisionCount }} revision{{ 's' if revisionCount != 1 }}
+    </p>
+  {% endif %}
+
   <form method="post" action="{{ action }}" class="stacked-form editor-form">
     <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
 

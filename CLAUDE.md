@@ -121,6 +121,27 @@ absent one. The year is ANDed on top of `visibilityFilter`, never in place of
 it; a filter that could make a private node reachable would be a leak, and
 `tests/integration/graph.test.ts` pins that it cannot.
 
+**Essay revisions are append-only, and written in the save transaction.**
+`essay_revision` holds whole snapshots, not diffs -- the row _is_ the text, so
+there is no reconstruction step that could be wrong. Three rules:
+
+- A revision records the state **after** a save, so the newest revision always
+  equals `essay_detail`. `tests/integration/essay-revisions.test.ts` pins that.
+  Change it and "restore revision N" is off by one.
+- Revision numbers are allocated inside `updateEssay`'s transaction, which
+  already holds `FOR UPDATE` on the `content_item` row. That lock is what stops
+  two saves claiming one number; do not move the numbering outside it.
+- **Restoring is an ordinary save.** It goes through `updateEssay`, so
+  `rebuildReferences` runs and a new revision is appended. Nothing rewinds and
+  nothing in the history is rewritten. A restore must never carry `visibility`
+  back: publication is a decision about now, and silently republishing old
+  prose is exactly the disclosure this application exists to prevent.
+
+The revision reads take no `Viewer` on purpose -- a revision is unpublished
+draft text by definition, the routes are behind the admin guard and check the
+essay with `findEssayById` first, and there is no public path to one. Do not
+add a viewer parameter; it would imply there could be.
+
 **Zotero sync pulls; it never pushes.** `worker/jobs/zotero_sync.py` is the
 only thing that talks to the API, and the web service never holds the key --
 it enqueues `zotero.sync` and reads the state back for the listing. Two
@@ -352,6 +373,8 @@ the properties being asserted actually live.
 | Reference syntax, context extraction   | `src/content/references.ts`         |
 | Prose → HTML, the visible/not decision | `src/content/markdown.ts`           |
 | Projections and backlinks              | `src/content/mentions.ts`           |
+| Essay revisions, restore rules         | `src/content/essays.ts`             |
+| Line diff for the comparison view      | `src/content/diff.ts`               |
 | Outline, navigation, assembly          | `src/content/manuscripts.ts`        |
 | Build records, staging, enqueue        | `src/content/builds.ts`             |
 | Graph traversal with per-hop filtering | `src/content/graph.ts`              |

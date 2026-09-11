@@ -1,0 +1,84 @@
+{% extends "layouts/admin.njk" %}
+
+{% block adminTitle %}Revision {{ revision.revisionNumber }} — {{ essay.title }}{% endblock %}
+
+{% block adminContent %}
+  <div class="page-heading">
+    <h1>Revision {{ revision.revisionNumber }}</h1>
+    <a class="button" href="/admin/essays/{{ essay.id }}/revisions">All revisions</a>
+  </div>
+
+  <p class="muted">
+    {{ essay.title }} ·
+    saved {{ revision.createdAt.toISOString().slice(0, 16) | replace('T', ' ') }} ·
+    {{ revision.wordCount }} word{{ 's' if revision.wordCount != 1 }}
+    {%- if revision.source == 'restore' %}, restored from revision {{ revision.restoredFrom }}{% endif %}
+  </p>
+
+  {% if titleChanged %}
+    <div class="flash flash-info">
+      <p>Title changed from “{{ previous.title }}” to “{{ revision.title }}”.</p>
+    </div>
+  {% endif %}
+
+  {% if statusChanged %}
+    <div class="flash flash-info">
+      <p>
+        Status changed from {{ previous.status | replace('_', ' ') }}
+        to {{ revision.status | replace('_', ' ') }}.
+      </p>
+    </div>
+  {% endif %}
+
+  {% if not isCurrent %}
+    <form
+      method="post"
+      action="/admin/essays/{{ essay.id }}/revisions/{{ revision.revisionNumber }}/restore"
+      class="inline-form"
+    >
+      <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+      <button type="submit">Restore this revision</button>
+      <span class="muted small">
+        Writes a new revision holding this text. Visibility is not restored.
+      </span>
+    </form>
+  {% endif %}
+
+  {% if previous == null %}
+    <h2>The first revision</h2>
+    <p class="muted">There is nothing before this one, so the whole text is shown.</p>
+    <pre class="revision-body">{{ revision.bodyMarkdown }}</pre>
+  {% elif summary.identical %}
+    <h2>Compared with revision {{ previous.revisionNumber }}</h2>
+    <p class="empty">The prose is unchanged; only the title or status differs.</p>
+  {% else %}
+    <h2>Compared with revision {{ previous.revisionNumber }}</h2>
+    <p class="muted">
+      <span class="diff-count diff-count-added">+{{ summary.added }}</span>
+      <span class="diff-count diff-count-removed">−{{ summary.removed }}</span>
+      line{{ 's' if (summary.added + summary.removed) != 1 }} changed
+    </p>
+
+    <div class="diff">
+      {% for hunk in hunks %}
+        {% if hunk.skipped > 0 %}
+          <p class="diff-skip">{{ hunk.skipped }} unchanged line{{ 's' if hunk.skipped != 1 }}</p>
+        {% endif %}
+        <table class="diff-table">
+          <tbody>
+            {% for line in hunk.lines %}
+              <tr class="diff-row diff-{{ line.kind }}">
+                <td class="diff-number">{{ line.oldNumber if line.oldNumber else '' }}</td>
+                <td class="diff-number">{{ line.newNumber if line.newNumber else '' }}</td>
+                <td class="diff-marker" aria-hidden="true">
+                  {%- if line.kind == 'added' %}+{% elif line.kind == 'removed' %}−{% else %} {% endif -%}
+                </td>
+                <td class="diff-text">{{ line.text }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endblock %}
