@@ -767,18 +767,26 @@ skipped every visibility test is green and proves nothing — so set
 `.github/workflows/ci.yml` runs the same gate on every pull request, in three
 independent jobs:
 
-| Job          | Runs                                                                                                                                                                                                |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `node`       | format, typecheck, lint, build, then vitest against a MySQL 8.4 service container with `REQUIRE_TEST_DB=1`                                                                                          |
-| `python`     | the pinned pandoc, then ruff and pytest                                                                                                                                                             |
-| `migrations` | refuses a change that edits or deletes a migration already on `main`                                                                                                                                |
-| `docker`     | builds the image for amd64 and arm64 and smoke-tests each — runs as uid 1000, pandoc and tectonic present, every declared Python dependency installed, built assets landed, dev dependencies pruned |
+| Job          | Runs                                                                                                                                                                                                                                                                    |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node`       | format, typecheck, lint, build, then vitest against a MySQL 8.4 service container with `REQUIRE_TEST_DB=1`                                                                                                                                                              |
+| `python`     | the pinned pandoc, then ruff and pytest                                                                                                                                                                                                                                 |
+| `migrations` | refuses a change that edits or deletes a migration already on `main`                                                                                                                                                                                                    |
+| `docker`     | builds the image for amd64 and arm64 and smoke-tests each — runs as uid 1000, pandoc and tectonic present, every declared Python dependency installed, built assets landed, dev dependencies pruned                                                                     |
+| `compose`    | brings `docker-compose.yml` up and checks what only a running stack shows — health, capability sets, which secrets each container holds, `preflight`, `enqueue-backup`, the published port — then starts the database again on a bind mount through the Unraid override |
 
 A separate `codeql` workflow runs static analysis on both languages, and again
 weekly on `main` — advisories arrive after a merge as well as before one.
 
-`docker` reaches out to Debian mirrors and GitHub releases, so it can go red
-without a code change; nothing depends on it. It runs once per architecture:
+`docker` and `compose` reach out to Debian mirrors and GitHub releases, so
+they can go red without a code change; nothing depends on them.
+
+`compose` is the only job that runs the file an operator deploys. The others
+each test a piece — the image alone, the application against a service
+container, the schema against a scratch database — and none of them would
+notice a broken entrypoint order, a health check that cannot authenticate, a
+capability set trimmed too far, or a credential reaching a container with no
+code to read it. Each of those has been wrong here at least once. It runs once per architecture:
 the arm64 job builds and executes under QEMU, which is slow but is the only
 thing that proves the Dockerfile's aarch64 pandoc and tectonic downloads are
 the right binaries rather than merely the right size.
