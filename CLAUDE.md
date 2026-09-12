@@ -604,6 +604,28 @@ the properties being asserted actually live.
 | Job runner                              | `worker/runner.py`                  |
 | Pandoc invocation                       | `worker/jobs/manuscript_compile.py` |
 
+### The published image
+
+`ghcr.io/thegspiro/romania` is built for `linux/amd64` and `linux/arm64` and
+pushed by the `publish` job, which runs **only on a push to `main` or a `v*`
+tag** and `needs` every other job. Two rules follow and should stay true:
+
+- A pull request never publishes. A fork's token could not anyway, but the
+  reason to state it is the other one: an image built from unreviewed code
+  must not be the one an operator pulls.
+- `packages: write` is granted to that job alone, not at workflow level, so
+  nothing else can acquire the ability to publish by accident.
+
+`docker-compose.yml` names that image, so `up -d` pulls and `up -d --build`
+still builds -- and the `compose` job builds under the same tag, because it
+brings the stack up with `--no-build`. Change one and change the other.
+
+**`APP_UID` and a published image are in tension, and it is not resolved.** The
+uid is a build argument, so the published image is 1000:1000 and an operator
+who needs another uid gives up pulling. That was a clean trade when every
+install built; it is a real limitation now. `docs/unraid.md` states both paths
+honestly rather than pretending the old rationale still holds.
+
 ### Pinned images
 
 Base images are pinned by digest with the tag kept beside them, for the reason

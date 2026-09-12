@@ -23,11 +23,13 @@ You need:
 so passkeys will not work over plain HTTP on any host except `localhost`.
 Install the proxy first if you do not have one.
 
-> **There is no published container image.** CI builds the image for
-> `linux/amd64` and `linux/arm64` on every pull request but does not push it to
-> a registry, so `docker compose pull` has nothing to pull. Every install and
-> every update builds from a clone of this repository. That is why step 1 is a
-> `git clone` and not a `docker run`.
+> **The image is published**, at `ghcr.io/thegspiro/romania`, for
+> `linux/amd64` and `linux/arm64`. The pipeline that runs the tests is the one
+> that pushes it, and only from `main` — so what you pull is what CI passed.
+>
+> You still clone, because the compose files and `.env.example` live in this
+> repository and a deployment needs them. What you no longer wait for is a
+> local build.
 
 ---
 
@@ -38,9 +40,9 @@ git clone https://github.com/thegspiro/romania.git
 cd romania
 ```
 
-Keep this clone. It is the build context, so updating means pulling into this
-same directory rather than fetching a new image — see
-[`updating.md`](updating.md).
+Keep this clone. It holds `docker-compose.yml`, the Unraid overlay and your
+`.env`, and an update pulls into it — see [`updating.md`](updating.md). It is
+also the build context if you choose to build rather than pull.
 
 ## 2. Configure
 
@@ -101,18 +103,42 @@ One caveat: the bundled `db` service still needs a literal `DB_PASSWORD` in
 service, the worker and `wait-for-db.sh`, so it fits a database you manage
 yourself rather than the bundled one.
 
-## 3. Build and start
+## 3. Start it
+
+```sh
+docker compose up -d
+```
+
+That pulls `ghcr.io/thegspiro/romania:latest` and starts three containers:
+`web`, `worker` and `db`. Database migrations are applied automatically by the
+`web` role on start.
+
+### Building instead of pulling
 
 ```sh
 docker compose up -d --build
 ```
 
+Build when you have local changes, or when you need the container to run as a
+uid other than 1000 — the published image is built once, at `1000:1000`, and
+`APP_UID` is a build argument, so it cannot be applied to an image you pulled.
+That is the Unraid case; [`unraid.md`](unraid.md) covers both ways round.
+
 The first build takes several minutes — it compiles the TypeScript, installs
 the Python dependencies and downloads Pandoc and Tectonic, each verified
 against a recorded SHA-256. Subsequent builds reuse the cached layers.
 
-Three containers come up: `web`, `worker` and `db`. Database migrations are
-applied automatically by the `web` role on start.
+### Pinning a version
+
+`latest` moves with every merge to `main`. To hold a deployment still, set an
+immutable tag in `.env`:
+
+```sh
+IMAGE_TAG=sha-1a2b3c4d5e6f
+```
+
+Every published commit carries a `sha-<commit>` tag; the available tags are
+listed on the package page at `ghcr.io/thegspiro/romania`.
 
 Watch it settle:
 

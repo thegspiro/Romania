@@ -21,7 +21,15 @@ services:
       args:
         APP_UID: ${APP_UID:-1000}
         APP_GID: ${APP_GID:-1000}
-    image: dissertation-platform:latest
+    # The published multi-architecture image, so a host that has never built
+    # anything can `docker compose pull`. The `build:` block above still takes
+    # precedence under `up --build`, which is how a local change is tested and
+    # how an Unraid deployment sets APP_UID -- a pulled image is built once,
+    # at 1000:1000, and cannot be rebuilt for another uid.
+    #
+    # IMAGE_TAG pins a deployment to an immutable `sha-<commit>` tag. Left
+    # unset it follows `latest`, which moves with main.
+    image: ghcr.io/thegspiro/romania:${IMAGE_TAG:-latest}
     restart: unless-stopped
     command: ['web']
     env_file: [.env]
@@ -98,7 +106,9 @@ services:
       args:
         APP_UID: ${APP_UID:-1000}
         APP_GID: ${APP_GID:-1000}
-    image: dissertation-platform:latest
+    # Identical to web's, and interpolated from the same variable: the two
+    # roles are one image and must not drift to different revisions.
+    image: ghcr.io/thegspiro/romania:${IMAGE_TAG:-latest}
     restart: unless-stopped
     command: ['worker']
     env_file: [.env]

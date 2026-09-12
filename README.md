@@ -444,7 +444,7 @@ The shape of it, so you know what you are in for:
 ```sh
 git clone https://github.com/thegspiro/romania.git && cd romania
 cp .env.example .env                      # then edit it
-docker compose up -d --build              # migrations apply on start
+docker compose up -d                      # pulls; migrations apply on start
 docker compose run --rm web preflight     # check the install
 docker compose exec web /app/scripts/entrypoint.sh admin create-admin
 ```
@@ -453,11 +453,13 @@ You also need a **reverse proxy terminating TLS** and a domain name. HTTPS is
 not optional: WebAuthn refuses to run outside a secure context, so passkeys
 will not work over plain HTTP on any host but `localhost`.
 
-> **There is no published container image.** CI builds for `linux/amd64` and
-> `linux/arm64` but does not push to a registry, so every install and every
-> update builds from a clone. On Unraid this means Community Applications and
-> the Docker tab cannot install it — use Compose Manager or SSH, as
-> [`docs/unraid.md`](docs/unraid.md) describes.
+> **The image is published to GHCR**, built for `linux/amd64` and
+> `linux/arm64` by the same pipeline that runs the tests — so `docker compose
+up -d` pulls rather than builds, and a first install no longer waits on a
+> local build. You still clone: the compose files and `.env.example` live here.
+> Add `--build` to build from source instead, which is what an Unraid host
+> needing a different container uid does — see
+> [`docs/unraid.md`](docs/unraid.md).
 
 > **`WEBAUTHN_RP_ID` is effectively permanent.** Passkeys are bound to that
 > domain. Changing it after registration invalidates every one of them. Decide
@@ -590,9 +592,11 @@ put the command above in the host's crontab.
 
 ### Updating
 
-`git pull --ff-only origin main` then `docker compose up -d --build`. The
-database, files and backups live in volumes the rebuild reattaches, and
-migrations are additive, so an update does not touch your data.
+`git pull --ff-only origin main` then `docker compose pull && docker compose
+up -d` — or `up -d --build` if you build locally. The database, files and
+backups live in volumes the recreate reattaches, and migrations are additive,
+so an update does not touch your data. Pull the compose files as well as the
+image: a new revision may change what the stack expects of them.
 [`docs/updating.md`](docs/updating.md) is the full runbook — what to back up
 first, how to roll back, how to restore, and the three changes that are not
 ordinary updates.
