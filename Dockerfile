@@ -11,8 +11,23 @@
 # Tectonic rather than a full TeX Live: TeX Live is 3-5 GB, Tectonic is around
 # 150 MB and fetches only the packages a document actually uses.
 
+#
+# Both stages and the database in docker-compose.yml are pinned by digest, the
+# same way pandoc and tectonic are below. A floating tag meant the image CI
+# validated and the image a rebuild produced could be different base images,
+# which is the one difference that never appears in a diff.
+#
+# The tag is kept alongside the digest: the digest is what Docker resolves, the
+# tag is what tells a reader which release this is. Pinning freezes the base's
+# security updates too, so refresh it deliberately -- the digest for a tag is:
+#
+#   docker buildx imagetools inspect node:22-bookworm-slim --format '{{.Manifest.Digest}}'
+#
+# Resolved 2026-09-12; both digests are multi-arch indexes covering linux/amd64
+# and linux/arm64, which the CI matrix builds.
+
 # --- Stage 1: build the TypeScript ------------------------------------------
-FROM node:22-bookworm-slim AS build
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS build
 
 WORKDIR /app
 
@@ -30,7 +45,7 @@ RUN npm run build && npm prune --omit=dev
 
 
 # --- Stage 2: runtime --------------------------------------------------------
-FROM node:22-bookworm-slim AS runtime
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS runtime
 
 ENV NODE_ENV=production \
     PYTHONUNBUFFERED=1 \

@@ -42,8 +42,13 @@ jobs:
       # collation explicitly and 8.4 already defaults to utf8mb4_0900_ai_ci.
       # A future table without an explicit collation would diverge from
       # production silently.
+      #
+      # The digest is the same one docker-compose.yml pins, and it is the
+      # point: this job's whole claim is that the migrations and the
+      # visibility suites passed against the database production runs, which
+      # a tag resolved twice cannot promise. Change both together.
       mysql:
-        image: mysql:8.4
+        image: mysql:8.4@sha256:85b9bf2e29cf836ecb8c2a15a935d4ba0c606631dff1dd79531a11983c638f2a
         env:
           # Throwaway values for an ephemeral container that exists for the
           # length of one job. Nothing secret belongs in a workflow file.
@@ -156,9 +161,11 @@ jobs:
 
     services:
       # Same image and reasoning as the `node` job: the schema declares
-      # utf8mb4_0900_ai_ci, which MariaDB and MySQL 5.7 do not have.
+      # utf8mb4_0900_ai_ci, which MariaDB and MySQL 5.7 do not have. Same
+      # digest too -- a rehearsal that restores into a different build of
+      # MySQL than production runs is rehearsing the wrong thing.
       mysql:
-        image: mysql:8.4
+        image: mysql:8.4@sha256:85b9bf2e29cf836ecb8c2a15a935d4ba0c606631dff1dd79531a11983c638f2a
         env:
           MYSQL_ROOT_PASSWORD: ci-root-not-a-secret
           MYSQL_DATABASE: rehearsal_source

@@ -146,6 +146,59 @@ for (const file of walk(join(ROOT, 'src'), '.ts')) {
   });
 }
 
+// --- Pinned images ---------------------------------------------------------
+
+// The MySQL digest is written in several places -- the compose file, and one
+// service container per CI job that needs a database -- and those jobs' whole
+// claim is that the migrations, the visibility suites and the restore drill
+// passed against the database production runs. Hand-kept copies cannot promise
+// that: the day one diverges, CI goes green against a database nobody deploys.
+// Same reasoning as the shared slug fixture -- one edit has to move them all,
+// or a check has to notice that it did not.
+//
+// Every occurrence is collected, not the first: a second service container was
+// added to a CI job while this check existed, and a first-match-per-file
+// version would have declared the tree clean with it still unpinned.
+const MYSQL_IMAGE = /image:\s*mysql:8\.4(@sha256:[0-9a-f]{64})?/g;
+
+const mysqlPins = [];
+for (const file of [join(ROOT, 'docker-compose.yml'), join(ROOT, '.github/workflows/ci.yml')]) {
+  const contents = readFileSync(file, 'utf8');
+  const lines = contents.split('\n');
+  let found = 0;
+
+  lines.forEach((text, index) => {
+    MYSQL_IMAGE.lastIndex = 0;
+    const match = MYSQL_IMAGE.exec(text);
+    if (match === null) return;
+    found += 1;
+    if (match[1] === undefined) {
+      fail(file, index + 1, 'mysql:8.4 is not digest-pinned. Pin it as mysql:8.4@sha256:<64 hex>.');
+      return;
+    }
+    mysqlPins.push({ file, line: index + 1, digest: match[1].slice(1) });
+  });
+
+  if (found === 0) {
+    fail(file, 1, 'no mysql:8.4 image found. If it moved, this check needs updating.');
+  }
+}
+
+const distinct = new Set(mysqlPins.map((pin) => pin.digest));
+if (distinct.size > 1) {
+  const first = mysqlPins[0];
+  for (const pin of mysqlPins.slice(1)) {
+    if (pin.digest === first.digest) continue;
+    fail(
+      pin.file,
+      pin.line,
+      `mysql digest ${pin.digest} does not match ${relative(ROOT, first.file)}:${first.line} ` +
+        `(${first.digest}). CI would then test against a database production does not run. ` +
+        'Change them together.',
+    );
+  }
+}
+
 // --- Report ----------------------------------------------------------------
 
 if (failures.length > 0) {
@@ -156,5 +209,6 @@ if (failures.length > 0) {
 }
 
 console.log(
-  'invariants hold: safe-filter allowlist, no inline styles, nonced scripts, visibility chokepoint',
+  'invariants hold: safe-filter allowlist, no inline styles, nonced scripts, visibility chokepoint, ' +
+    'matching mysql pin',
 );

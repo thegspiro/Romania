@@ -84,7 +84,10 @@ services:
       options: { max-size: '10m', max-file: '5' }
 
   db:
-    image: mysql:8.4
+    # Pinned by digest for the reason the Dockerfile records: a floating
+    # tag lets the database CI tested against and the one a deployment
+    # pulls drift apart without anything appearing in a diff.
+    image: mysql:8.4@sha256:85b9bf2e29cf836ecb8c2a15a935d4ba0c606631dff1dd79531a11983c638f2a
     restart: unless-stopped
     command:
       - --character-set-server=utf8mb4
