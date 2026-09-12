@@ -17,9 +17,15 @@
 # the SAME /data/files. Compilation hands work across that volume: the web app
 # writes the assembled Markdown and the worker reads it back.
 #
-# The containers run as uid/gid 1000, which is what Unraid shares are normally
-# owned by. If yours differ, `chown -R 1000:1000` these paths -- the entrypoint
-# now refuses to start on a directory it cannot write to, and names the uid.
+# Unraid owns its shares as nobody:users -- uid 99, gid 100 -- and the image's
+# default user is uid 1000. Set APP_UID=99 and APP_GID=100 in .env so the
+# containers are built to run as Unraid's own user; see docs/unraid.md.
+#
+# A share left at Unraid's usual 0777 is writable either way, which is why some
+# installs never notice. A directory created over SSH is root:root 0755 and is
+# not, so `chown` the paths below to whichever uid the image was built with.
+# The entrypoint refuses to start on a directory it cannot write to and names
+# that uid in the message.
 
 services:
   web:

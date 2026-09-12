@@ -13,6 +13,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # The uid/gid the application runs as, baked at build time. Defaults to
+      # the base image's 1000:1000, so an unset .env builds what it always did.
+      # On Unraid set APP_UID=99 and APP_GID=100 in .env so the containers can
+      # write to bind-mounted shares. MUST match the worker's, below: the two
+      # share /data/files, and a file one wrote is one the other has to read.
+      args:
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
     image: dissertation-platform:latest
     restart: unless-stopped
     command: ['web']
@@ -84,6 +92,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # Identical to web's, and interpolated from the same variables so the two
+      # cannot drift. A mismatch would build the tag twice and leave whichever
+      # ran last owning /data/files.
+      args:
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
     image: dissertation-platform:latest
     restart: unless-stopped
     command: ['worker']
