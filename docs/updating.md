@@ -1,129 +1,186 @@
 # Updating
 
+This is the runbook for moving an installed instance to a newer revision
+without losing anything. It assumes the Compose deployment from
+[`installation.md`](installation.md) or [`unraid.md`](unraid.md) — Unraid, a
+Linux host or a cloud VM. The steps are identical; only the volume paths
+differ.
+
 An update here is a **rebuild from source**, not an image pull. There is no
 published container image, so `docker compose pull` has nothing to fetch — the
-clone you installed from is the build context, and updating means pulling into
-it and rebuilding.
+clone you installed from is the build context.
 
-This page assumes the install described in [`installation.md`](installation.md)
-or [`unraid.md`](unraid.md).
+Read this once before your first update. The short version:
+
+```sh
+git pull --ff-only origin main
+docker compose up -d --build
+```
+
+Everything below is about doing that safely and knowing how to reverse it.
 
 ---
 
-## What an update actually does
+## Why the data survives a rebuild
 
-```
-git pull                      new application code
-docker compose up -d --build  rebuild the image, recreate the containers
-                              └─ web starts, applies pending migrations,
-                                 then serves
-```
+Nothing durable lives in the image or in a container's own filesystem. Three
+volumes hold everything, and `docker compose up -d --build` reattaches all
+three to the containers it recreates:
 
-Two consequences worth knowing before you run it:
+| Volume     | Mounted at       | Holds                                  |
+| ---------- | ---------------- | -------------------------------------- |
+| `database` | `/var/lib/mysql` | Every content item, source and account |
+| `files`    | `/data/files`    | Uploads, derivatives, build staging    |
+| `backups`  | `/data/backups`  | Dumps and file archives                |
 
-- **Migrations apply themselves.** The `web` role runs `migrate up` on start
-  unless `RUN_MIGRATIONS=false`. By the time the new container is serving, the
-  schema has already moved. You do not get a chance to inspect the change
-  between the pull and the migration unless you ask for one — see
-  [Looking before you leap](#looking-before-you-leap).
-- **Only `web` migrates.** The compose file sets `RUN_MIGRATIONS=false` on the
-  worker so the two roles never race.
+Destroying and recreating containers is the normal update path, not a risk to
+those. Two further properties make the schema safe to move forward:
 
-And one that is easy to miss: **MySQL commits implicitly around DDL**, so a
-migration that fails halfway cannot roll itself back. Up-migrations in this
-repository are written to be re-runnable for that reason, but the recovery for
-a genuinely broken one is the backup. Which is why the backup comes first.
+- **Applied migrations are immutable.** The runner stores a SHA-256 of every
+  migration it applies and refuses to start if a file has changed since
+  (`src/db/migrate.ts`). `.github/scripts/check-migrations.sh` fails any pull
+  request that edits or deletes a migration already on `main`. An update can
+  therefore only _add_ migrations on top of your schema; it cannot rewrite the
+  ground your data sits on.
+- **Migrations run once, from one role.** `scripts/entrypoint.sh` applies them
+  from the `web` role only, and the Compose file sets `RUN_MIGRATIONS=false`
+  on the worker. A MySQL named lock serialises runners besides, so containers
+  starting together cannot double-apply.
+
+One more that decides how carefully to read a diff: **MySQL commits implicitly
+around DDL**, so a migration that fails halfway cannot roll itself back.
+Up-migrations here are written to be re-runnable for that reason, but the
+recovery for a genuinely broken one is the backup. Which is why the backup
+comes first.
+
+> **`docker compose down -v` deletes the volumes.** That flag is the one way
+> to lose the database through an ordinary-looking command. Plain
+> `docker compose down` keeps them, and so does `up -d --build`. On Unraid,
+> the equivalent mistake is deleting `/mnt/user/appdata/dissertation/mysql`
+> while "cleaning up appdata".
 
 ---
 
-## 1. Back up, and wait for it to finish
+## The runbook
+
+Run everything from the directory holding `docker-compose.yml` and your
+`.env` — over SSH on Unraid, or from the Compose Manager plugin's terminal.
+
+### 1. Back up, and confirm the backup exists
+
+Enqueue the job:
 
 ```sh
 docker compose exec db mysql -u root -p"$DB_ROOT_PASSWORD" dissertation \
   -e "INSERT INTO job (kind, payload) VALUES ('backup.run', '{\"keep\": 14}')"
 ```
 
-> If you run the database elsewhere — RDS, Cloud SQL — there is no `db`
-> service to exec into. Connect with your own client and run the same
-> `INSERT`, or use the web container's MySQL client:
-> `docker compose exec web mysql -h "$DB_HOST" -u "$DB_USER" -p "$DB_NAME" -e "…"`.
-
-**This is asynchronous.** The statement enqueues a job; the worker picks it up
-on its next poll and a dump of a real corpus takes minutes. Restarting the
-stack while that runs kills the backup you are relying on.
-
-Wait for it:
+The worker picks it up on its next poll and writes `database-<stamp>.sql.gz`
+and `files-<stamp>.tar.gz` to `BACKUP_ROOT`. **It is asynchronous**, so do not
+move on until it has finished — restarting the stack mid-dump kills the backup
+you are relying on:
 
 ```sh
 docker compose exec db mysql -u root -p"$DB_ROOT_PASSWORD" dissertation \
   -e "SELECT id, state, attempts, last_error FROM job WHERE kind='backup.run' ORDER BY id DESC LIMIT 1"
+
+docker compose exec web ls -lh /data/backups
 ```
 
-Wait until `state` is `succeeded`. Then confirm the files landed:
+Wait for `state` to read `succeeded`. A file still named `.partial` means the
+dump is mid-write; the job renames only after a complete, successful one, so a
+partial file is never mistaken for a good backup.
+
+If the worker is not running — which is exactly when you are most likely to be
+updating — dump directly instead:
 
 ```sh
-docker compose exec web ls -l /data/backups
+docker compose exec db sh -c \
+  'mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --single-transaction --quick \
+   --routines --triggers --events --no-create-db dissertation' \
+  | gzip > /path/on/host/pre-update-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
 ```
 
-You are looking for a `database-<timestamp>.sql.gz` and a
-`files-<timestamp>.tar.gz` with recent timestamps. A file still named
-`.partial` means the backup is mid-write — the job renames only after a
-complete, successful dump, so a partial file is never mistaken for a good one.
+`--single-transaction` gives a consistent snapshot without locking the site
+out; every table is InnoDB.
 
-**Copy the backup off the machine** before continuing if it is not already
-replicated. A backup on the host you are about to change is only half a backup.
+**Copy the backup off the machine** if it is not already replicated. A copy
+sitting in the same appdata directory as the database it protects is not a
+backup.
 
-## 2. Look at what is coming
+> If you run the database elsewhere — RDS, Cloud SQL — there is no `db`
+> service to exec into. Connect with your own client and run the same
+> statements, or use the web container's MySQL client:
+> `docker compose exec web mysql -h "$DB_HOST" -u "$DB_USER" -p "$DB_NAME" -e "…"`.
+
+### 2. Record where you are
 
 ```sh
-git fetch origin
-git log --oneline HEAD..origin/main
-git diff HEAD..origin/main -- db/migrations/ .env.example docker-compose.yml
+git rev-parse HEAD > /path/on/host/last-known-good.txt
+docker compose exec web /app/scripts/entrypoint.sh migrate status
+```
+
+The first line is what you check out to roll back. The second tells you which
+migration version you are rolling back _to_ — note the highest `applied`
+number before the update moves it.
+
+### 3. Pull, and read what changed
+
+```sh
+git pull --ff-only origin main
+git diff HEAD@{1} HEAD -- .env.example db/migrations/ docker-compose.yml
 ```
 
 Three things in that diff decide how careful to be:
 
 - **New migrations** (`db/migrations/NNNN_*.up.sql`) mean the schema moves.
-  Read them. Note the highest version number already applied — you need it to
-  roll back, and `docker compose exec web /app/scripts/entrypoint.sh migrate
-status` prints it.
-- **Changes to `.env.example`** mean new or changed configuration. Nothing
-  copies them into your `.env`; see [Configuration drift](#configuration-drift).
+  Read them.
+- **Changes to `.env.example`** mean new or changed configuration. `.env` is
+  gitignored, so your configuration and secrets are untouched by the pull —
+  but the application refuses to start on invalid configuration rather than
+  falling back to an unsafe default, so **a new required key in `.env.example`
+  is a failed boot if you do not add it to `.env` first.** See
+  [Configuration drift](#configuration-drift).
 - **Changes to `docker-compose.yml`** conflict with any edits you made to that
-  file directly. If you kept your changes in `docker-compose.override.yml` this
-  is a non-issue.
-
-## 3. Pull and rebuild
-
-```sh
-git pull
-docker compose up -d --build
-```
+  file directly. If you kept your changes in `docker-compose.override.yml`
+  this is a non-issue.
 
 If you edited `docker-compose.yml` in place — for example to delete the `db`
-service for a managed database — the pull may conflict. Resolve it in favour of
-keeping your deletion, and consider moving everything that _can_ live in
+service for a managed database — the pull may conflict. Resolve it in favour
+of keeping your deletion, and consider moving everything that _can_ live in
 `docker-compose.override.yml` there so future pulls are clean.
 
-Watch the migrations run:
+### 4. Rebuild and restart
 
 ```sh
+docker compose up -d --build
 docker compose logs -f web
 ```
 
-## 4. Verify
+In the log you want, in order: `entrypoint: applying database migrations`, the
+new versions being applied, then `entrypoint: starting web service`.
+
+The `db` service is a pinned upstream image and is not rebuilt; only `web` and
+`worker` come from this repository.
+
+### 5. Verify
 
 ```sh
+docker compose ps                                              # web reports (healthy)
 docker compose run --rm web preflight
+docker compose exec web /app/scripts/entrypoint.sh migrate status
 ```
 
-Then:
+`web`'s health check queries the database through `/healthz`, so a healthy
+container means the schema is reachable, not merely that a process started.
 
-- [ ] `docker compose ps` shows `web`, `worker` and `db` healthy.
-- [ ] `migrations` reads `all N applied`.
-- [ ] The site loads and you can sign in.
+Then, by hand:
+
+- [ ] Load a page and sign in.
 - [ ] A passkey still works — if it does not, check that `WEBAUTHN_RP_ID` did
       not change.
+- [ ] **Confirm a private item is still private.** Visibility is the property
+      worth checking by hand after any change.
 - [ ] The worker is processing: `docker compose logs --tail=50 worker`.
 
 ---
@@ -139,16 +196,15 @@ docker compose exec web /app/scripts/entrypoint.sh migrate status
 docker compose exec web /app/scripts/entrypoint.sh migrate up
 ```
 
-Worth doing when the diff in step 2 showed a migration that rewrites data
+Worth doing when the diff in step 3 showed a migration that rewrites data
 rather than only adding structure.
 
 ---
 
 ## Configuration drift
 
-New releases add configuration. Your `.env` is a copy taken at install time and
-nothing updates it, so the way to find what is new is to diff against the
-template:
+New releases add configuration, and nothing updates your `.env`. To find what
+is new, diff against the template:
 
 ```sh
 comm -23 \
@@ -161,23 +217,23 @@ Commented-out optional settings in the template (`ZOTERO_*`, the `*_FILE`
 forms, `DB_WAIT_TIMEOUT`) show up too, so read the list rather than pasting it
 in wholesale.
 
-Most values have safe defaults, and the application validates the whole
-configuration at startup and refuses to start if something required is missing
-— so a genuinely necessary value fails loudly rather than silently.
-
 Two are the exception, because they are **build** arguments rather than runtime
 configuration: `APP_UID` and `APP_GID` decide the uid the containers run as and
-are baked into the image. Changing either takes a `--build`, which step 3 does
+are baked into the image. Changing either takes a `--build`, which step 4 does
 anyway — but it does not move data already on disk. If you change them, chown
-the bind-mounted directories to match in the same window, or the containers will
-not be able to read what they wrote yesterday.
+the bind-mounted directories to match in the same window, or the containers
+will not be able to read what they wrote yesterday.
 
 ---
 
 ## Rolling back
 
-Rolling back an update means undoing **two** things: the code and the schema.
-The order matters, and it is not the obvious one.
+Every up-migration has a tested down-migration — the runner refuses to load a
+migration that lacks one (`src/db/migrate.ts`). So a bad update reverses
+without touching the dump.
+
+Rolling back means undoing **two** things, the code and the schema, and the
+order matters:
 
 > **Roll the schema back first, while the new code is still checked out.**
 >
@@ -187,15 +243,13 @@ The order matters, and it is not the obvious one.
 > `Version N is recorded as applied but its files are missing from
 db/migrations. Restore them before rolling back.`
 
-So:
-
 ```sh
-# 1. Still on the new code. Roll the schema back to the version you noted
-#    in step 2 — every migration above it is reverted.
+# 1. Still on the new code. --to is the version from step 2 -- the one you
+#    were on BEFORE the update, not the one you are on now.
 docker compose exec web /app/scripts/entrypoint.sh migrate down --to 13
 
 # 2. Now go back to the old code and rebuild.
-git checkout <the-previous-commit>
+git checkout "$(cat /path/on/host/last-known-good.txt)"
 docker compose up -d --build
 
 # 3. Confirm.
@@ -209,9 +263,9 @@ all, use `run` instead, which does not need a healthy service:
 docker compose run --rm web migrate down --to 13
 ```
 
-If a migration failed partway through and left the schema in a state its own
-down-migration cannot undo — possible, because MySQL commits around DDL — stop
-and restore from the backup instead.
+Restore from the dump only if a down-migration itself failed. MySQL commits
+implicitly around DDL, so a migration that dies partway cannot undo itself, and
+at that point the recorded schema version no longer describes the database.
 
 ---
 
@@ -221,13 +275,15 @@ The full recovery path, for when rolling back is not enough. This **replaces**
 the live database and files.
 
 Before you start, know which backup you are restoring and that you can afford
-to lose everything written since it was taken.
+to lose everything written since it was taken. Check out the application code
+that matches the backup — `last-known-good.txt`, or the revision the dump was
+taken on — before step 4.
 
 ```sh
 # 1. Stop the application, but leave the database running.
 docker compose stop web worker
 
-# 2. Restore the database. Adjust the timestamp to the backup you want.
+# 2. Restore the database.
 docker compose exec db sh -c '
   mysql -u root -p"$MYSQL_ROOT_PASSWORD" -e "
     DROP DATABASE IF EXISTS \`dissertation\`;
@@ -254,10 +310,9 @@ docker compose up -d
 docker compose run --rm web preflight
 ```
 
-Check out the application code that matches the backup's schema before step 4.
-A dump restored under newer code whose migrations have not run is a schema the
-application does not expect; `migrate status` will show them pending and the
-`web` role will apply them on start.
+Storage keys are content hashes, so files and rows can be restored
+independently without going out of step — a database restored from one stamp
+and files from another still agree about which bytes a record names.
 
 > **Rehearse this before you need it.** `scripts/restore-rehearsal.sh` runs the
 > whole drill against a scratch database — see the README's
@@ -266,12 +321,24 @@ application does not expect; `migrate status` will show them pending and the
 
 ---
 
-## Refreshing the base images
+## Three changes that are not ordinary updates
 
-Base images are pinned by digest in `Dockerfile` and `docker-compose.yml`, so a
-rebuild produces the image CI validated rather than whatever the tag points at
-today. The cost is that base security updates do not arrive on their own —
-refresh them deliberately:
+**The MySQL major version.** `docker-compose.yml` pins `mysql:8.4`. MySQL
+upgrades its data directory in place on first boot and cannot be downgraded
+afterwards — starting a newer major version against your volume is a one-way
+door. If an update bumps it, the safe path is a dump, a fresh empty volume and
+a restore, not an in-place start. Nothing in this repository requires you to
+move.
+
+**`WEBAUTHN_RP_ID`.** Not a database concern, but the other irreversible one:
+passkeys are bound to that domain, and changing it invalidates every registered
+credential. Password plus a recovery code still gets you in, but leave it alone
+across updates.
+
+**The pinned base images.** Base images are pinned by digest in `Dockerfile`
+and `docker-compose.yml`, so a rebuild produces the image CI validated rather
+than whatever the tag points at today. The cost is that base security updates
+do not arrive on their own — refresh them deliberately:
 
 ```sh
 docker buildx imagetools inspect node:22-bookworm-slim --format '{{.Manifest.Digest}}'
@@ -279,14 +346,24 @@ docker buildx imagetools inspect mysql:8.4 --format '{{.Manifest.Digest}}'
 ```
 
 Use the multi-arch index digest, not a per-platform one: the CI matrix builds
-`linux/amd64` and `linux/arm64` from the same reference.
+`linux/amd64` and `linux/arm64` from the same reference. The MySQL digest
+appears in more than one place — `docker-compose.yml` and one service container
+per CI job — and `.github/scripts/check-invariants.mjs` fails the build if any
+occurrence is unpinned or if they diverge, so update them together. This is a
+change to tracked files, so it belongs in a commit rather than a local edit the
+next `git pull` will fight with.
 
-The MySQL digest appears in more than one place — `docker-compose.yml` and one
-service container per CI job. `.github/scripts/check-invariants.mjs` fails the
-build if any occurrence is unpinned or if they diverge, so update them together.
+---
 
-This is a change to tracked files, so it belongs in a commit rather than in a
-local edit that the next `git pull` will fight with.
+## Keeping backups running between updates
+
+The backup job is enqueued, not scheduled — nothing in the container runs cron.
+On Unraid, add the `INSERT` from step 1 to a User Scripts entry on a nightly
+schedule; on another host, a host crontab line issuing the same statement does
+the same thing. The job prunes to the newest `keep` of each kind, so it will
+not fill the share.
+
+A pre-update backup you took by hand should never be your only one.
 
 ---
 
@@ -303,11 +380,11 @@ Nothing above changes, with two notes:
 
 ## When the database is managed elsewhere
 
-The rebuild is the same. The backup enqueue and the restore need your own
-client rather than `docker compose exec db`, and the restore's `DROP DATABASE`
-may not be permitted to the application's user — use an administrative account,
-the same way `scripts/restore-rehearsal.sh` takes `REHEARSAL_DB_USER` for
-exactly this reason.
+The rebuild is the same. The backup and the restore need your own client rather
+than `docker compose exec db`, and the restore's `DROP DATABASE` may not be
+permitted to the application's user — use an administrative account, the same
+way `scripts/restore-rehearsal.sh` takes `REHEARSAL_DB_USER` for exactly this
+reason.
 
 Snapshots of the managed instance are a complement to the job-based backup, not
 a replacement: the dump is what the restore rehearsal exercises, and it is the

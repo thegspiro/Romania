@@ -580,11 +580,12 @@ nightly, add a cron entry on the host that issues the same statement.
 
 ### Updating
 
-`git pull` then `docker compose up -d --build`. The database, files and
-backups live in volumes the rebuild reattaches, and migrations are additive,
-so an update does not touch your data. [UPDATING.md](UPDATING.md) is the full
-runbook — what to back up first, how to roll back, and the two changes that
-are not ordinary updates.
+`git pull --ff-only origin main` then `docker compose up -d --build`. The
+database, files and backups live in volumes the rebuild reattaches, and
+migrations are additive, so an update does not touch your data.
+[`docs/updating.md`](docs/updating.md) is the full runbook — what to back up
+first, how to roll back, how to restore, and the three changes that are not
+ordinary updates.
 
 ### Locked out?
 
