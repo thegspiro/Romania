@@ -306,6 +306,82 @@ describe.skipIf(!available)('relational browsing', () => {
       ]);
     });
 
+    it('reads an edge forward even when the walk arrives from the far end', async () => {
+      const { person, org } = await office('Prime Minister', '1941-01-01', '1944-01-01');
+
+      // Centred on the organization, so the edge is discovered from its `to`
+      // end rather than its `from` end.
+      const centre = (await findEntityById(harness.pool, 'organization', org, admin))!;
+      const graph = await buildGraph(harness.pool, centre, ANONYMOUS, 2);
+
+      expect(graph.edges).toHaveLength(1);
+      // The drawing orients every edge from -> to and puts an arrowhead on it,
+      // so the label has to read along that arrow. "Office held by" pointing
+      // from the person to the institution says the opposite of the record.
+      expect(graph.edges[0]?.source).toBe(person);
+      expect(graph.edges[0]?.target).toBe(org);
+      expect(graph.edges[0]?.label).toBe('Held office in');
+      expect(graph.edges[0]?.display).toBe('Prime Minister, 1941–1944');
+    });
+
+    it('draws one edge when both of its ends are in the same layer', async () => {
+      const centreId = await makeEntity(harness.pool, 'person', 'The Subject', 'public');
+      const person = await makeEntity(harness.pool, 'person', 'Ion Antonescu', 'public');
+      const org = await makeEntity(harness.pool, 'organization', 'Council of Ministers', 'public');
+
+      // Deliberately unqualified. An edge carrying a role reads as that role
+      // from either end, so it hid this: only a bare predicate, which reads
+      // one way forward and another way back, shows the edge twice.
+      const edges: [number, number, number][] = [
+        [centreId, person, associatedWith],
+        [centreId, org, associatedWith],
+        [person, org, heldOffice],
+      ];
+      for (const [from, to, predicateId] of edges) {
+        const created = await createRelationship(harness.pool, {
+          fromItemId: from,
+          toItemId: to,
+          predicateId,
+          note: '',
+          visibility: 'public',
+        });
+        expect(created.ok).toBe(true);
+      }
+
+      const centre = (await findEntityById(harness.pool, 'person', centreId, admin))!;
+      const graph = await buildGraph(harness.pool, centre, ANONYMOUS, 2);
+
+      // The centre reaches both ends of the third edge, so the next layer
+      // holds them both and the walk finds that edge from either side at
+      // once. Three claims, three edges -- not four, and not one of them
+      // drawn twice with its wording reversed.
+      expect(graph.edges).toHaveLength(3);
+      const between = graph.edges.filter((edge) => edge.source === person && edge.target === org);
+      expect(between).toHaveLength(1);
+      expect(between[0]?.display).toBe('Held office in');
+    });
+
+    it('draws one mention edge when both of its ends are in the same layer', async () => {
+      await makeEntity(harness.pool, 'person', 'Named Twice', 'public');
+      await makeEntity(harness.pool, 'person', 'The Intermediary', 'public', {
+        biography: 'Worked with [[person:named-twice]].',
+      });
+      const centreId = await makeEntity(harness.pool, 'person', 'The Subject', 'public', {
+        biography: 'Knew [[person:the-intermediary]] and [[person:named-twice]].',
+      });
+
+      const centre = (await findEntityById(harness.pool, 'person', centreId, admin))!;
+      const graph = await buildGraph(harness.pool, centre, ANONYMOUS, 2);
+
+      // The two people the centre names are one layer out, and one of them
+      // names the other -- so that mention is reachable from both ends.
+      const between = graph.edges.filter(
+        (edge) => edge.relation === 'mentioned' && edge.source !== centre.id,
+      );
+      expect(between).toHaveLength(1);
+      expect(between[0]?.display).toBe('mentions');
+    });
+
     it('leaves an unqualified edge reading as its predicate', async () => {
       const one = await makeEntity(harness.pool, 'person', 'Person One', 'public');
       const two = await makeEntity(harness.pool, 'person', 'Person Two', 'public');
@@ -322,6 +398,258 @@ describe.skipIf(!available)('relational browsing', () => {
       expect(graph.edges[0]?.roleTitle).toBeNull();
       expect(graph.edges[0]?.period).toBeNull();
       expect(graph.edges[0]?.display).toBe('Associated with');
+    });
+  });
+
+  /**
+   * Two hops out, on the page rather than in the JSON.
+   *
+   * The reading itself is unit-tested over graph literals. What is asserted
+   * here is the thing that would actually reach a reader: an item reachable
+   * only through something private must be *absent*, not redacted -- and the
+   * page must not name it, slug it, or hint that a route exists.
+   */
+  describe('two hops out', () => {
+    /**
+     * Just the "Connected through" section, or '' when the page has none.
+     *
+     * Scoping matters: a direct neighbour's name appears in the relationships
+     * list above, so "not among the indirect ones" cannot be asserted over the
+     * whole page without passing for the wrong reason.
+     */
+    function section(body: string): string {
+      const start = body.indexOf('<section class="connected-through">');
+      if (start === -1) return '';
+      const end = body.indexOf('</section>', start);
+      return body.slice(start, end === -1 ? undefined : end);
+    }
+
+    /** An asserted edge, defaulting to one anyone may see. */
+    async function link(
+      from: number,
+      to: number,
+      predicate: number,
+      visibility: 'public' | 'private' = 'public',
+    ): Promise<void> {
+      const created = await createRelationship(harness.pool, {
+        fromItemId: from,
+        toItemId: to,
+        predicateId: predicate,
+        note: '',
+        visibility,
+      });
+      expect(created.ok).toBe(true);
+    }
+
+    /**
+     * Centre --[held office in]--> middle <--[held office in]-- far.
+     *
+     * Each argument says how visible that piece is, so one shape covers every
+     * way the route can be cut.
+     */
+    async function chain(options: {
+      middle?: 'public' | 'private';
+      far?: 'public' | 'private';
+      farEdge?: 'public' | 'private';
+    }): Promise<{ centre: number; middle: number; far: number }> {
+      const centre = await makeEntity(harness.pool, 'person', 'The Subject', 'public');
+      const middle = await makeEntity(
+        harness.pool,
+        'organization',
+        'Council of Ministers',
+        options.middle ?? 'public',
+      );
+      const far = await makeEntity(
+        harness.pool,
+        'person',
+        'Mihai Antonescu',
+        options.far ?? 'public',
+      );
+
+      await link(centre, middle, heldOffice);
+      await link(far, middle, heldOffice, options.farEdge ?? 'public');
+      return { centre, middle, far };
+    }
+
+    it('names an item two hops out and what connects them', async () => {
+      await chain({});
+
+      const page = await harness.app.inject({ method: 'GET', url: '/people/the-subject' });
+      expect(page.statusCode).toBe(200);
+      expect(page.body).toContain('Connected through');
+      expect(page.body).toContain('Mihai Antonescu');
+      expect(page.body).toContain('/people/mihai-antonescu');
+      // The item in the middle, so the reader can see *why* they are connected
+      // rather than being told that they are.
+      expect(page.body).toContain('Council of Ministers');
+      expect(page.body).toContain('Held office in');
+    });
+
+    it('omits the section entirely when there is no second hop', async () => {
+      const centre = await makeEntity(harness.pool, 'person', 'The Subject', 'public');
+      const middle = await makeEntity(harness.pool, 'organization', 'Council', 'public');
+      await link(centre, middle, heldOffice);
+
+      const page = await harness.app.inject({ method: 'GET', url: '/people/the-subject' });
+      expect(page.body).not.toContain('Connected through');
+    });
+
+    it('does not reach an item through a private intermediary', async () => {
+      await chain({ middle: 'private' });
+
+      // The institution is unpublished, so the route through it does not
+      // exist for a reader -- and the person on the far side is absent, not
+      // withheld. No title, no slug, no marker where a route was.
+      const anonymous = await harness.app.inject({ method: 'GET', url: '/people/the-subject' });
+      expect(anonymous.statusCode).toBe(200);
+      expect(anonymous.body).not.toContain('Connected through');
+      expect(anonymous.body).not.toContain('Mihai Antonescu');
+      expect(anonymous.body).not.toContain('mihai-antonescu');
+      expect(anonymous.body).not.toContain('Council of Ministers');
+
+      const jar = await signIn(harness);
+      const asAdmin = await harness.app.inject({
+        method: 'GET',
+        url: '/people/the-subject',
+        headers: { cookie: cookieHeader(jar) },
+      });
+      expect(asAdmin.body).toContain('Connected through');
+      expect(asAdmin.body).toContain('Mihai Antonescu');
+    });
+
+    it('does not list a private item on the far side', async () => {
+      await chain({ far: 'private' });
+
+      const anonymous = await harness.app.inject({ method: 'GET', url: '/people/the-subject' });
+      expect(anonymous.body).not.toContain('Connected through');
+      expect(anonymous.body).not.toContain('Mihai Antonescu');
+      expect(anonymous.body).not.toContain('mihai-antonescu');
+
+      // The other half, so this is a test of the filter rather than of the
+      // feature being absent.
+      const jar = await signIn(harness);
+      const asAdmin = await harness.app.inject({
+        method: 'GET',
+        url: '/people/the-subject',
+        headers: { cookie: cookieHeader(jar) },
+      });
+      expect(section(asAdmin.body)).toContain('Mihai Antonescu');
+    });
+
+    it('does not reach an item through a private edge', async () => {
+      await chain({ farEdge: 'private' });
+
+      // Both people and the institution are published; the claim that the
+      // second one held office there is not.
+      const anonymous = await harness.app.inject({ method: 'GET', url: '/people/the-subject' });
+      expect(anonymous.body).not.toContain('Connected through');
+      expect(anonymous.body).not.toContain('Mihai Antonescu');
+      expect(anonymous.body).not.toContain('mihai-antonescu');
+
+      const jar = await signIn(harness);
+      const asAdmin = await harness.app.inject({
+        method: 'GET',
+        url: '/people/the-subject',
+        headers: { cookie: cookieHeader(jar) },
+      });
+      expect(section(asAdmin.body)).toContain('Mihai Antonescu');
+    });
+
+    it('never lists a direct neighbour among the indirect ones', async () => {
+      const { centre, middle, far } = await chain({});
+      // Now connect them directly as well. The walk reaches them in one hop,
+      // so they belong to the relationships list and not to this one.
+      await link(centre, far, associatedWith);
+
+      // Someone who really is two hops out, so the section exists and the
+      // assertion below is about who is in it rather than about it being gone.
+      const other = await makeEntity(harness.pool, 'person', 'Zoe Popescu', 'public');
+      await link(other, middle, heldOffice);
+
+      const page = await harness.app.inject({ method: 'GET', url: '/people/the-subject' });
+      const listed = section(page.body);
+      expect(listed).toContain('Zoe Popescu');
+      // Named in the relationships list above, and only there.
+      expect(listed).not.toContain('Mihai Antonescu');
+      expect(page.body).toContain('Mihai Antonescu');
+    });
+
+    it('connects two subjects named in the same piece of writing', async () => {
+      await makeEntity(harness.pool, 'person', 'The Subject', 'public');
+      await makeEntity(harness.pool, 'person', 'Mihai Antonescu', 'public');
+      await makeEssay(
+        harness.pool,
+        'Report on the Commission',
+        'public',
+        'Both [[person:the-subject]] and [[person:mihai-antonescu]] attended.',
+      );
+
+      // Nobody asserted this connection; the prose did.
+      const page = await harness.app.inject({ method: 'GET', url: '/people/the-subject' });
+      expect(page.body).toContain('Connected through');
+      expect(page.body).toContain('Mihai Antonescu');
+      expect(page.body).toContain('Report on the Commission');
+    });
+
+    it('does not connect two subjects through a private essay', async () => {
+      await makeEntity(harness.pool, 'person', 'The Subject', 'public');
+      await makeEntity(harness.pool, 'person', 'Mihai Antonescu', 'public');
+      await makeEssay(
+        harness.pool,
+        'Unpublished Chapter',
+        'private',
+        'Both [[person:the-subject]] and [[person:mihai-antonescu]] attended.',
+      );
+
+      const anonymous = await harness.app.inject({ method: 'GET', url: '/people/the-subject' });
+      expect(anonymous.body).not.toContain('Connected through');
+      expect(anonymous.body).not.toContain('Mihai Antonescu');
+      expect(anonymous.body).not.toContain('Unpublished');
+      expect(anonymous.body).not.toContain('unpublished-chapter');
+
+      const jar = await signIn(harness);
+      const asAdmin = await harness.app.inject({
+        method: 'GET',
+        url: '/people/the-subject',
+        headers: { cookie: cookieHeader(jar) },
+      });
+      expect(section(asAdmin.body)).toContain('Mihai Antonescu');
+    });
+
+    it('narrows to the year the page was asked for, as the drawing does', async () => {
+      const centre = await makeEntity(harness.pool, 'person', 'The Subject', 'public');
+      const middle = await makeEntity(harness.pool, 'organization', 'Council', 'public');
+      const far = await makeEntity(harness.pool, 'person', 'Mihai Antonescu', 'public');
+
+      for (const [from, start, end] of [
+        [centre, '1940-01-01', '1944-01-01'],
+        [far, '1950-01-01', '1955-01-01'],
+      ] as const) {
+        const created = await createRelationship(harness.pool, {
+          fromItemId: from,
+          toItemId: middle,
+          predicateId: heldOffice,
+          startDate: start,
+          endDate: end,
+          datePrecision: 'year',
+          note: '',
+          visibility: 'public',
+        });
+        expect(created.ok).toBe(true);
+      }
+
+      const unfiltered = await harness.app.inject({ method: 'GET', url: '/people/the-subject' });
+      expect(unfiltered.body).toContain('Mihai Antonescu');
+
+      // They were never there at the same time, so in 1941 there is no route
+      // through the institution. The text and the drawing are one walk, so
+      // they cannot disagree about which network is on screen.
+      const inYear = await harness.app.inject({
+        method: 'GET',
+        url: '/people/the-subject?year=1941',
+      });
+      expect(inYear.body).not.toContain('Connected through');
+      expect(inYear.body).not.toContain('Mihai Antonescu');
     });
   });
 

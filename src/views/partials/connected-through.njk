@@ -1,0 +1,72 @@
+{#
+  Two hops out: what this item is not directly connected to, and the item in
+  the middle that connects them.
+
+  Nothing here decides visibility, and nothing here queries. The list is a pure
+  derivation from the graph `buildGraph` already filtered at every hop -- a
+  private node is never traversed *through*, so an item reachable only by way of
+  one is simply absent, with no gap and no placeholder where it was.
+
+  Every hop is printed in the direction it was asserted, with both of its ends
+  named, so a hop reads correctly whichever way its edge points and the text
+  says exactly what the drawing below draws. All of it is plain text under
+  autoescape; nothing here is ever marked safe.
+#}
+<section class="connected-through">
+  <h2>Connected through</h2>
+  <p class="hint">
+    Not directly connected to this {{ labels.singular | lower }}, but reachable
+    by way of something that is. Only what you may see is counted.
+  </p>
+
+  <ul class="connection-list">
+    {% for connection in connected.items %}
+      <li>
+        <a href="{{ connection.node.href }}">{{ connection.node.title }}</a>
+        <span class="muted small">{{ connection.node.kind }}</span>
+        {% if connection.routes.length > 1 %}
+          <span class="muted small">· {{ connection.routes.length }} ways through</span>
+        {% endif %}
+
+        <ul class="route-list">
+          {% for route in connection.routes %}
+            <li class="route">
+              <span class="route-through">
+                through <a href="{{ route.through.href }}">{{ route.through.title }}</a>
+              </span>
+              {% for hop in route.hops %}
+                <span class="hop hop-{{ hop.relation }}">
+                  <span class="hop-end">{{ hop.from.title }}</span>
+                  <span class="hop-label">{{ hop.label }}</span>
+                  <span class="hop-end">{{ hop.to.title }}</span>
+                </span>
+              {% endfor %}
+            </li>
+          {% endfor %}
+          {% if connection.moreRoutes > 0 %}
+            <li class="muted small">
+              and {{ connection.moreRoutes }} more way{{ 's' if connection.moreRoutes != 1 }} through
+            </li>
+          {% endif %}
+        </ul>
+      </li>
+    {% endfor %}
+  </ul>
+
+  {#
+    Both notes are about items the viewer may already see. Saying "showing 25
+    of 60" withholds nothing -- unlike a marker where a private item was
+    filtered out, which is what this application must never print.
+  #}
+  {% if connected.total > connected.items.length %}
+    <p class="muted small">
+      Showing the {{ connected.items.length }} most connected of {{ connected.total }}.
+    </p>
+  {% endif %}
+  {% if graphTruncated %}
+    <p class="muted small">
+      This neighbourhood is larger than the network walks at once, so there may
+      be more than are counted here.
+    </p>
+  {% endif %}
+</section>

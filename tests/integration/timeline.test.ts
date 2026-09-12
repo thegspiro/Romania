@@ -248,6 +248,54 @@ describe.skipIf(!available)('timeline', () => {
     ).toEqual(['A public event']);
   });
 
+  // The place link is the one connection recorded on the event rather than on
+  // an edge, so it is the one that could be -- and was -- one-way.
+
+  it('lists an event on the page of the place it happened', async () => {
+    const placeId = await makeEntity(harness.pool, 'place', 'Iasi', 'public');
+    const eventId = await makeEvent('A public event', 'public', { startDate: '1941-01-01' });
+    await execute(
+      harness.pool,
+      'UPDATE event_detail SET place_item_id = ? WHERE content_item_id = ?',
+      [placeId, eventId],
+    );
+
+    // No relationship row and no prose: the place field on the event form is
+    // the only thing connecting these two, and it has to read from both ends.
+    const chronology = await listEventsRelatedTo(harness.pool, placeId, ANONYMOUS);
+    expect(chronology.map((entry) => entry.title)).toEqual(['A public event']);
+
+    const page = await anonymous('/places/iasi');
+    expect(page.body).toContain('A public event');
+    expect(page.body).toContain('/events/a-public-event');
+  });
+
+  it('does not list a private event on a public place page', async () => {
+    const placeId = await makeEntity(harness.pool, 'place', 'Iasi', 'public');
+    const eventId = await makeEvent('Unpublished incident', 'private', {
+      startDate: '1941-01-01',
+    });
+    await execute(
+      harness.pool,
+      'UPDATE event_detail SET place_item_id = ? WHERE content_item_id = ?',
+      [placeId, eventId],
+    );
+
+    // Reading the link the other way must not turn a private event into a
+    // public one. There is no edge to carry a visibility of its own here: the
+    // event asserts the place, so the event's own visibility decides.
+    expect(await listEventsRelatedTo(harness.pool, placeId, ANONYMOUS)).toEqual([]);
+    expect(
+      (await listEventsRelatedTo(harness.pool, placeId, adminViewer(harness.userId))).map(
+        (entry) => entry.title,
+      ),
+    ).toEqual(['Unpublished incident']);
+
+    const page = await anonymous('/places/iasi');
+    expect(page.body).not.toContain('Unpublished incident');
+    expect(page.body).not.toContain('unpublished-incident');
+  });
+
   it('does not reach a private event through a public edge', async () => {
     const personId = await makeEntity(harness.pool, 'person', 'Ion Antonescu', 'public');
     const eventId = await makeEvent('Unpublished incident', 'private', {

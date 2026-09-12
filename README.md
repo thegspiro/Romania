@@ -682,6 +682,14 @@ put the command above in the host's crontab.
 > That works, but it puts the root password in shell history and in the host's
 > process list, every night. Use the command above instead.
 
+### Updating
+
+`git pull` then `docker compose up -d --build`. The database, files and
+backups live in volumes the rebuild reattaches, and migrations are additive,
+so an update does not touch your data. [UPDATING.md](UPDATING.md) is the full
+runbook — what to back up first, how to roll back, and the two changes that
+are not ordinary updates.
+
 ### Locked out?
 
 1. **Lost your passkey** → sign in with your password and a recovery code, then

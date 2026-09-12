@@ -1091,13 +1091,25 @@ async function findVisibleItems(
 }
 
 /**
- * The ids of events connected to an item, by asserted edge or by prose.
+ * The ids of events connected to an item, by asserted edge, by prose, or by
+ * being the place the event happened.
  *
  * Filtered at every hop, the way `buildGraph` traverses: the edge itself, the
  * item we start from and the event we arrive at must all be visible. An event
  * reachable only through a private edge is not merely hidden from the list, it
  * is never reached -- otherwise the chronology would disclose that the edge
  * exists.
+ *
+ * The place branch has no edge to filter, because there is no edge row: an
+ * event's place is a column of the event, so the connection is exactly as
+ * visible as the event that asserts it. That is the same rule read from the
+ * other side -- an event page withholds a private place, and a place page
+ * withholds a private event -- and it is why the branch filters on `other`,
+ * the event, rather than on anything of its own.
+ *
+ * Without it the link is one-way. The event form is where a place is actually
+ * recorded, and until now nothing carried that back: a place's page said "no
+ * connected events recorded yet" while every one of its events named it.
  */
 async function relatedEventIds(
   db: Pool | PoolConnection,
@@ -1140,6 +1152,13 @@ async function relatedEventIds(
        JOIN content_item ci ON ci.id = m.to_item_id
        JOIN content_item other ON other.id = m.from_item_id
       WHERE m.to_item_id IN (${ids}) AND other.kind = ?
+        AND ${near.sql} AND ${far.sql}
+      UNION
+     SELECT d.content_item_id AS event_id
+       FROM event_detail d
+       JOIN content_item ci ON ci.id = d.place_item_id
+       JOIN content_item other ON other.id = d.content_item_id
+      WHERE d.place_item_id IN (${ids})
         AND ${near.sql} AND ${far.sql}`,
     [
       ...itemIds,
@@ -1158,6 +1177,11 @@ async function relatedEventIds(
       ...far.params,
       ...itemIds,
       'event',
+      ...near.params,
+      ...far.params,
+      // No `other.kind = ?` for this branch: a row in event_detail is an
+      // event by construction, so asking would only cost a join condition.
+      ...itemIds,
       ...near.params,
       ...far.params,
     ],
