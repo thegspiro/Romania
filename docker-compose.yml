@@ -154,13 +154,37 @@ services:
       start_period: 60s
     security_opt:
       - no-new-privileges:true
-    # No cap_drop here, unlike `web` and `worker`. Both of those are already
-    # uid 1000 from the first instruction, so dropping the bounding set takes
-    # away nothing they use. This image starts as root and drops to the mysql
-    # user itself, which needs CHOWN, SETUID, SETGID and DAC_OVERRIDE among
-    # others; naming that set from memory and getting it wrong is a database
-    # that will not start, and nothing in CI runs this composition to catch it.
-    # Worth doing with a real deployment to test against, not before.
+    # Unlike `web` and `worker`, this image starts as root and drops to the
+    # mysql user itself, so it cannot simply drop everything. The four below
+    # are the minimum, each established by removing it and watching the
+    # container fail:
+    #
+    #   SETGID, SETUID  gosu dropping root to the mysql user. Without them:
+    #                   "setgid: Operation not permitted", before any datadir
+    #                   work at all.
+    #   DAC_OVERRIDE    the entrypoint reads and writes files it does not own
+    #                   while still root. Without it: "find:
+    #                   '/var/lib/mysql-files': Permission denied".
+    #   CHOWN           `chown -R mysql:mysql` over the data directory.
+    #
+    # CHOWN is the one worth not trimming. A Docker-managed volume inherits
+    # the image's ownership, so the chown is a no-op and the container comes
+    # up perfectly well without the capability -- which is exactly how you
+    # would conclude it is unnecessary. A bind mount does not: it arrives
+    # owned by whoever owns the host path, the chown is real, and without
+    # CHOWN the container dies with "chown: changing ownership of
+    # '/var/lib/mysql': Operation not permitted". docker-compose.unraid.yml
+    # bind-mounts this directory, so that is the deployment this repository
+    # ships, not the edge case.
+    #
+    # FOWNER is not needed; it was tried and removed.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
     logging:
       driver: json-file
       options: { max-size: '10m', max-file: '3' }
