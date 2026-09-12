@@ -28,7 +28,7 @@ import {
 } from '../content/manuscripts.js';
 import { listMentionsOf, listMentionsFrom } from '../content/mentions.js';
 import { listRelationshipsFor } from '../content/relationships.js';
-import { buildGraph, parseGraphYear } from '../content/graph.js';
+import { buildGraph, indirectConnections, parseGraphYear } from '../content/graph.js';
 import { renderProse, renderFragment } from '../content/markdown.js';
 import { resolveForRender, resolveTimelines } from '../content/render-context.js';
 import {
@@ -115,6 +115,25 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
       const point =
         kind === 'place' ? await findMappablePlace(pool, request.viewer, record.id) : null;
 
+      // Re-parsed rather than echoed, so nothing from the query string reaches
+      // the page unchecked. The same year narrows the text below and the
+      // drawing's data URL, so the two cannot disagree about which network is
+      // being shown.
+      const graphYear = parseGraphYear((request.query as { year?: unknown }).year);
+
+      // Two hops out, as text. The drawing is the same walk, so the page is
+      // complete without JavaScript rather than complete only for a reader who
+      // can run it -- and the list can be searched in the page and printed.
+      // `indirectConnections` adds no query and makes no visibility decision:
+      // this graph is already filtered at every hop.
+      const graph = await buildGraph(
+        pool,
+        { id: record.id, kind: record.kind, slug: record.slug, title: record.title },
+        request.viewer,
+        2,
+        { year: graphYear },
+      );
+
       return renderPage(
         config,
         request,
@@ -137,10 +156,15 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
           // "the other places that they have been mentioned"
           mentions: await listMentionsOf(pool, record.id, request.viewer),
           relationships: await listRelationshipsFor(pool, record.id, request.viewer),
+          // Not directly connected, but connected: the item in the middle and
+          // the hop on either side of it.
+          connected: indirectConnections(graph),
+          // The walk ran out of budget before it ran out of neighbours, so the
+          // count above is of what was reached rather than of what there is.
+          graphTruncated: graph.truncated,
           // Carried into the graph's data URL so the year survives a reload
-          // without JavaScript. Re-parsed rather than echoed, so nothing from
-          // the query string reaches the page unchecked.
-          graphYear: parseGraphYear((request.query as { year?: unknown }).year),
+          // without JavaScript.
+          graphYear,
           point,
           mapTileUrl: config.MAP_TILE_URL ?? '',
           mapTileAttribution: config.MAP_TILE_ATTRIBUTION ?? '',

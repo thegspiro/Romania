@@ -31,6 +31,7 @@ export type AuditAction =
   | 'source.unpublish'
   | 'zotero.sync'
   | 'zotero.sync.full'
+  | 'backup.requested'
   | 'place.geocode';
 
 export interface AuditEntry {

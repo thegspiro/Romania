@@ -154,6 +154,14 @@
     {% include "partials/place-map.njk" %}
     {% include "partials/relationships.njk" %}
     {% include "partials/mentions.njk" %}
+    {#
+      Sits directly above the drawing it describes, and only when there is
+      something to say -- an empty section on every page early in a corpus is
+      noise, not information.
+    #}
+    {% if connected.items.length > 0 %}
+      {% include "partials/connected-through.njk" %}
+    {% endif %}
     {% include "partials/graph.njk" %}
 
     {% if isAdmin %}

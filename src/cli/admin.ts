@@ -15,6 +15,7 @@
  *   node dist/cli/admin.js recovery-codes --username u
  *   node dist/cli/admin.js sessions-revoke --username u
  *   node dist/cli/admin.js export --out /data/backups/export
+ *   node dist/cli/admin.js enqueue-backup [--keep 14] [--no-files]
  */
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
@@ -38,6 +39,12 @@ import {
 import { generateRecoveryCodes, hashRecoveryCode } from '../auth/recovery.js';
 import { destroyUserSessions } from '../auth/session.js';
 import { recordAudit } from '../content/audit.js';
+import {
+  DEFAULT_KEEP,
+  InvalidRetentionError,
+  parseRetention,
+  requestBackup,
+} from '../content/backups.js';
 import { exportCorpus } from '../content/export.js';
 import { ANONYMOUS, adminViewer } from '../content/visibility.js';
 
@@ -187,12 +194,15 @@ function usage(): string {
     '  recovery-codes     Generate a fresh set of recovery codes',
     '  sessions-revoke    Sign out every session for an account',
     '  export             Write the whole corpus as Markdown and CSL-JSON',
+    '  enqueue-backup     Queue a database and file backup for the worker',
     '',
     'Options:',
     '  --username <name>  Account to act on',
     '  --name <text>      Display name (create-admin only)',
     '  --out <directory>  Where to write an export (export only)',
     '  --public           Export only published material (export only)',
+    `  --keep <n>         Backups of each kind to retain (enqueue-backup, default ${DEFAULT_KEEP})`,
+    '  --no-files         Back up the database only (enqueue-backup)',
   ].join('\n');
 }
 
@@ -358,6 +368,31 @@ async function run(argv: string[]): Promise<number> {
         return 0;
       }
 
+      case 'enqueue-backup': {
+        // The worker does the work; this only records that it should happen.
+        // Retention is validated here as well as in the handler so a typo
+        // fails at the prompt instead of as a job that errors minutes later.
+        const keep = parseRetention(flags.get('keep'));
+        // Presence, not value: parseFlags would read `--no-files 7` as the
+        // string "7", and comparing against 'true' would then silently include
+        // the files the operator asked to leave out.
+        const includeFiles = !flags.has('no-files');
+
+        const outcome = await requestBackup(pool, { keep, includeFiles });
+        if (outcome === 'already_queued') {
+          console.log('A backup is already queued or running; not queueing another.');
+          return 0;
+        }
+
+        await recordAudit(pool, { actor: 'cli', action: 'backup.requested' });
+        console.log(
+          `Queued a backup: ${includeFiles ? 'database and files' : 'database only'}, ` +
+            `keeping the newest ${keep} of each.`,
+        );
+        console.log('The worker picks it up on its next poll; watch its log for the result.');
+        return 0;
+      }
+
       default: {
         console.error(`Unknown command "${command}"\n\n${usage()}`);
         return 2;
@@ -373,6 +408,11 @@ run(process.argv.slice(2))
     process.exitCode = code;
   })
   .catch((error: unknown) => {
+    if (error instanceof InvalidRetentionError) {
+      console.error(error.message);
+      process.exitCode = 2;
+      return;
+    }
     if (error instanceof ConfigError) {
       console.error(error.message);
       process.exitCode = 78; // EX_CONFIG

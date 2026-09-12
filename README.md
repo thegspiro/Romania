@@ -514,27 +514,25 @@ second one on a different device from `/admin/security`.
 
 ### On Unraid
 
-Use the Compose Manager plugin, or run the commands above over SSH. Replace
-the named volumes with array paths so backups and files live on the array
-rather than inside Docker:
+Use the Compose Manager plugin, or run the commands above over SSH. Add the
+committed Unraid override so backups and files live on the array rather than
+inside Docker:
 
-```yaml
-services:
-  web:
-    volumes:
-      - /mnt/user/appdata/dissertation/files:/data/files
-      - /mnt/user/backups/dissertation:/data/backups
-  worker:
-    volumes:
-      - /mnt/user/appdata/dissertation/files:/data/files
-      - /mnt/user/backups/dissertation:/data/backups
-  db:
-    volumes:
-      - /mnt/user/appdata/dissertation/mysql:/var/lib/mysql
+```sh
+docker compose -f docker-compose.yml -f docker-compose.unraid.yml up -d
 ```
 
+`docker-compose.unraid.yml` points `/data/files`, `/data/backups` and MySQL's
+data directory at `/mnt/user` paths. Compose merges a service's volumes by
+target path, so each entry replaces the named volume at that path rather than
+adding a second mount. Edit that file if your shares differ — it exists so
+that running on Unraid is a flag on the command line rather than an edit to
+`docker-compose.yml`, which would conflict on every `git pull`.
+
 The containers run as uid 1000, which matches the default ownership of Unraid
-shares. If yours differ, `chown -R 1000:1000` those paths.
+shares. If yours differ, `chown -R 1000:1000` those paths — the container
+refuses to start on a data directory it cannot write to, and the message names
+the uid.
 
 **`web` and `worker` must share `/data/files`.** Compilation hands work across
 that volume: the web app writes the assembled Markdown there and the worker
@@ -578,6 +576,7 @@ docker compose exec web /app/scripts/entrypoint.sh <command>
 | `admin revoke-passkey --username u --id 3` | Remove one passkey                         |
 | `admin recovery-codes --username u`        | Generate a fresh set of codes              |
 | `admin sessions-revoke --username u`       | Sign out everywhere                        |
+| `admin enqueue-backup [--keep n]`          | Queue a database and file backup           |
 | `preflight`                                | Report on the whole install and exit       |
 | `migrate status`                           | Show which migrations are applied          |
 | `migrate up`                               | Apply pending migrations                   |
@@ -666,14 +665,22 @@ mangles them silently.
 Enqueue a backup job:
 
 ```sh
-docker compose exec db mysql -u root -p"$DB_ROOT_PASSWORD" dissertation \
-  -e "INSERT INTO job (kind, payload) VALUES ('backup.run', '{\"keep\": 14}')"
+docker compose exec web /app/scripts/entrypoint.sh admin enqueue-backup
 ```
 
+`--keep <n>` changes how many of each kind to retain (default 14, max 365);
+`--no-files` backs up the database only. A second request while one is pending
+or running is refused rather than stacked, so a cron entry that fires during a
+long dump does not queue a duplicate.
+
 The worker writes a compressed dump and a file archive to `BACKUP_ROOT` and
-prunes to the newest 14 of each. Point that at a share the host itself backs
-up — a backup inside the container it protects is not a backup. To run it
-nightly, add a cron entry on the host that issues the same statement.
+prunes to the newest of each. Point that at a share the host itself backs up —
+a backup inside the container it protects is not a backup. To run it nightly,
+put the command above in the host's crontab.
+
+> Earlier versions documented a raw `INSERT` run as the database's root user.
+> That works, but it puts the root password in shell history and in the host's
+> process list, every night. Use the command above instead.
 
 ### Updating
 

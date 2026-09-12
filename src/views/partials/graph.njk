@@ -2,8 +2,10 @@
   The relationship network.
 
   The drawing is progressive enhancement: the roles and relationships list
-  above it carries the same information as text, so the page is complete
-  without JavaScript and without Cytoscape.
+  above it carries the direct connections as text, and "Connected through"
+  carries the second hop -- the same walk, the same labels, the same
+  directions -- so the page is complete without JavaScript and without
+  Cytoscape rather than complete only for a reader who can run it.
 
   The year control is an ordinary GET form for the same reason. Submitting it
   reloads the page with `?year=`, which the server re-parses and puts back into

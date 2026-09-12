@@ -807,6 +807,64 @@ button.danger {
   margin-left: 0.4rem;
 }
 
+/* --- Two hops out --------------------------------------------------------- */
+
+.connection-list,
+.route-list {
+  list-style: none;
+  padding: 0;
+}
+
+.connection-list {
+  margin: 0.75rem 0 0;
+}
+
+.connection-list > li {
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.route-list {
+  margin: 0.25rem 0 0;
+}
+
+.route {
+  margin-top: 0.35rem;
+  font-size: 0.9375rem;
+}
+
+.route-through {
+  display: block;
+  color: var(--ink-muted);
+}
+
+/*
+ * Solid for an edge the operator asserted, dotted for one derived from prose
+ * -- the same distinction the drawing makes with a solid and a dashed line.
+ */
+.hop {
+  display: block;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--rule);
+  color: var(--ink-muted);
+}
+
+.hop-mentioned {
+  border-left-style: dotted;
+}
+
+.hop-end {
+  color: var(--ink);
+}
+
+.hop-label {
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0.35rem;
+}
+
 /* --- Network graph -------------------------------------------------------- */
 
 .graph-controls {
