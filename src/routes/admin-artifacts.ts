@@ -48,6 +48,8 @@ function readArtifactForm(body: unknown): { input: ArtifactInput; errors: string
       dateCreated: readString(body, 'dateCreated'),
       creditLine: readString(body, 'creditLine'),
       rightsStatement: readString(body, 'rightsStatement'),
+      transcription: readString(body, 'transcription'),
+      transcriptionLanguage: readString(body, 'transcriptionLanguage'),
     },
     errors,
   };

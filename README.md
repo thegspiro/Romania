@@ -25,12 +25,12 @@ What is built and working:
 | Area                                                                      | State                                                                                                               |
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | Schema for all entity types                                               | Complete (sources, artifacts, essays, people, organizations, places, events, relationships, citations, tags, files) |
-| **Sources** — admin CRUD, publish/unpublish, public pages                 | Complete                                                                                                            |
+| **Sources** — admin CRUD, publish/unpublish, public pages                 | Complete (a source can hold the scan or PDF of the work itself)                                                     |
 | **Essays** — Markdown editor, reference picker, server-rendered preview   | Complete                                                                                                            |
 | **Share links** — one chapter to a supervisor, with anchored comments     | Complete (expiring, revocable, one essay each)                                                                      |
 | **Revision history** — every save recorded, compared and restorable       | Complete (append-only; restoring writes a new revision)                                                             |
 | **People, organizations, places, events** — admin CRUD and public pages   | Complete                                                                                                            |
-| **Artifacts** — catalogue records, file upload, access-controlled serving | Complete                                                                                                            |
+| **Artifacts** — catalogue records, file upload, access-controlled serving | Complete (with a transcription, which is prose and links like any other)                                            |
 | **Inline references and backlinks** — "everywhere this person is named"   | Complete (a backlink lands on the paragraph that named the subject)                                                 |
 | **Timeline** — chronology page, per-subject chronologies, blocks in prose | Complete (optional times; a contested event placed by "after X, before Y")                                          |
 | **Manuscripts** — nested outline, prev/next navigation, reusable sections | Complete                                                                                                            |
@@ -43,6 +43,7 @@ What is built and working:
 | Background worker — derivatives, bibliography import, geocoding, backups  | Complete                                                                                                            |
 | **Zotero sync** — pull a library in and keep it in step                   | Complete (incremental; deletions are flagged, never obeyed)                                                         |
 | Deployment — Docker, Compose, migrations, CLI                             | Complete                                                                                                            |
+| **Corpus export** — Markdown, CSL-JSON, and a rehearsed restore           | Complete                                                                                                            |
 | Maps                                                                      | **Not yet** (Leaflet is vendored; coordinates are in the schema)                                                    |
 | Public downloads of compiled documents                                    | **Not yet** (deliberately admin-only for now — see below)                                                           |
 | Search beyond `LIKE`                                                      | **Not yet** (a search service is the first side-cart candidate)                                                     |
@@ -225,6 +226,50 @@ public build is assembled with an **anonymous viewer**, so it can only contain
 what an anonymous reader could already read one page at a time. Downloads
 require an authenticated administrator; the column is what makes opening them
 up later a configuration change rather than a rewrite.
+
+### Transcriptions
+
+An artifact can carry the text of the document it photographs. A photograph is
+otherwise unsearchable, unquotable and uncitable by page; the transcription is
+what makes it reachable by the rest of the application.
+
+It is **prose**, in the same sense an essay body is. A reference written inside
+it — `[[person:ion-antonescu|Antonescu]]` — is projected into `mention` by
+`rebuildReferences` in the same transaction as the save, so a photographed
+order naming somebody appears on that person's page with the surrounding
+sentence as context. It inherits the renderer's rule too: a reference to
+something the reader may not see comes back as escaped display text, with no
+href and no slug.
+
+The `LIKE` search matches against it, so typing out a report is what lets you
+find it again in year four by a phrase you remember.
+
+`transcription_language` is separate from the record's language on purpose. A
+German order held in a Romanian archive has a Romanian catalogue entry and a
+German text, and the page has to say which is which for a screen reader.
+
+### A source can hold its own file
+
+`source_detail` carries a nullable `file_object_id`, so the scan or PDF of a
+work lives on the source that cites it. Before this, a scanned article had to
+be catalogued twice — once as a source, because that is what a footnote cites,
+and once as an artifact, because that is what could hold the bytes — with
+nothing linking the halves.
+
+Upload it from the source editor. Same pipeline as an artifact: the type is
+read from the file's contents rather than its name, EXIF is stripped, and
+derivatives are generated by the worker.
+
+Bytes are served only through `/files/:id/:variant`, which re-resolves the
+owning item and its visibility **on every request** — so a URL handed out
+while a source was public stops working the moment it is unpublished.
+
+> Storage is content-addressed: uploading identical bytes reuses one
+> `file_object`, so a file can be owned by an artifact _and_ a source at once.
+> The rule is **servable if any owning item is visible**. The bytes are one
+> object; there is no coherent way for them to be public and private
+> simultaneously. Unlinking a file leaves the file itself alone, because
+> something else may still own it.
 
 ### Zotero
 
@@ -557,6 +602,64 @@ If a build fails, its row carries Pandoc's stderr; the usual causes are a
 malformed YAML value on the manuscript's title-page fields and, for PDF, a TeX
 package Tectonic could not fetch because the container has no outbound
 network.
+
+### Exporting the corpus
+
+```sh
+docker compose exec web /app/scripts/entrypoint.sh admin export --out /data/backups/export
+```
+
+Writes the whole corpus in formats that do not need this application:
+prose as Markdown with YAML front matter, the bibliography as one CSL-JSON
+array that Zotero imports and Pandoc reads with `--bibliography`, the archival
+provenance CSL cannot carry as JSON beside it, and the artifact catalogue with
+each file's SHA-256 and storage key so the files inside a `files-*.tar.gz`
+can be matched back to the records describing them.
+
+Reference syntax is left exactly as written — `[[cite:hooligan-year|45-47]]`
+is readable as text and keyed to the slug in the front matter of the file it
+names, so it can be rewritten mechanically for another tool or simply read.
+
+> **A default export contains unpublished material.** It is assembled for an
+> administrator, so it holds every item regardless of visibility. The
+> directory is created `0700`. `--public` assembles it as an anonymous reader
+> instead, which is the copy that is safe to hand to somebody.
+
+### Rehearsing a restore
+
+A backup nobody has restored is a hypothesis. Once a year — or after any
+change to the schema you would not want to discover during a recovery — run
+the drill:
+
+```sh
+docker compose exec web /app/scripts/restore-rehearsal.sh
+```
+
+It takes a backup with the real backup handler, restores it into a scratch
+database, exports the restored corpus, and checks the row counts against the
+database it came from and that the bibliography parses as CSL-JSON. It reads
+the live database and writes only to the scratch database, so it is safe to
+run against the real thing — which is the point, since a rehearsal against an
+empty schema proves much less.
+
+The drill **creates and drops a scratch database**, which the application's own
+user usually may not do — a well-configured deployment grants it rights on its
+own schema and nothing else. Give the scratch database its own credentials:
+
+```sh
+REHEARSAL_DB_USER=root REHEARSAL_DB_PASSWORD=… \
+  docker compose exec web /app/scripts/restore-rehearsal.sh
+```
+
+They default to `DB_USER`/`DB_PASSWORD`, and step 0 proves the account can
+create and drop before anything else runs — so a missing privilege is a clear
+message up front rather than an "Access denied" halfway through, after a backup
+has already been written.
+
+`--keep-output` leaves the export in place to look at. CI runs the same script
+on every pull request against a seeded corpus, including Romanian diacritics,
+because a character set mismatch anywhere along dump → restore → export
+mangles them silently.
 
 ### Backups
 

@@ -132,6 +132,66 @@ absent one. The year is ANDed on top of `visibilityFilter`, never in place of
 it; a filter that could make a private node reachable would be a leak, and
 `tests/integration/graph.test.ts` pins that it cannot.
 
+**An artifact's transcription is its prose column.** Like an essay's body and
+an agent's biography, it goes through `rebuildReferences` in the save
+transaction -- `createArtifact` and `updateArtifact` both call it, and nothing
+else writes `mention`. One prose column per kind, for the reason the entity
+specs give: the projection is rebuilt wholesale from one string, and a
+mention's context and paragraph anchor have to point somewhere definite.
+
+It renders through `renderProse` with the request's viewer, so the
+visible/not-visible decision stays in the renderer rather than being made again
+on the page. `transcriptionHtml` is on the `| safe` allowlist for that reason
+and no other.
+
+`transcription_language` is deliberately not `content_item.language`: one
+describes the text, the other the catalogue record, and a German order in a
+Romanian archive needs both.
+
+**A file can be owned by an artifact or a source.** `FILE_OWNERS` in
+`src/files/repository.ts` is the one place that names them, so adding a third
+owner is editing that constant and nothing else. Two rules ride on it:
+
+- `findServableFile` is invariant 3 in one query. A `file_object` that **no**
+  item owns stays unreachable through `/files/:id/:variant` -- that is what
+  keeps a compiled manuscript build off this route, and it must survive any
+  change to the join.
+- Storage is content-addressed, so one file may have several owners. The rule
+  is **servable if any owning item is visible**: the bytes are one object, and
+  there is no coherent way for them to be public and private at once.
+  `tests/integration/source-files.test.ts` states that outright so it reads as
+  a decision rather than an accident of a `LIMIT 1`.
+
+Detaching a file clears the column and leaves `file_object` alone, because
+another item may still own it.
+
+**The export exists so the research can leave.** `src/content/export.ts`
+writes Markdown, CSL-JSON and a JSON catalogue -- deliberately nothing this
+application invented, because the risk to a five-year dissertation is not a
+bug, it is that nobody can build the image in 2031.
+
+- Reference syntax is exported **as written**. Resolving `[[cite:x]]` into a
+  link here would bake this application's idea of a reference into the copy
+  meant to outlive it. It is already readable text keyed to a slug.
+- Every read goes through a repository, so `visibilityFilter` applies. A
+  `--public` export is assembled with `ANONYMOUS` and is the same kind of
+  object as a `public` manuscript build: one file holding everything at once.
+  `tests/integration/export.test.ts` pins that it leaks no private prose, no
+  private artifact, and no storage key.
+- `artifactFileKeys` is the one read that goes around `ArtifactRecord`, because
+  no _page_ needs a storage key and an export does. It applies the filter like
+  anything else; keep it that way.
+
+`scripts/restore-rehearsal.sh` runs the whole drill and CI runs it on every
+pull request. Three things it is written to avoid, all of which bit this script
+before it worked: POSIX sh has no `pipefail` and `set -e` sees only the last
+command of a pipeline, so the export is captured to a file rather than piped
+into `sed`; a failed count query must not fall back to `0`, because two zeroes
+compare equal and the check would pass having compared nothing; and the drill
+creates a scratch database, which the application's user is not expected to be
+allowed to do -- hence `REHEARSAL_DB_USER`, and a step 0 that proves the
+privilege before a backup has been written.
+
 **Essay revisions are append-only, and written in the save transaction.**
 `essay_revision` holds whole snapshots, not diffs -- the row _is_ the text, so
 there is no reconstruction step that could be wrong. Three rules:
@@ -387,34 +447,35 @@ the properties being asserted actually live.
 
 ## Where things are
 
-| Concern                                | File                                |
-| -------------------------------------- | ----------------------------------- |
-| Who may see what                       | `src/content/visibility.ts`         |
-| Share links, tokens, reviewer comments | `src/content/sharing.ts`            |
-| The reviewer's routes                  | `src/routes/review.ts`              |
-| Config validation                      | `src/config.ts`                     |
-| Chicago rendering, HTML sanitising     | `src/citations/render.ts`           |
-| CSL-JSON model, form mapping           | `src/citations/csl.ts`              |
-| Passkey ceremonies                     | `src/auth/webauthn.ts`              |
-| Sessions, CSRF comparison, IP packing  | `src/auth/session.ts`               |
-| Security headers, CSP, robots policy   | `src/http/security.ts`              |
-| Request lifecycle                      | `src/http/server.ts`                |
-| Slugs (mirrored in Python)             | `src/content/slug.ts`               |
-| Reference syntax, context extraction   | `src/content/references.ts`         |
-| Prose → HTML, the visible/not decision | `src/content/markdown.ts`           |
-| Projections and backlinks              | `src/content/mentions.ts`           |
-| Essay revisions, restore rules         | `src/content/essays.ts`             |
-| Line diff for the comparison view      | `src/content/diff.ts`               |
-| Outline, navigation, assembly          | `src/content/manuscripts.ts`        |
-| Build records, staging, enqueue        | `src/content/builds.ts`             |
-| Graph traversal with per-hop filtering | `src/content/graph.ts`              |
-| Dates, chronological reads, the band   | `src/content/timeline.ts`           |
-| Path safety, magic bytes, hashing      | `src/files/storage.ts`              |
-| Access-checked file lookup             | `src/files/repository.ts`           |
-| Zotero sync, link and merge rules      | `worker/jobs/zotero_sync.py`        |
-| Sync queueing and state for the admin  | `src/content/zotero.ts`             |
-| Job runner                             | `worker/runner.py`                  |
-| Pandoc invocation                      | `worker/jobs/manuscript_compile.py` |
+| Concern                                 | File                                |
+| --------------------------------------- | ----------------------------------- |
+| Who may see what                        | `src/content/visibility.ts`         |
+| Share links, tokens, reviewer comments  | `src/content/sharing.ts`            |
+| The reviewer's routes                   | `src/routes/review.ts`              |
+| Config validation                       | `src/config.ts`                     |
+| Chicago rendering, HTML sanitising      | `src/citations/render.ts`           |
+| CSL-JSON model, form mapping            | `src/citations/csl.ts`              |
+| Passkey ceremonies                      | `src/auth/webauthn.ts`              |
+| Sessions, CSRF comparison, IP packing   | `src/auth/session.ts`               |
+| Security headers, CSP, robots policy    | `src/http/security.ts`              |
+| Request lifecycle                       | `src/http/server.ts`                |
+| Slugs (mirrored in Python)              | `src/content/slug.ts`               |
+| Reference syntax, context extraction    | `src/content/references.ts`         |
+| Prose → HTML, the visible/not decision  | `src/content/markdown.ts`           |
+| Projections and backlinks               | `src/content/mentions.ts`           |
+| Corpus export, portable formats         | `src/content/export.ts`             |
+| Essay revisions, restore rules          | `src/content/essays.ts`             |
+| Line diff for the comparison view       | `src/content/diff.ts`               |
+| Outline, navigation, assembly           | `src/content/manuscripts.ts`        |
+| Build records, staging, enqueue         | `src/content/builds.ts`             |
+| Graph traversal with per-hop filtering  | `src/content/graph.ts`              |
+| Dates, chronological reads, the band    | `src/content/timeline.ts`           |
+| Path safety, magic bytes, hashing       | `src/files/storage.ts`              |
+| Access-checked file lookup, file owners | `src/files/repository.ts`           |
+| Zotero sync, link and merge rules       | `worker/jobs/zotero_sync.py`        |
+| Sync queueing and state for the admin   | `src/content/zotero.ts`             |
+| Job runner                              | `worker/runner.py`                  |
+| Pandoc invocation                       | `worker/jobs/manuscript_compile.py` |
 
 ### Two implementations that must stay in step
 

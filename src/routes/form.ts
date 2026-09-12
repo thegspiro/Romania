@@ -75,6 +75,18 @@ export const FLASH_MESSAGES: Readonly<Record<string, Flash>> = Object.freeze({
   source_created: { kind: 'success', text: 'Source created.' },
   source_updated: { kind: 'success', text: 'Source updated.' },
   source_deleted: { kind: 'success', text: 'Source deleted.' },
+  source_file_attached: {
+    kind: 'success',
+    text: 'File attached. Derivatives are being generated.',
+  },
+  source_file_detached: {
+    kind: 'success',
+    text: 'File unlinked from this source. The file itself was not deleted.',
+  },
+  source_file_rejected: {
+    kind: 'error',
+    text: 'That file was rejected: it is either too large or not a type this site accepts.',
+  },
   source_published: { kind: 'success', text: 'Source is now public.' },
   source_unpublished: { kind: 'success', text: 'Source is now private.' },
   zotero_queued: {

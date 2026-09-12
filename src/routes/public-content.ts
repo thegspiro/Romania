@@ -243,6 +243,16 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
       {
         artifact,
         summaryHtml: artifact.summary === null ? null : renderFragment(artifact.summary),
+        // The transcription is prose, so it renders through the same pipeline
+        // an essay body does -- which is what makes a reference inside it a
+        // link the viewer may follow, or escaped plain text when they may not.
+        transcriptionHtml:
+          artifact.transcription === null || artifact.transcription.trim() === ''
+            ? null
+            : renderProse(artifact.transcription, {
+                targets: await resolveForRender(pool, artifact.transcription, request.viewer),
+                viewer: request.viewer,
+              }).html,
         mentions: await listMentionsOf(pool, artifact.id, request.viewer),
         canonicalUrl: `${config.PUBLIC_BASE_URL}${artifact.href}`,
       },

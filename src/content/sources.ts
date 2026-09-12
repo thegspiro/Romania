@@ -57,6 +57,16 @@ export interface SourceRecord extends SourceSummary {
   /** 'YYYY-MM-DD'; a DATE is a calendar day, not an instant. */
   accessedOn: string | null;
   notes: string | null;
+  /**
+   * The scan or PDF of the work itself, if one has been uploaded.
+   *
+   * Bytes are never served from here -- only through `/files/:id/:variant`,
+   * which re-checks the owning item's visibility on every request.
+   */
+  fileObjectId: number | null;
+  mimeType: string | null;
+  byteSize: number | null;
+  originalFilename: string | null;
 }
 
 interface SourceRow extends RowDataPacket {
@@ -81,18 +91,24 @@ interface SourceRow extends RowDataPacket {
   url: string | null;
   accessed_on: string | null;
   notes: string | null;
+  file_object_id: number | null;
+  mime_type: string | null;
+  byte_size: number | null;
+  original_filename: string | null;
 }
 
 const SELECT_COLUMNS = `
   ci.id, ci.slug, ci.title, ci.title_original, ci.language, ci.summary,
   ci.visibility, ci.noindex, ci.published_at, ci.created_at, ci.updated_at,
   sd.csl_type, sd.csl_json, sd.container_title, sd.issued_year, sd.archive,
-  sd.archive_location, sd.call_number, sd.url, sd.accessed_on, sd.notes
+  sd.archive_location, sd.call_number, sd.url, sd.accessed_on, sd.notes,
+  sd.file_object_id, fo.mime_type, fo.byte_size, fo.original_filename
 `;
 
 const FROM_CLAUSE = `
   FROM content_item ci
   JOIN source_detail sd ON sd.content_item_id = ci.id
+  LEFT JOIN file_object fo ON fo.id = sd.file_object_id
 `;
 
 function toRecord(row: SourceRow): SourceRecord {
@@ -118,6 +134,10 @@ function toRecord(row: SourceRow): SourceRecord {
     url: row.url,
     accessedOn: row.accessed_on,
     notes: row.notes,
+    fileObjectId: row.file_object_id === null ? null : Number(row.file_object_id),
+    mimeType: row.mime_type,
+    byteSize: row.byte_size === null ? null : Number(row.byte_size),
+    originalFilename: row.original_filename,
   };
 }
 
@@ -491,4 +511,44 @@ export async function listCitingItems(
     title: row.title,
     locator: row.locator,
   }));
+}
+
+/**
+ * Attaches an uploaded file to a source.
+ *
+ * The mirror of `attachFile` in `src/content/artifacts.ts`, deliberately: the
+ * two columns are the same shape, so the two writes should read the same way.
+ * Nothing here decides who may read the bytes -- `findServableFile` does that,
+ * per request.
+ */
+export async function attachSourceFile(
+  db: Pool | PoolConnection,
+  sourceId: number,
+  fileObjectId: number,
+): Promise<boolean> {
+  const result = await execute(
+    db,
+    'UPDATE source_detail SET file_object_id = ? WHERE content_item_id = ?',
+    [fileObjectId, sourceId],
+  );
+  return result.affectedRows > 0;
+}
+
+/**
+ * Removes the link between a source and its file.
+ *
+ * The `file_object` row and the bytes stay: they are content-addressed and may
+ * still be owned by an artifact. Detaching is a statement about this record,
+ * not about the file.
+ */
+export async function detachSourceFile(
+  db: Pool | PoolConnection,
+  sourceId: number,
+): Promise<boolean> {
+  const result = await execute(
+    db,
+    'UPDATE source_detail SET file_object_id = NULL WHERE content_item_id = ?',
+    [sourceId],
+  );
+  return result.affectedRows > 0;
 }

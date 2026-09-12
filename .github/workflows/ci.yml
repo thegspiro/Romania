@@ -142,6 +142,137 @@ jobs:
   # Its own job rather than a step in `node`, because it is the one thing here
   # that needs full history, and fetch-depth: 0 would slow that checkout for
   # every other step that does not.
+  # A backup nobody has restored is a hypothesis. This runs the whole drill --
+  # the real backup handler, a real restore into a scratch database, then the
+  # export -- and fails if what comes back out does not match what went in.
+  #
+  # It exists because the risk to a five-year dissertation is not a bug in this
+  # application; it is that in 2031 nobody can build the image, and the research
+  # is trapped in a dump nobody has ever opened.
+  rehearsal:
+    name: restore rehearsal
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      # Same image and reasoning as the `node` job: the schema declares
+      # utf8mb4_0900_ai_ci, which MariaDB and MySQL 5.7 do not have.
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-not-a-secret
+          MYSQL_DATABASE: rehearsal_source
+          MYSQL_USER: dissertation
+          MYSQL_PASSWORD: testpass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --host=127.0.0.1 --user=root --password=ci-root-not-a-secret --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+          --health-start-period=10s
+
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_NAME: rehearsal_source
+      DB_USER: dissertation
+      DB_PASSWORD: testpass
+      REHEARSAL_DB_NAME: rehearsal_restored
+      # The drill CREATEs and DROPs the scratch database. The service container
+      # grants `dissertation` rights on MYSQL_DATABASE and nothing else, which
+      # is how a well-configured deployment looks too -- so the scratch database
+      # gets its own credentials rather than widening the application user's.
+      REHEARSAL_DB_USER: root
+      REHEARSAL_DB_PASSWORD: ci-root-not-a-secret
+      BACKUP_ROOT: /tmp/rehearsal-backups
+      STORAGE_ROOT: /tmp/rehearsal-files
+      # The export loads the application's own config, which validates every
+      # setting. These are the values a local development run uses.
+      NODE_ENV: test
+      PUBLIC_BASE_URL: http://localhost:8080
+      WEBAUTHN_RP_ID: localhost
+      WEBAUTHN_ORIGIN: http://localhost:8080
+      SESSION_SECURE_COOKIES: 'false'
+      PYTHON: python3
+      NODE: node
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          python3 -m pip install --quiet -e .
+
+      # The rehearsal shells out to both. Installed explicitly rather than
+      # relying on whatever the runner image happens to carry, because a
+      # missing client would make this job fail for a reason unrelated to the
+      # thing it is testing.
+      - name: Install the MySQL client tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mysql-client
+
+      - name: Build
+        run: npm run build
+
+      - name: Apply migrations
+        run: |
+          mkdir -p "$BACKUP_ROOT" "$STORAGE_ROOT"
+          npm run migrate -- up
+
+      # Diacritics on purpose. A dump and restore that mangles them is the
+      # failure this catches, and Romanian names are most of the corpus.
+      - name: Seed a small corpus
+        run: |
+          mysql --host=127.0.0.1 --user="$DB_USER" --password="$DB_PASSWORD" \
+            --default-character-set=utf8mb4 "$DB_NAME" <<'SQL'
+          INSERT INTO content_item (kind, slug, title, visibility)
+            VALUES ('essay','opening-chapter','The Opening Chapter','public');
+          INSERT INTO essay_detail (content_item_id, body_markdown, status, word_count)
+            VALUES (LAST_INSERT_ID(), 'The commission met in Iași.[[cite:hooligan-year|45-47]]', 'draft', 6);
+          INSERT INTO content_item (kind, slug, title, visibility)
+            VALUES ('source','hooligan-year','Anii Ș','public');
+          INSERT INTO source_detail (content_item_id, csl_type, csl_json, issued_year, archive, call_number)
+            VALUES (LAST_INSERT_ID(), 'book',
+                    CAST('{"id":"hooligan-year","type":"book","title":"Anii Ș"}' AS JSON),
+                    1996, 'Arhivele Naționale ale României', 'Fond 2242, dosar 17/1941');
+          INSERT INTO content_item (kind, slug, title, visibility)
+            VALUES ('person','ion-antonescu','Ion Antonescu','public');
+          INSERT INTO agent_detail (content_item_id, family_name, given_name)
+            VALUES (LAST_INSERT_ID(), 'Antonescu', 'Ion');
+          SQL
+
+      - name: Rehearse the restore
+        run: scripts/restore-rehearsal.sh --keep-output
+        env:
+          REHEARSAL_OUTPUT_DIR: /tmp/rehearsal-export
+
+      # The drill compares row counts; this asserts the bytes survived, which
+      # a count cannot see. Romanian names are most of this corpus, and a
+      # character set mismatch anywhere along dump -> restore -> export
+      # mangles them silently.
+      - name: Diacritics survived the round trip
+        run: |
+          grep -q 'Arhivele Naționale ale României' /tmp/rehearsal-export/sources/provenance.json
+          grep -q 'Iași' /tmp/rehearsal-export/essays/opening-chapter.md
+          echo "UTF-8 survived mysqldump, restore and export."
+
   migrations:
     name: migrations
     if: github.event_name == 'pull_request'

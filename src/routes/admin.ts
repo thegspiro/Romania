@@ -22,7 +22,11 @@ import {
   updateSource,
   type SourceInput,
   type SourceRecord,
+  attachSourceFile,
+  detachSourceFile,
 } from '../content/sources.js';
+import { storeStream, UnsupportedFileTypeError, UploadTooLargeError } from '../files/storage.js';
+import { enqueueDerivatives, insertFileObject } from '../files/repository.js';
 import {
   SOURCE_TYPES,
   formatCreators,
@@ -348,6 +352,7 @@ export async function registerAdminRoutes(
             sourceTypes: SOURCE_TYPES,
             values: formValuesFrom(source),
             errors: [],
+            maxUploadBytes: config.UPLOAD_MAX_BYTES,
             preview: {
               bibliography: renderBibliographyEntry(source.csl),
               note: renderNote(source.csl),
@@ -397,6 +402,95 @@ export async function registerAdminRoutes(
         );
 
         return reply.redirect(`/admin/sources/${id}/edit?msg=source_updated`);
+      });
+
+      /**
+       * Attaches the scan or PDF of the work itself.
+       *
+       * The mirror of the artifact upload, and deliberately so: the same
+       * storeStream, the same magic-byte typing, the same derivative job. What
+       * it changes is that a scanned article no longer has to be catalogued
+       * twice -- once as a source for the footnote, once as an artifact for
+       * the bytes -- with nothing linking the halves.
+       *
+       * Serving is unchanged: bytes go out only through /files/:id/:variant,
+       * which re-checks the owning item's visibility on every request.
+       */
+      admin.post('/admin/sources/:id/file', async (request, reply) => {
+        const id = parseId(request);
+        const source = await findSourceById(pool, id, request.viewer);
+        if (source === null) throw notFound(`source ${id}`);
+
+        const upload = await request.file();
+        if (upload === undefined) throw badRequest('Choose a file to upload.');
+
+        let stored;
+        try {
+          stored = await storeStream(config.STORAGE_ROOT, upload.file, config.UPLOAD_MAX_BYTES);
+        } catch (error) {
+          if (error instanceof UploadTooLargeError || error instanceof UnsupportedFileTypeError) {
+            return reply.redirect(`/admin/sources/${id}/edit?msg=source_file_rejected`);
+          }
+          throw error;
+        }
+
+        const fileObjectId = await insertFileObject(pool, {
+          sha256: stored.sha256,
+          byteSize: stored.byteSize,
+          mimeType: stored.mimeType,
+          // Display only; the path on disk comes from the content hash.
+          originalFilename: upload.filename,
+          storageKey: stored.storageKey,
+        });
+
+        await attachSourceFile(pool, id, fileObjectId);
+        await enqueueDerivatives(pool, fileObjectId);
+        await recordAudit(
+          pool,
+          {
+            actor: actorId(request),
+            action: 'source.update',
+            itemId: id,
+            detail: {
+              kind: 'source',
+              file: stored.sha256,
+              mime: stored.mimeType,
+              bytes: stored.byteSize,
+            },
+            ip: request.ip,
+          },
+          request.log,
+        );
+
+        return reply.redirect(`/admin/sources/${id}/edit?msg=source_file_attached`);
+      });
+
+      /**
+       * Unlinks the file from the source.
+       *
+       * The file_object row and the bytes stay: they are content-addressed and
+       * may still be owned by an artifact. This says something about the
+       * record, not about the file.
+       */
+      admin.post('/admin/sources/:id/file/detach', async (request, reply) => {
+        const id = parseId(request);
+        const source = await findSourceById(pool, id, request.viewer);
+        if (source === null) throw notFound(`source ${id}`);
+
+        await detachSourceFile(pool, id);
+        await recordAudit(
+          pool,
+          {
+            actor: actorId(request),
+            action: 'source.update',
+            itemId: id,
+            detail: { kind: 'source', file: null },
+            ip: request.ip,
+          },
+          request.log,
+        );
+
+        return reply.redirect(`/admin/sources/${id}/edit?msg=source_file_detached`);
       });
 
       admin.post('/admin/sources/:id/visibility', async (request, reply) => {

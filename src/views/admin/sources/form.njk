@@ -140,6 +140,49 @@
   </form>
 
   {% if mode == 'edit' %}
+    <section class="source-file">
+      <h2>The work itself</h2>
+
+      {% if source.fileObjectId %}
+        <dl class="facts">
+          <dt>File</dt>
+          <dd>{{ source.originalFilename }}</dd>
+          <dt>Type</dt>
+          <dd>{{ source.mimeType }}</dd>
+          <dt>Size</dt>
+          <dd>{{ (source.byteSize / 1048576) | round(2) }} MB</dd>
+        </dl>
+        <p><a href="/files/{{ source.fileObjectId }}/original">Download the original</a></p>
+        <form method="post" action="/admin/sources/{{ source.id }}/file/detach" class="inline-form">
+          <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+          <button type="submit" class="link-button">Unlink this file</button>
+          <span class="hint">The file itself is kept; only the link is removed.</span>
+        </form>
+      {% else %}
+        <p class="empty">No file attached.</p>
+      {% endif %}
+
+      <form
+        method="post"
+        action="/admin/sources/{{ source.id }}/file"
+        enctype="multipart/form-data"
+      >
+        <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+        <p class="field">
+          <label for="file">{{ 'Replace file' if source.fileObjectId else 'Attach a file' }}</label>
+          <input type="file" id="file" name="file" required />
+          <span class="hint">
+            The scan or PDF of this work, so it does not have to be catalogued
+            a second time as an artifact. Up to
+            {{ (maxUploadBytes / 1048576) | round | int }} MB; the type is read
+            from the file's contents, not its name. It is readable by visitors
+            only while this source is public.
+          </span>
+        </p>
+        <button type="submit">Upload</button>
+      </form>
+    </section>
+
     <form
       method="post"
       action="/admin/sources/{{ source.id }}/delete"

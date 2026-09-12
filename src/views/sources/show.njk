@@ -70,6 +70,21 @@
           <dt>Online</dt>
           <dd><a href="{{ source.url }}" rel="noopener noreferrer nofollow">{{ source.url }}</a></dd>
         {% endif %}
+        {#
+          The link is safe on a public page because the route behind it is not
+          a link check: /files/:id/:variant re-resolves the owning item and its
+          visibility on every request, so the URL is worthless once this source
+          is unpublished.
+        #}
+        {% if source.fileObjectId %}
+          <dt>File</dt>
+          <dd>
+            <a href="/files/{{ source.fileObjectId }}/original">
+              {{ source.originalFilename }}
+            </a>
+            <span class="muted">({{ (source.byteSize / 1048576) | round(2) }} MB)</span>
+          </dd>
+        {% endif %}
       </dl>
     </section>
 
