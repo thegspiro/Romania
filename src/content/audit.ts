@@ -29,6 +29,13 @@ export type AuditAction =
   | 'source.delete'
   | 'source.publish'
   | 'source.unpublish'
+  // An edge carries its own visibility, so publishing one is its own decision
+  // and deserves its own trace -- "when did this connection become public?"
+  // had no answer before.
+  | 'relationship.create'
+  | 'relationship.delete'
+  | 'relationship.publish'
+  | 'relationship.unpublish'
   | 'zotero.sync'
   | 'zotero.sync.full'
   | 'backup.requested'

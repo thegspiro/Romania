@@ -20,6 +20,7 @@ import {
   type ArtifactInput,
 } from '../content/artifacts.js';
 import { listMentionsOf } from '../content/mentions.js';
+import { listPredicateChoices, listRelationshipsFor } from '../content/relationships.js';
 import { UnsupportedFileTypeError, UploadTooLargeError, storeStream } from '../files/storage.js';
 import { enqueueDerivatives, insertFileObject } from '../files/repository.js';
 import { recordAudit } from '../content/audit.js';
@@ -151,6 +152,8 @@ export function registerAdminArtifactRoutes(admin: FastifyInstance, context: App
         errors: [],
         maxUploadBytes: config.UPLOAD_MAX_BYTES,
         mentions: await listMentionsOf(pool, id, request.viewer),
+        relationships: await listRelationshipsFor(pool, id, request.viewer),
+        predicateChoices: await listPredicateChoices(pool),
       },
       { noindex: true, flash: flashFor(request) },
     );

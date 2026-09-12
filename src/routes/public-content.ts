@@ -289,6 +289,10 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
                 viewer: request.viewer,
               }).html,
         mentions: await listMentionsOf(pool, artifact.id, request.viewer),
+        // An artifact is an end of a typed edge like any other item -- it is
+        // depicted, and it was created by someone. Read with the same filter,
+        // so the edge and both of its ends must be visible.
+        relationships: await listRelationshipsFor(pool, artifact.id, request.viewer),
         canonicalUrl: `${config.PUBLIC_BASE_URL}${artifact.href}`,
       },
       { noindex: artifact.noindex || artifact.visibility !== 'public' },

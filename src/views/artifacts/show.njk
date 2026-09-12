@@ -64,6 +64,12 @@
       </dl>
     </section>
 
+    {#
+      One form and one listing serve every kind that may be an end of an edge,
+      so `record` is set to whichever item this page is about.
+    #}
+    {% set record = artifact %}
+    {% include "partials/relationships.njk" %}
     {% include "partials/mentions.njk" %}
 
     {% if isAdmin %}

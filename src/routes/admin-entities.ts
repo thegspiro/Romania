@@ -18,7 +18,6 @@ import {
   createEntity,
   deleteEntity,
   findEntityById,
-  isEntityKind,
   listEntities,
   setEntityVisibility,
   updateEntity,
@@ -31,9 +30,13 @@ import {
   MAX_ROLE_TITLE,
   createRelationship,
   deleteRelationship,
+  isLinkableKind,
   isPeriodPrecision,
-  listPredicates,
+  listPredicateChoices,
   listRelationshipsFor,
+  parsePredicateChoice,
+  setRelationshipVisibility,
+  type LinkableKind,
 } from '../content/relationships.js';
 import {
   findEventBoundSlugs,
@@ -265,7 +268,7 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
           },
           errors: [],
           relationships: await listRelationshipsFor(pool, id, request.viewer),
-          predicates: await listPredicates(pool),
+          predicateChoices: await listPredicateChoices(pool),
           mentions: await listMentionsOf(pool, id, request.viewer),
         },
         { noindex: true, flash: flashFor(request) },
@@ -330,7 +333,7 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
             values: { ...input, ...input.detail },
             errors,
             relationships: await listRelationshipsFor(pool, id, request.viewer),
-            predicates: await listPredicates(pool),
+            predicateChoices: await listPredicateChoices(pool),
             mentions: await listMentionsOf(pool, id, request.viewer),
           },
           { status: 400, noindex: true },
@@ -408,17 +411,29 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
   // Shared by every kind: the edge table does not care what it connects.
 
   admin.post('/admin/relationships', async (request, reply) => {
-    const fromItemId = Number(readString(request.body, 'fromItemId'));
-    const predicateId = Number(readString(request.body, 'predicateId'));
+    // The item whose page the form was on. It is the `from` end for a forward
+    // reading and the `to` end for a reverse one, which is the whole point of
+    // offering both: an edge is asserted from wherever the operator is
+    // standing, and the direction it is *stored* in should not decide which
+    // page they have to be on to record it.
+    const ownItemId = Number(readString(request.body, 'fromItemId'));
+
+    // A form posting only `predicateId` is read as the forward direction --
+    // which is what that field always meant, so an older form still works.
+    const choice = parsePredicateChoice(readString(request.body, 'predicate')) ?? {
+      predicateId: Number(readString(request.body, 'predicateId')),
+      reverse: false,
+    };
+
     const targetSlug = readString(request.body, 'targetSlug').trim();
     const targetKindRaw = readString(request.body, 'targetKind').trim();
     const visibility = readString(request.body, 'visibility');
     const returnTo = readString(request.body, 'returnTo');
 
     if (
-      !Number.isSafeInteger(fromItemId) ||
-      !Number.isSafeInteger(predicateId) ||
-      !isEntityKind(targetKindRaw) ||
+      !Number.isSafeInteger(ownItemId) ||
+      !Number.isSafeInteger(choice.predicateId) ||
+      !isLinkableKind(targetKindRaw) ||
       !/^[a-z0-9-]{1,190}$/.test(targetSlug)
     ) {
       return reply.redirect(`${safeReturn(returnTo)}?msg=relationship_invalid`);
@@ -437,10 +452,15 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
     const target = await findItemIdBySlug(targetKindRaw, targetSlug);
     if (target === null) return reply.redirect(`${safeReturn(returnTo)}?msg=relationship_invalid`);
 
+    // The reverse reading swaps the ends, so one row is stored whichever page
+    // it was entered from and the duplicate check still sees them as one edge.
+    const fromItemId = choice.reverse ? target : ownItemId;
+    const toItemId = choice.reverse ? ownItemId : target;
+
     const outcome = await createRelationship(pool, {
       fromItemId,
-      toItemId: target,
-      predicateId,
+      toItemId,
+      predicateId: choice.predicateId,
       roleTitle,
       startDate: readString(request.body, 'startDate'),
       endDate: readString(request.body, 'endDate'),
@@ -459,14 +479,80 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
       return reply.redirect(`${safeReturn(returnTo)}?msg=${code}`);
     }
 
+    await recordAudit(
+      pool,
+      {
+        actor: actorId(request),
+        action: 'relationship.create',
+        itemId: fromItemId,
+        detail: {
+          toItemId,
+          predicateId: choice.predicateId,
+          visibility,
+          relationshipId: outcome.id,
+        },
+        ip: request.ip,
+      },
+      request.log,
+    );
+
     return reply.redirect(`${safeReturn(returnTo)}?msg=relationship_added`);
   });
 
   admin.post('/admin/relationships/:id/delete', async (request, reply) => {
     const id = parseId(request);
     const returnTo = readString(request.body, 'returnTo');
-    await deleteRelationship(pool, id);
+    const removed = await deleteRelationship(pool, id);
+
+    if (removed) {
+      await recordAudit(
+        pool,
+        {
+          actor: actorId(request),
+          action: 'relationship.delete',
+          detail: { relationshipId: id },
+          ip: request.ip,
+        },
+        request.log,
+      );
+    }
+
     return reply.redirect(`${safeReturn(returnTo)}?msg=relationship_removed`);
+  });
+
+  /**
+   * Publishes or withdraws one edge.
+   *
+   * An edge has its own visibility because the connection between two people
+   * can be more sensitive than either page, and until now that could only be
+   * chosen when the edge was created -- so publishing a relationship later
+   * meant deleting it and entering it again. The repository function for this
+   * existed from the start and had no route.
+   */
+  admin.post('/admin/relationships/:id/visibility', async (request, reply) => {
+    const id = parseId(request);
+    const requested = readString(request.body, 'visibility');
+    const returnTo = readString(request.body, 'returnTo');
+    if (!isVisibility(requested)) throw badRequest('Unknown visibility value.');
+
+    if (!(await setRelationshipVisibility(pool, id, requested))) {
+      throw notFound(`relationship ${id}`);
+    }
+
+    await recordAudit(
+      pool,
+      {
+        actor: actorId(request),
+        action: requested === 'public' ? 'relationship.publish' : 'relationship.unpublish',
+        detail: { relationshipId: id },
+        ip: request.ip,
+      },
+      request.log,
+    );
+
+    return reply.redirect(
+      `${safeReturn(returnTo)}?msg=relationship_${requested === 'public' ? 'published' : 'unpublished'}`,
+    );
   });
 
   /**
@@ -486,7 +572,7 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
    * relationship to a private item is exactly the case the edge's own
    * visibility column exists for.
    */
-  async function findItemIdBySlug(kind: EntityKind, slug: string): Promise<number | null> {
+  async function findItemIdBySlug(kind: LinkableKind, slug: string): Promise<number | null> {
     const row = await queryOne<RowDataPacket & { id: number }>(
       pool,
       'SELECT id FROM content_item WHERE kind = ? AND slug = ?',
