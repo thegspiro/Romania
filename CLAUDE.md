@@ -215,7 +215,12 @@ add a viewer parameter; it would imply there could be.
 
 **Zotero sync pulls; it never pushes.** `worker/jobs/zotero_sync.py` is the
 only thing that talks to the API, and the web service never holds the key --
-it enqueues `zotero.sync` and reads the state back for the listing. Two
+it enqueues `zotero.sync` and reads the state back for the listing. That was
+true of the code and false of the container until `docker-compose.yml` emptied
+`ZOTERO_API_KEY` for `web`: `env_file` loads the whole of `.env` everywhere it
+appears, and an environment variable is readable from `/proc` whether or not
+anything reads it. `check-invariants.mjs` now fails on the next credential
+that arrives the same way. Two
 invariants make a repeated sync safe:
 
 - `source_zotero_link` is unique on `(library_type, library_id, item_key)`.
@@ -419,7 +424,11 @@ runs in the `node` job and fails on:
 - a `visibility = '<literal>'` in a `.ts` file outside
   `src/content/visibility.ts`,
 - a `mysql:8.4` image that is not digest-pinned, or whose digest differs
-  between `docker-compose.yml` and any CI service container.
+  between `docker-compose.yml` and any CI service container,
+- a secret-looking variable in `.env.example` that `src/` never looks up and
+  the `web` service does not empty -- `env_file` hands the whole file to every
+  service, so a worker-only credential otherwise reaches the internet-facing
+  container as well.
 
 The last one takes an escape hatch, because not every match is a viewer
 decision -- an admin dashboard counting published items is not. Put

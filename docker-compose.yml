@@ -24,6 +24,26 @@ services:
       # override .env and send every connection back to a container that a
       # cloud deployment has deleted.
       DB_HOST: ${DB_HOST:-db}
+      # `env_file` loads the whole of .env, which is what keeps adding a
+      # setting from meaning editing this file too. The cost is that it also
+      # hands this container credentials it has no code to read, and an
+      # environment variable is readable from /proc and from `docker inspect`
+      # whether or not anything reads it.
+      #
+      # Emptied rather than left out: an `environment` entry with no value
+      # resolves from .env again, which looks like an unset and is not.
+      #
+      # DB_ROOT_PASSWORD is the bundled database's, and the application never
+      # connects as root -- holding it here would turn a compromise of this
+      # container into root on the database rather than the app account.
+      DB_ROOT_PASSWORD: ''
+      # The Zotero key belongs to the worker alone; CLAUDE.md says the web
+      # service never holds it, and until now that was true of the code and
+      # false of the container. Nothing here reads it: the sync button is
+      # decided by ZOTERO_LIBRARY_ID, and the job that needs the key runs in
+      # the worker.
+      ZOTERO_API_KEY: ''
+      ZOTERO_API_KEY_FILE: ''
       HTTP_HOST: 0.0.0.0
       HTTP_PORT: '8080'
       STORAGE_ROOT: /data/files
@@ -70,6 +90,9 @@ services:
     env_file: [.env]
     environment:
       DB_HOST: ${DB_HOST:-db}
+      # Same reasoning as `web`. The Zotero key is deliberately NOT emptied
+      # here: this is the process that calls the API.
+      DB_ROOT_PASSWORD: ''
       STORAGE_ROOT: /data/files
       BACKUP_ROOT: /data/backups
       # Migrations belong to the web role; see scripts/entrypoint.sh.
