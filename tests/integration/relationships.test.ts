@@ -30,6 +30,7 @@ import {
   listPredicateChoices,
   listPredicates,
   listRelationshipsFor,
+  setPredicateKinds,
   type Predicate,
 } from '../../src/content/relationships.js';
 import { ANONYMOUS, adminViewer } from '../../src/content/visibility.js';
@@ -748,6 +749,353 @@ describe.skipIf(!available)('relationship roles and periods', () => {
       });
       expect(response.statusCode).not.toBe(200);
       expect(await listRelationshipsFor(harness.pool, person, ANONYMOUS)).toEqual([]);
+    });
+  });
+
+  /**
+   * What a predicate is allowed to connect.
+   *
+   * The vocabulary was untyped: "Born in" accepted an organization, silently.
+   * A mistyped edge is not visibly wrong afterwards -- it is a false claim
+   * sitting in the record -- so this is refused rather than warned about.
+   *
+   * The check lives in `createRelationship`, not in the route, so every caller
+   * is governed by one rule. These tests go through the repository for that
+   * reason, and through the route where the message matters.
+   */
+  describe('what a predicate may connect', () => {
+    it('seeds a domain and a range for the verbs that have one', async () => {
+      const predicates = await listPredicates(harness.pool);
+      const bornIn = predicates.find((predicate) => predicate.code === 'born_in');
+      expect(bornIn?.domainKinds).toEqual(['person']);
+      expect(bornIn?.rangeKinds).toEqual(['place']);
+    });
+
+    it('leaves the catch-all verb unconstrained', async () => {
+      // "Associated with" is the escape hatch for a connection the vocabulary
+      // has no verb for. Typing it would remove the only way to record one.
+      const predicates = await listPredicates(harness.pool);
+      const associated = predicates.find((predicate) => predicate.code === 'associated_with');
+      expect(associated?.domainKinds).toBeNull();
+      expect(associated?.rangeKinds).toBeNull();
+    });
+
+    it('refuses an edge whose far end is the wrong kind', async () => {
+      const person = await makeEntity(harness.pool, 'person', 'Ion Antonescu', 'public');
+      const org = await makeEntity(harness.pool, 'organization', 'Council of Ministers', 'public');
+
+      const outcome = await createRelationship(harness.pool, {
+        fromItemId: person,
+        toItemId: org,
+        predicateId: predicateId('born_in'),
+        note: null,
+        visibility: 'public',
+      });
+
+      expect(outcome.ok).toBe(false);
+      if (outcome.ok) throw new Error('expected a refusal');
+      expect(outcome.reason).toBe('kind_mismatch');
+      // The caller is told what would have been accepted, so the message can
+      // say more than "no".
+      expect(outcome.expected).toEqual({ subject: ['person'], target: ['place'] });
+    });
+
+    it('refuses an edge whose near end is the wrong kind', async () => {
+      const place = await makeEntity(harness.pool, 'place', 'Bucharest', 'public');
+      const other = await makeEntity(harness.pool, 'place', 'Iasi', 'public');
+
+      const outcome = await createRelationship(harness.pool, {
+        fromItemId: place,
+        toItemId: other,
+        predicateId: predicateId('born_in'),
+        note: null,
+        visibility: 'public',
+      });
+      expect(outcome.ok).toBe(false);
+      if (outcome.ok) throw new Error('expected a refusal');
+      expect(outcome.reason).toBe('kind_mismatch');
+    });
+
+    it('accepts the pairing the verb was typed for', async () => {
+      const person = await makeEntity(harness.pool, 'person', 'Ion Antonescu', 'public');
+      const place = await makeEntity(harness.pool, 'place', 'Bucharest', 'public');
+
+      const outcome = await createRelationship(harness.pool, {
+        fromItemId: person,
+        toItemId: place,
+        predicateId: predicateId('born_in'),
+        note: null,
+        visibility: 'public',
+      });
+      expect(outcome.ok).toBe(true);
+    });
+
+    it('accepts anything for an unconstrained verb', async () => {
+      const place = await makeEntity(harness.pool, 'place', 'Bucharest', 'public');
+      const org = await makeEntity(harness.pool, 'organization', 'Council', 'public');
+
+      const outcome = await createRelationship(harness.pool, {
+        fromItemId: place,
+        toItemId: org,
+        predicateId: predicateId('associated_with'),
+        note: null,
+        visibility: 'public',
+      });
+      expect(outcome.ok).toBe(true);
+    });
+
+    it('reports an unknown item at either end rather than a driver error', async () => {
+      const person = await makeEntity(harness.pool, 'person', 'Ion Antonescu', 'public');
+
+      const missingTarget = await createRelationship(harness.pool, {
+        fromItemId: person,
+        toItemId: 999999,
+        predicateId: predicateId('associated_with'),
+        note: null,
+        visibility: 'public',
+      });
+      expect(missingTarget).toEqual({ ok: false, reason: 'unknown_item' });
+
+      // The `from` end used to be checked only by the foreign key.
+      const missingSource = await createRelationship(harness.pool, {
+        fromItemId: 999999,
+        toItemId: person,
+        predicateId: predicateId('associated_with'),
+        note: null,
+        visibility: 'public',
+      });
+      expect(missingSource).toEqual({ ok: false, reason: 'unknown_item' });
+    });
+
+    it('leaves connections already recorded exactly as they are', async () => {
+      const person = await makeEntity(harness.pool, 'person', 'Ion Antonescu', 'public');
+      const org = await makeEntity(harness.pool, 'organization', 'Council', 'public');
+
+      // Recorded while the verb was unconstrained, the way every edge written
+      // before migration 0014 was.
+      await setPredicateKinds(harness.pool, predicateId('member_of'), null, null);
+      const created = await createRelationship(harness.pool, {
+        fromItemId: org,
+        toItemId: person,
+        predicateId: predicateId('member_of'),
+        note: null,
+        visibility: 'public',
+      });
+      expect(created.ok).toBe(true);
+
+      // Typing the verb afterwards governs what may be asserted from now on;
+      // it never re-checks the past and never removes an edge.
+      await setPredicateKinds(harness.pool, predicateId('member_of'), ['person'], ['organization']);
+      const edges = await listRelationshipsFor(harness.pool, org, ANONYMOUS);
+      expect(edges).toHaveLength(1);
+      expect(edges[0]?.other.title).toBe('Ion Antonescu');
+    });
+
+    it('tells the operator why, through the form', async () => {
+      const person = await makeEntity(harness.pool, 'person', 'Ion Antonescu', 'public');
+      await makeEntity(harness.pool, 'organization', 'Council of Ministers', 'public');
+      const jar = await signIn(harness);
+
+      const form = await getPage(harness, `/admin/people/${String(person)}/edit`, jar);
+      const posted = await postForm(harness, '/admin/relationships', jar, {
+        _csrf: form.csrf,
+        fromItemId: String(person),
+        returnTo: `/admin/people/${String(person)}/edit`,
+        predicate: `${String(predicateId('born_in'))}:forward`,
+        targetKind: 'organization',
+        targetSlug: 'council-of-ministers',
+        visibility: 'public',
+      });
+      expect(posted.location).toContain('msg=relationship_kind_mismatch');
+    });
+  });
+
+  /**
+   * The picker only offers readings that make sense where it is rendered.
+   *
+   * Filtered on the server, so it works with JavaScript off: the form teaches
+   * the vocabulary rather than relying on a refusal to correct a choice the
+   * operator should never have been offered.
+   */
+  describe('the readings a page offers', () => {
+    it('offers a person the verbs a person can be the subject of', async () => {
+      const labels = (await listPredicateChoices(harness.pool, 'person')).map(
+        (choice) => choice.label,
+      );
+      expect(labels).toContain('Born in');
+      // A place is not born anywhere, so the forward reading is not a person's
+      // to offer... but "Birthplace of" is the place's.
+      expect(labels).not.toContain('Birthplace of');
+    });
+
+    it('offers a place the reverse reading instead', async () => {
+      const labels = (await listPredicateChoices(harness.pool, 'place')).map(
+        (choice) => choice.label,
+      );
+      expect(labels).toContain('Birthplace of');
+      expect(labels).not.toContain('Born in');
+    });
+
+    it('carries what each reading may point at', async () => {
+      const choices = await listPredicateChoices(harness.pool, 'person');
+      const bornIn = choices.find((choice) => choice.label === 'Born in');
+      expect(bornIn?.targetKinds).toEqual(['place']);
+      expect(bornIn?.reverse).toBe(false);
+
+      // The reverse reading swaps which constraint applies to which end.
+      const places = await listPredicateChoices(harness.pool, 'place');
+      const birthplace = places.find((choice) => choice.label === 'Birthplace of');
+      expect(birthplace?.targetKinds).toEqual(['person']);
+      expect(birthplace?.reverse).toBe(true);
+    });
+
+    it('keeps an unconstrained verb on every page', async () => {
+      for (const kind of ['person', 'organization', 'place', 'event', 'artifact'] as const) {
+        const labels = (await listPredicateChoices(harness.pool, kind)).map(
+          (choice) => choice.label,
+        );
+        expect(labels).toContain('Associated with');
+      }
+    });
+
+    it('filters nothing when no kind is given', async () => {
+      const labels = (await listPredicateChoices(harness.pool)).map((choice) => choice.label);
+      expect(labels).toContain('Born in');
+      expect(labels).toContain('Birthplace of');
+    });
+
+    it('shows only the offered readings on the page itself', async () => {
+      const place = await makeEntity(harness.pool, 'place', 'Bucharest', 'public');
+      const jar = await signIn(harness);
+      const page = await getPage(harness, `/admin/places/${String(place)}/edit`, jar);
+
+      expect(page.body).toContain('Birthplace of');
+      // The option text names what the reading accepts, so the form says what
+      // it takes rather than leaving it to be discovered from a refusal.
+      expect(page.body).toContain('→ person');
+    });
+  });
+
+  /**
+   * Correcting the vocabulary.
+   *
+   * The seeded values are a judgement about a history vocabulary, and a
+   * refusal is hard, so a value judged wrong has to be fixable in the
+   * interface rather than by a second migration.
+   */
+  describe('the vocabulary screen', () => {
+    it('lists every verb with what it connects', async () => {
+      const jar = await signIn(harness);
+      const page = await getPage(harness, '/admin/vocabulary', jar);
+      expect(page.statusCode).toBe(200);
+      expect(page.body).toContain('Born in');
+      expect(page.body).toContain('held_office_in');
+    });
+
+    it('retypes a verb, and the refusal follows', async () => {
+      const person = await makeEntity(harness.pool, 'person', 'Ion Antonescu', 'public');
+      const org = await makeEntity(harness.pool, 'organization', 'Council', 'public');
+
+      const before = await createRelationship(harness.pool, {
+        fromItemId: person,
+        toItemId: org,
+        predicateId: predicateId('born_in'),
+        note: null,
+        visibility: 'public',
+      });
+      expect(before.ok).toBe(false);
+
+      const jar = await signIn(harness);
+      const page = await getPage(harness, '/admin/vocabulary', jar);
+      const saved = await postForm(
+        harness,
+        `/admin/vocabulary/${String(predicateId('born_in'))}`,
+        jar,
+        { _csrf: page.csrf, domainKinds: 'person', rangeKinds: 'organization' },
+      );
+      expect(saved.location).toContain('msg=vocabulary_saved');
+
+      const after = await createRelationship(harness.pool, {
+        fromItemId: person,
+        toItemId: org,
+        predicateId: predicateId('born_in'),
+        note: null,
+        visibility: 'public',
+      });
+      expect(after.ok).toBe(true);
+    });
+
+    it('stores nothing ticked as "no opinion" rather than "connects nothing"', async () => {
+      const jar = await signIn(harness);
+      const page = await getPage(harness, '/admin/vocabulary', jar);
+      await postForm(harness, `/admin/vocabulary/${String(predicateId('born_in'))}`, jar, {
+        _csrf: page.csrf,
+      });
+
+      const predicates = await listPredicates(harness.pool);
+      const bornIn = predicates.find((predicate) => predicate.code === 'born_in');
+      expect(bornIn?.domainKinds).toBeNull();
+      expect(bornIn?.rangeKinds).toBeNull();
+
+      // And the verb is usable again, rather than being one that connects
+      // nothing and so can never be chosen.
+      const org = await makeEntity(harness.pool, 'organization', 'Council', 'public');
+      const place = await makeEntity(harness.pool, 'place', 'Bucharest', 'public');
+      const outcome = await createRelationship(harness.pool, {
+        fromItemId: org,
+        toItemId: place,
+        predicateId: predicateId('born_in'),
+        note: null,
+        visibility: 'public',
+      });
+      expect(outcome.ok).toBe(true);
+    });
+
+    it('ignores a kind that may not be an end of an edge', async () => {
+      const jar = await signIn(harness);
+      const page = await getPage(harness, '/admin/vocabulary', jar);
+      await postForm(harness, `/admin/vocabulary/${String(predicateId('born_in'))}`, jar, {
+        _csrf: page.csrf,
+        domainKinds: 'essay',
+        rangeKinds: 'place',
+      });
+
+      const predicates = await listPredicates(harness.pool);
+      const bornIn = predicates.find((predicate) => predicate.code === 'born_in');
+      // 'essay' is dropped, which leaves nothing ticked on that side.
+      expect(bornIn?.domainKinds).toBeNull();
+      expect(bornIn?.rangeKinds).toEqual(['place']);
+    });
+
+    it('records the change', async () => {
+      const jar = await signIn(harness);
+      const page = await getPage(harness, '/admin/vocabulary', jar);
+      await postForm(harness, `/admin/vocabulary/${String(predicateId('born_in'))}`, jar, {
+        _csrf: page.csrf,
+        domainKinds: 'person',
+        rangeKinds: 'place',
+      });
+
+      const rows = await queryRows<RowDataPacket & { action: string }>(
+        harness.pool,
+        "SELECT action FROM audit_log WHERE action = 'predicate.retype'",
+      );
+      expect(rows).toHaveLength(1);
+    });
+
+    it('is not reachable without a session', async () => {
+      const response = await harness.app.inject({
+        method: 'POST',
+        url: `/admin/vocabulary/${String(predicateId('born_in'))}`,
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        payload: new URLSearchParams({ domainKinds: 'event' }).toString(),
+      });
+      expect(response.statusCode).not.toBe(200);
+
+      const predicates = await listPredicates(harness.pool);
+      expect(predicates.find((predicate) => predicate.code === 'born_in')?.domainKinds).toEqual([
+        'person',
+      ]);
     });
   });
 

@@ -132,6 +132,32 @@ absent one. The year is ANDed on top of `visibilityFilter`, never in place of
 it; a filter that could make a private node reachable would be a leak, and
 `tests/integration/graph.test.ts` pins that it cannot.
 
+**The vocabulary is typed, and the typing is a chokepoint too.**
+`relationship_predicate.domain_kinds` and `range_kinds` say which kinds a verb
+joins; migration 0014 seeds them and `/admin/vocabulary` edits them. Three
+rules follow:
+
+- **NULL means unconstrained, and is the default.** A predicate nobody has
+  typed behaves exactly as it did before the columns existed, which is what
+  makes the migration safe on a corpus already full of edges. An _empty_ set
+  reads as NULL rather than as "connects nothing": a verb that joins nothing
+  could never be used, so unticking every box means "no opinion". Retiring a
+  verb is deleting it.
+- **The check is in `createRelationship`, not in the route.** Same argument as
+  visibility: one place to audit, and no second copy in a handler to fall out
+  of step. `setEventBounds` writes `happened_after` rows directly and is
+  unaffected — it only ever joins two events, which is what that verb is typed
+  for.
+- **Nothing is re-checked retroactively.** Typing governs what may be asserted
+  from now on. An edge recorded while a verb was untyped stays exactly as it
+  is, and a rollback of 0014 loses the typing and no edges at all.
+
+`listPredicateChoices(db, kind)` filters the picker to the readings that make
+sense on that page — a place offers "Birthplace of", not "Born in" — on the
+server, so it holds with JavaScript off. `associated_with` is deliberately left
+untyped: it is the escape hatch for a connection the vocabulary has no verb
+for, and typing it would remove the only way to record one.
+
 **An artifact's transcription is its prose column.** Like an essay's body and
 an agent's biography, it goes through `rebuildReferences` in the save
 transaction -- `createArtifact` and `updateArtifact` both call it, and nothing

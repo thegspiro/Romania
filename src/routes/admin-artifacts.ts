@@ -153,7 +153,7 @@ export function registerAdminArtifactRoutes(admin: FastifyInstance, context: App
         maxUploadBytes: config.UPLOAD_MAX_BYTES,
         mentions: await listMentionsOf(pool, id, request.viewer),
         relationships: await listRelationshipsFor(pool, id, request.viewer),
-        predicateChoices: await listPredicateChoices(pool),
+        predicateChoices: await listPredicateChoices(pool, 'artifact'),
       },
       { noindex: true, flash: flashFor(request) },
     );

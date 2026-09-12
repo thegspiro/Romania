@@ -132,6 +132,11 @@ export const FLASH_MESSAGES: Readonly<Record<string, Flash>> = Object.freeze({
     text: 'That role or position is too long (255 characters maximum).',
   },
   relationship_invalid: { kind: 'error', text: 'Choose a different item and a relationship type.' },
+  relationship_kind_mismatch: {
+    kind: 'error',
+    text: 'That relationship type does not connect those two kinds of item. The list of relationships shows what each one accepts.',
+  },
+  vocabulary_saved: { kind: 'success', text: 'Relationship type saved.' },
   relationship_published: { kind: 'success', text: 'Relationship is now public.' },
   relationship_unpublished: { kind: 'success', text: 'Relationship is now private.' },
 

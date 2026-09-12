@@ -174,12 +174,46 @@ export function isLinkableKind(value: unknown): value is LinkableKind {
   return typeof value === 'string' && (LINKABLE_KINDS as readonly string[]).includes(value);
 }
 
+/**
+ * What a predicate is allowed to connect, or null for "anything".
+ *
+ * Stored as two SET columns on `relationship_predicate` (migration 0014).
+ * NULL is the default and means unconstrained, which is what keeps the
+ * vocabulary backward compatible: a predicate nobody has typed behaves exactly
+ * as it did before the column existed, and so does one the operator adds later.
+ *
+ * An empty set reads as null rather than as "no kind at all". A verb that
+ * connects nothing would be a verb that cannot be used, and unchecking every
+ * box in the vocabulary screen should mean "I have no opinion", not "disable
+ * this". Deleting the predicate is how a verb is retired.
+ */
+export type KindSet = readonly LinkableKind[] | null;
+
+/** A SET column as mysql2 hands it back: 'person,place', '' or null. */
+export function parseKindSet(value: unknown): KindSet {
+  if (typeof value !== 'string') return null;
+  const kinds = value
+    .split(',')
+    .map((part) => part.trim())
+    .filter(isLinkableKind);
+  return kinds.length === 0 ? null : kinds;
+}
+
+/** True when `kind` is allowed by a constraint, including an absent one. */
+export function kindAllowed(allowed: KindSet, kind: string): boolean {
+  return allowed === null || (allowed as readonly string[]).includes(kind);
+}
+
 export interface Predicate {
   id: number;
   code: string;
   label: string;
   inverseLabel: string;
   isSymmetric: boolean;
+  /** Kinds allowed at the `from` end, or null for any. */
+  domainKinds: KindSet;
+  /** Kinds allowed at the `to` end, or null for any. */
+  rangeKinds: KindSet;
 }
 
 export async function listPredicates(db: Pool | PoolConnection): Promise<Predicate[]> {
@@ -190,10 +224,14 @@ export async function listPredicates(db: Pool | PoolConnection): Promise<Predica
       label: string;
       inverse_label: string;
       is_symmetric: number;
+      domain_kinds: unknown;
+      range_kinds: unknown;
     }
   >(
     db,
-    'SELECT id, code, label, inverse_label, is_symmetric FROM relationship_predicate ORDER BY label',
+    `SELECT id, code, label, inverse_label, is_symmetric, domain_kinds, range_kinds
+       FROM relationship_predicate
+      ORDER BY label`,
   );
 
   return rows.map((row) => ({
@@ -202,7 +240,31 @@ export async function listPredicates(db: Pool | PoolConnection): Promise<Predica
     label: row.label,
     inverseLabel: row.inverse_label,
     isSymmetric: row.is_symmetric === 1,
+    domainKinds: parseKindSet(row.domain_kinds),
+    rangeKinds: parseKindSet(row.range_kinds),
   }));
+}
+
+/** Replaces one predicate's typing. Null for either side means "any kind". */
+export async function setPredicateKinds(
+  db: Pool | PoolConnection,
+  predicateId: number,
+  domainKinds: KindSet,
+  rangeKinds: KindSet,
+): Promise<boolean> {
+  // Joined here rather than bound as a list because a SET column takes one
+  // string; every member came from `isLinkableKind`, so nothing user-typed
+  // reaches the value, and it is still a bound parameter.
+  const result = await execute(
+    db,
+    'UPDATE relationship_predicate SET domain_kinds = ?, range_kinds = ? WHERE id = ?',
+    [
+      domainKinds === null ? null : domainKinds.join(','),
+      rangeKinds === null ? null : rangeKinds.join(','),
+      predicateId,
+    ],
+  );
+  return result.affectedRows > 0;
 }
 
 /**
@@ -228,26 +290,59 @@ export interface PredicateChoice {
   predicateId: number;
   /** True when choosing this makes the page's item the `to` end. */
   reverse: boolean;
+  /** Kinds this reading may be asserted *from*, or null for any. */
+  subjectKinds: KindSet;
+  /** Kinds this reading may point *at*, or null for any. */
+  targetKinds: KindSet;
 }
 
-/** Every reading of every predicate, in one alphabetical list. */
-export async function listPredicateChoices(db: Pool | PoolConnection): Promise<PredicateChoice[]> {
+/**
+ * Every reading of every predicate, in one alphabetical list.
+ *
+ * Pass the kind of the page the form is on and the list narrows to the
+ * readings that make sense there: a place's page offers "Birthplace of" and
+ * not "Born in", because a place is not born somewhere. That filtering is done
+ * here, on the server, so it works with JavaScript switched off -- the picker
+ * teaches the vocabulary rather than relying on a later refusal to correct a
+ * choice the operator should not have been offered.
+ *
+ * Omit the kind and nothing is filtered, which is what the vocabulary screen
+ * and the tests want.
+ */
+export async function listPredicateChoices(
+  db: Pool | PoolConnection,
+  subjectKind?: LinkableKind,
+): Promise<PredicateChoice[]> {
   const choices: PredicateChoice[] = [];
 
   for (const predicate of await listPredicates(db)) {
-    choices.push({
-      value: `${String(predicate.id)}:forward`,
-      label: predicate.label,
-      predicateId: predicate.id,
-      reverse: false,
-    });
-    if (predicate.isSymmetric) continue;
-    choices.push({
-      value: `${String(predicate.id)}:reverse`,
-      label: predicate.inverseLabel,
-      predicateId: predicate.id,
-      reverse: true,
-    });
+    // A reverse reading swaps which end the page's item sits at, so it swaps
+    // which constraint applies to it.
+    const readings: PredicateChoice[] = [
+      {
+        value: `${String(predicate.id)}:forward`,
+        label: predicate.label,
+        predicateId: predicate.id,
+        reverse: false,
+        subjectKinds: predicate.domainKinds,
+        targetKinds: predicate.rangeKinds,
+      },
+    ];
+    if (!predicate.isSymmetric) {
+      readings.push({
+        value: `${String(predicate.id)}:reverse`,
+        label: predicate.inverseLabel,
+        predicateId: predicate.id,
+        reverse: true,
+        subjectKinds: predicate.rangeKinds,
+        targetKinds: predicate.domainKinds,
+      });
+    }
+
+    for (const reading of readings) {
+      if (subjectKind !== undefined && !kindAllowed(reading.subjectKinds, subjectKind)) continue;
+      choices.push(reading);
+    }
   }
 
   // Sorted across both readings rather than grouped by predicate: the operator
@@ -413,7 +508,15 @@ export type CreateRelationshipOutcome =
   | { ok: true; id: number }
   | {
       ok: false;
-      reason: 'self' | 'duplicate' | 'unknown_item' | 'unknown_predicate' | 'role_too_long';
+      reason:
+        | 'self'
+        | 'duplicate'
+        | 'unknown_item'
+        | 'unknown_predicate'
+        | 'role_too_long'
+        | 'kind_mismatch';
+      /** For 'kind_mismatch': what the predicate would have accepted. */
+      expected?: { subject: KindSet; target: KindSet };
     };
 
 /**
@@ -454,19 +557,43 @@ export async function createRelationship(
     return { ok: false, reason: 'role_too_long' };
   }
 
-  const target = await queryOne<RowDataPacket & { id: number }>(
+  // Both ends in one read, because the kinds are needed to check the
+  // predicate's typing and the `from` end was previously only validated by the
+  // foreign key -- which reported a driver error rather than a reason.
+  const ends = await queryRows<RowDataPacket & { id: number; kind: string }>(
     db,
-    'SELECT id FROM content_item WHERE id = ?',
-    [input.toItemId],
+    'SELECT id, kind FROM content_item WHERE id IN (?, ?)',
+    [input.fromItemId, input.toItemId],
   );
-  if (target === null) return { ok: false, reason: 'unknown_item' };
+  const fromKind = ends.find((row) => Number(row.id) === input.fromItemId)?.kind;
+  const toKind = ends.find((row) => Number(row.id) === input.toItemId)?.kind;
+  if (fromKind === undefined || toKind === undefined) {
+    return { ok: false, reason: 'unknown_item' };
+  }
 
-  const predicate = await queryOne<RowDataPacket & { id: number }>(
-    db,
-    'SELECT id FROM relationship_predicate WHERE id = ?',
-    [input.predicateId],
-  );
+  const predicate = await queryOne<
+    RowDataPacket & { id: number; domain_kinds: unknown; range_kinds: unknown }
+  >(db, 'SELECT id, domain_kinds, range_kinds FROM relationship_predicate WHERE id = ?', [
+    input.predicateId,
+  ]);
   if (predicate === null) return { ok: false, reason: 'unknown_predicate' };
+
+  // What the verb is allowed to join. An unconstrained predicate -- the
+  // default, and what every predicate was before migration 0014 -- accepts
+  // anything, so this refuses only where the vocabulary has an opinion.
+  //
+  // Checked here rather than in the route so every caller is covered by one
+  // rule: the chokepoint argument that governs visibility applies to meaning
+  // too, and a second copy in a handler is a second copy to fall out of step.
+  const domainKinds = parseKindSet(predicate.domain_kinds);
+  const rangeKinds = parseKindSet(predicate.range_kinds);
+  if (!kindAllowed(domainKinds, fromKind) || !kindAllowed(rangeKinds, toKind)) {
+    return {
+      ok: false,
+      reason: 'kind_mismatch',
+      expected: { subject: domainKinds, target: rangeKinds },
+    };
+  }
 
   // Two edges between the same pair are the same edge only when the office
   // and the period match as well -- the same comparison the unique key makes,

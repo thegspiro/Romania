@@ -13,6 +13,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   LINKABLE_KINDS,
+  kindAllowed,
+  parseKindSet,
   columnToIsoDate,
   edgeLabel,
   formatPeriod,
@@ -193,5 +195,49 @@ describe('parsePredicateChoice', () => {
     expect(parsePredicateChoice('')).toBeNull();
     expect(parsePredicateChoice(null)).toBeNull();
     expect(parsePredicateChoice(42)).toBeNull();
+  });
+});
+
+describe('parseKindSet', () => {
+  it('reads a SET column as a list of kinds', () => {
+    expect(parseKindSet('person,place')).toEqual(['person', 'place']);
+    expect(parseKindSet('artifact')).toEqual(['artifact']);
+  });
+
+  it('tolerates whitespace around members', () => {
+    expect(parseKindSet('person, place')).toEqual(['person', 'place']);
+  });
+
+  it('reads NULL as unconstrained', () => {
+    // The default, and what every predicate was before migration 0014.
+    expect(parseKindSet(null)).toBeNull();
+    expect(parseKindSet(undefined)).toBeNull();
+  });
+
+  it('reads an empty set as unconstrained, not as "connects nothing"', () => {
+    // A verb that connects nothing could never be used, so unticking every box
+    // has to mean "no opinion". Retiring a verb is deleting it.
+    expect(parseKindSet('')).toBeNull();
+  });
+
+  it('drops a member that is not a linkable kind', () => {
+    expect(parseKindSet('person,essay')).toEqual(['person']);
+    expect(parseKindSet('essay,source')).toBeNull();
+  });
+});
+
+describe('kindAllowed', () => {
+  it('allows anything when the predicate is unconstrained', () => {
+    expect(kindAllowed(null, 'person')).toBe(true);
+    expect(kindAllowed(null, 'artifact')).toBe(true);
+  });
+
+  it('allows a listed kind and refuses one that is absent', () => {
+    expect(kindAllowed(['person', 'organization'], 'person')).toBe(true);
+    expect(kindAllowed(['person', 'organization'], 'place')).toBe(false);
+  });
+
+  it('refuses a kind that is not a kind at all', () => {
+    expect(kindAllowed(['person'], 'nonsense')).toBe(false);
   });
 });

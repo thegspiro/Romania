@@ -27,15 +27,19 @@ import {
 import { KIND_PATHS } from '../content/references.js';
 import { listMentionsOf } from '../content/mentions.js';
 import {
+  LINKABLE_KINDS,
   MAX_ROLE_TITLE,
   createRelationship,
   deleteRelationship,
   isLinkableKind,
   isPeriodPrecision,
   listPredicateChoices,
+  listPredicates,
   listRelationshipsFor,
   parsePredicateChoice,
+  setPredicateKinds,
   setRelationshipVisibility,
+  type KindSet,
   type LinkableKind,
 } from '../content/relationships.js';
 import {
@@ -268,7 +272,7 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
           },
           errors: [],
           relationships: await listRelationshipsFor(pool, id, request.viewer),
-          predicateChoices: await listPredicateChoices(pool),
+          predicateChoices: await listPredicateChoices(pool, kind),
           mentions: await listMentionsOf(pool, id, request.viewer),
         },
         { noindex: true, flash: flashFor(request) },
@@ -333,7 +337,7 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
             values: { ...input, ...input.detail },
             errors,
             relationships: await listRelationshipsFor(pool, id, request.viewer),
-            predicateChoices: await listPredicateChoices(pool),
+            predicateChoices: await listPredicateChoices(pool, kind),
             mentions: await listMentionsOf(pool, id, request.viewer),
           },
           { status: 400, noindex: true },
@@ -475,7 +479,9 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
           ? 'relationship_duplicate'
           : outcome.reason === 'role_too_long'
             ? 'relationship_role_long'
-            : 'relationship_invalid';
+            : outcome.reason === 'kind_mismatch'
+              ? 'relationship_kind_mismatch'
+              : 'relationship_invalid';
       return reply.redirect(`${safeReturn(returnTo)}?msg=${code}`);
     }
 
@@ -553,6 +559,63 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
     return reply.redirect(
       `${safeReturn(returnTo)}?msg=relationship_${requested === 'public' ? 'published' : 'unpublished'}`,
     );
+  });
+
+  // --- The vocabulary ------------------------------------------------------
+  //
+  // What each relationship type is allowed to connect. Migration 0014 seeds a
+  // value for every predicate it found, and those values are a judgement about
+  // a history vocabulary rather than a fact about the schema -- so they have to
+  // be correctable here, not by a second migration. Refusal is hard, and a
+  // constraint that is wrong and unfixable would block a claim the sources
+  // actually support.
+
+  admin.get('/admin/vocabulary', async (request, reply) => {
+    return renderPage(
+      config,
+      request,
+      reply,
+      'admin/vocabulary',
+      { predicates: await listPredicates(pool), kinds: LINKABLE_KINDS },
+      { noindex: true, flash: flashFor(request) },
+    );
+  });
+
+  admin.post('/admin/vocabulary/:id', async (request, reply) => {
+    const id = parseId(request);
+
+    /**
+     * The checked kinds for one side.
+     *
+     * Nothing checked is stored as NULL -- "no opinion" -- rather than as an
+     * empty set, which would be a verb that connects nothing and so cannot be
+     * used at all. Retiring a verb is deleting it, not emptying it.
+     */
+    const side = (field: string): KindSet => {
+      const body = request.body;
+      if (typeof body !== 'object' || body === null) return null;
+      const raw: unknown = (body as Record<string, unknown>)[field];
+      const values = Array.isArray(raw) ? raw : [raw];
+      const kinds = values.filter(isLinkableKind);
+      return kinds.length === 0 ? null : kinds;
+    };
+
+    if (!(await setPredicateKinds(pool, id, side('domainKinds'), side('rangeKinds')))) {
+      throw notFound(`predicate ${String(id)}`);
+    }
+
+    await recordAudit(
+      pool,
+      {
+        actor: actorId(request),
+        action: 'predicate.retype',
+        detail: { predicateId: id },
+        ip: request.ip,
+      },
+      request.log,
+    );
+
+    return reply.redirect('/admin/vocabulary?msg=vocabulary_saved');
   });
 
   /**
