@@ -297,15 +297,16 @@ what the application sends and not what MySQL expects, which presents as
 it inside MySQL:
 
 ```sh
-docker compose exec db sh -c \
-  'mysql -u root -p"$MYSQL_ROOT_PASSWORD" \
-     -e "ALTER USER \"dissertation\"@\"%\" IDENTIFIED BY \"the-new-password\";"'
+docker compose exec -T db sh -c \
+  'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -u root \
+     -e "ALTER USER \"$MYSQL_USER\"@\"%\" IDENTIFIED BY \"the-new-password\";"'
 ```
 
-The password is read inside the container, from the `db` service's own
-environment. Writing `-p"$DB_ROOT_PASSWORD"` unquoted would expand it in your
-host shell instead, where `.env` is not exported and the variable is usually
-empty.
+Both variables expand inside the container, where Compose set them. Writing
+`-p"$DB_ROOT_PASSWORD"` would expand it in your own shell instead, where `.env`
+is not exported and the variable is empty — which leaves a bare `-p` and an
+interactive prompt that fails outright under `exec -T`. `MYSQL_PWD` also keeps
+the password out of the container's process list.
 
 ---
 

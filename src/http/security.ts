@@ -17,16 +17,24 @@ import type { Config } from '../config.js';
  *
  * There is no `'unsafe-inline'`. Inline scripts carry a per-response nonce and
  * inline styles are not used at all -- which is why the templates never use a
- * `style=` attribute. If maps are added later, the tile host must be added to
- * `img-src` here; nothing else should need to change.
+ * `style=` attribute.
+ *
+ * `tileOrigin` is the one source ever added from configuration, and it is
+ * added to `img-src` alone. Maps draw with no basemap unless `MAP_TILE_URL` is
+ * set, so the default policy still contacts nobody: the browser fetches tiles
+ * only from a host the operator named, having accepted that the host then sees
+ * which coordinates are being looked at.
  */
-export function contentSecurityPolicy(nonce: string): string {
+export function contentSecurityPolicy(nonce: string, tileOrigin: string | null = null): string {
+  const images =
+    tileOrigin === null ? "img-src 'self' data:" : `img-src 'self' data: ${tileOrigin}`;
+
   return [
     "default-src 'none'",
     "base-uri 'none'",
     "form-action 'self'",
     "frame-ancestors 'none'",
-    "img-src 'self' data:",
+    images,
     "style-src 'self'",
     `script-src 'self' 'nonce-${nonce}'`,
     "connect-src 'self'",
@@ -35,13 +43,30 @@ export function contentSecurityPolicy(nonce: string): string {
   ].join('; ');
 }
 
+/**
+ * The origin of the configured tile host, or null when maps have no basemap.
+ *
+ * Parsed rather than pattern-matched: `MAP_TILE_URL` is already validated to
+ * have a literal host, so `new URL` cannot fail here, but returning null on a
+ * surprise is the safe direction -- it drops the basemap rather than widening
+ * the policy.
+ */
+export function tileOrigin(config: Config): string | null {
+  if (config.MAP_TILE_URL === undefined) return null;
+  try {
+    return new URL(config.MAP_TILE_URL).origin;
+  } catch {
+    return null;
+  }
+}
+
 export function applySecurityHeaders(
   config: Config,
   request: FastifyRequest,
   reply: FastifyReply,
   nonce: string,
 ): void {
-  reply.header('Content-Security-Policy', contentSecurityPolicy(nonce));
+  reply.header('Content-Security-Policy', contentSecurityPolicy(nonce, tileOrigin(config)));
   reply.header('X-Content-Type-Options', 'nosniff');
   reply.header('X-Frame-Options', 'DENY');
   reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');

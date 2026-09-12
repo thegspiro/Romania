@@ -45,7 +45,7 @@ What is built and working:
 | Deployment — Docker, Compose, migrations, CLI                             | Complete                                                                                                            |
 | **Corpus export** — Markdown, CSL-JSON, and a rehearsed restore           | Complete                                                                                                            |
 | **Corpus-wide search** — every kind at once, with snippets                | Complete (admin-only; a query, not an index)                                                                        |
-| Maps                                                                      | **Not yet** (Leaflet is vendored; coordinates are in the schema)                                                    |
+| **Maps** — places, with queued geocoding                                  | Complete (no basemap unless a tile host is configured)                                                              |
 | Public downloads of compiled documents                                    | **Not yet** (deliberately admin-only for now — see below)                                                           |
 
 Each of those is a separate change set on top of this one. The architecture

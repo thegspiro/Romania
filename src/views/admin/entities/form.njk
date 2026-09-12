@@ -141,6 +141,25 @@
     </div>
   </form>
 
+  {#
+    Its own form, because a form cannot nest inside the edit form above, and
+    because queueing a lookup is not part of saving the record.
+  #}
+  {% if mode == 'edit' and kind == 'place' %}
+    <form method="post" action="/admin/places/{{ record.id }}/geocode" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+      <h2>Coordinates</h2>
+      <p class="hint">
+        Looks the place up with Nominatim, in the worker — this page never
+        contacts it. Coordinates already entered by hand are left alone, so
+        clear them first if you want the lookup's answer to win. Historical
+        geography does not map onto a modern gazetteer: check the precision it
+        records before trusting the point.
+      </p>
+      <button type="submit">Queue a lookup</button>
+    </form>
+  {% endif %}
+
   {% if mode == 'edit' %}
     {% set editable = true %}
     {% set returnTo = '/admin/' + path + '/' + record.id + '/edit' %}

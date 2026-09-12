@@ -88,24 +88,37 @@ docker compose logs --tail=20 worker
 docker compose exec web ls -lh /data/backups
 ```
 
-You want both files present with a recent timestamp. A file still named
-`.partial` means the dump is mid-write; the job renames only after a complete,
-successful one, so a partial file is never mistaken for a good backup.
+Wait for `wrote database backup` in the log — and `wrote file backup` unless
+you passed `--no-files` — and for files of a plausible size to appear. A file
+still named `.partial` means the dump is mid-write; the job renames only after
+a complete, successful one, so a partial file is never mistaken for a good
+backup.
 
 If the worker is not running — which is exactly when you are most likely to be
 updating — dump directly instead:
 
 ```sh
-docker compose exec db sh -c \
-  'mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --single-transaction --quick \
-   --routines --triggers --events --no-create-db dissertation' \
-  | gzip > /path/on/host/pre-update-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
+docker compose exec -T db sh -c '
+  MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -u root \
+    --single-transaction --quick --routines --triggers --events \
+    --default-character-set=utf8mb4 --hex-blob --no-create-db "$MYSQL_DATABASE"
+' | gzip > /path/on/host/pre-update-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
 ```
 
+Those variables expand **inside the container**, where Compose set them. A
+`$DB_ROOT_PASSWORD` written in your own shell expands to nothing, because
+`.env` is read by Compose and not by your shell — the single quotes are what
+keep the expansion on the right side of that line. `MYSQL_PWD` keeps the
+password out of the container's process list, the same way
+`scripts/wait-for-db.sh` does.
+
 `--single-transaction` gives a consistent snapshot without locking the site
-out; every table is InnoDB. This is the one step here that still needs the
-database's root password; `enqueue-backup` exists so the ordinary path does
-not.
+out; every table is InnoDB. `--default-character-set=utf8mb4` and `--hex-blob`
+are not decoration: a charset mismatch anywhere along dump → restore mangles
+Romanian diacritics silently.
+
+This is the one step here that still needs the database's root password;
+`enqueue-backup` exists so the ordinary path does not.
 
 **Copy the backup off the machine** if it is not already replicated. A copy
 sitting in the same appdata directory as the database it protects is not a
@@ -282,14 +295,15 @@ taken on — before step 4.
 docker compose stop web worker
 
 # 2. Restore the database.
-docker compose exec db sh -c '
-  mysql -u root -p"$MYSQL_ROOT_PASSWORD" -e "
-    DROP DATABASE IF EXISTS \`dissertation\`;
-    CREATE DATABASE \`dissertation\`
+docker compose exec -T db sh -c '
+  MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -u root -e "
+    DROP DATABASE IF EXISTS \`$MYSQL_DATABASE\`;
+    CREATE DATABASE \`$MYSQL_DATABASE\`
       CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;"'
 
 gzip -dc /path/on/host/to/database-20260912T031500Z.sql.gz \
-  | docker compose exec -T db sh -c 'mysql -u root -p"$MYSQL_ROOT_PASSWORD" dissertation'
+  | docker compose exec -T db sh -c \
+      'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -u root "$MYSQL_DATABASE"'
 ```
 
 The character set matters: the corpus contains Romanian diacritics, and a
