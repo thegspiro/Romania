@@ -329,7 +329,9 @@ runs in the `node` job and fails on:
 - a `| safe` whose expression is not on its allowlist,
 - an inline `style=` attribute, or a `<script>` without a nonce,
 - a `visibility = '<literal>'` in a `.ts` file outside
-  `src/content/visibility.ts`.
+  `src/content/visibility.ts`,
+- a `mysql:8.4` image that is not digest-pinned, or whose digest differs
+  between `docker-compose.yml` and the `node` job's service container.
 
 The last one takes an escape hatch, because not every match is a viewer
 decision -- an admin dashboard counting published items is not. Put
@@ -385,6 +387,26 @@ the properties being asserted actually live.
 | Sync queueing and state for the admin  | `src/content/zotero.ts`             |
 | Job runner                             | `worker/runner.py`                  |
 | Pandoc invocation                      | `worker/jobs/manuscript_compile.py` |
+
+### Pinned images
+
+Base images are pinned by digest with the tag kept beside them, for the reason
+pandoc and tectonic are: a floating tag lets the image CI validated and the
+image a rebuild produces be different, and that difference never appears in a
+diff. The MySQL digest is written twice -- `docker-compose.yml` and the `node`
+job -- so `check-invariants.mjs` fails when they diverge, because CI going
+green against a database nobody deploys is exactly what the pin exists to
+prevent.
+
+Pinning also freezes the base's own security updates, so refresh deliberately:
+
+```sh
+docker buildx imagetools inspect node:22-bookworm-slim --format '{{.Manifest.Digest}}'
+docker buildx imagetools inspect mysql:8.4 --format '{{.Manifest.Digest}}'
+```
+
+Use the multi-arch index digest, not a per-platform one: the CI matrix builds
+`linux/amd64` and `linux/arm64` from the same reference.
 
 ### Two implementations that must stay in step
 

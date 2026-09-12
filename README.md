@@ -639,6 +639,21 @@ CI installs the **same pinned pandoc `.deb`** the image does
 `Dockerfile`), so the end-to-end citation test validates the binary that
 actually renders your dissertation. Bumping the version means changing both.
 
+The base images are pinned the same way — `node:22-bookworm-slim` in the
+`Dockerfile`, `mysql:8.4` in `docker-compose.yml` and in the `node` job's
+service container, each by digest with the tag kept beside it for legibility.
+A floating tag would let the image CI validated and the image a rebuild
+produced be different base images, which is the one difference that never
+shows up in a diff. The cost is that base security updates no longer arrive on
+their own, so refresh the digests deliberately:
+
+```sh
+docker buildx imagetools inspect node:22-bookworm-slim --format '{{.Manifest.Digest}}'
+docker buildx imagetools inspect mysql:8.4 --format '{{.Manifest.Digest}}'
+```
+
+The MySQL digest appears twice and must match in both places.
+
 ### Layout
 
 ```

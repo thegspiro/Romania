@@ -142,6 +142,40 @@ for (const file of walk(join(ROOT, 'src'), '.ts')) {
   });
 }
 
+// --- Pinned images ---------------------------------------------------------
+
+// The MySQL digest is written in two files, and the `node` job's whole claim
+// is that the migrations and the visibility suites passed against the database
+// production runs. Two hand-kept copies cannot promise that: the day they
+// diverge, CI goes green against a database nobody deploys. Same reasoning as
+// the shared slug fixture -- one edit has to move both, or a check has to
+// notice that it did not.
+const MYSQL_PIN = /image:\s*mysql:8\.4@(sha256:[0-9a-f]{64})/;
+
+const pinnedMysql = [join(ROOT, 'docker-compose.yml'), join(ROOT, '.github/workflows/ci.yml')].map(
+  (file) => {
+    const match = MYSQL_PIN.exec(readFileSync(file, 'utf8'));
+    if (match === null) {
+      fail(file, 1, 'no digest-pinned mysql:8.4 image found. Pin it as mysql:8.4@sha256:<64 hex>.');
+    }
+    return { file, digest: match?.[1] };
+  },
+);
+
+const [compose, workflow] = pinnedMysql;
+if (
+  compose?.digest !== undefined &&
+  workflow?.digest !== undefined &&
+  compose.digest !== workflow.digest
+) {
+  fail(
+    workflow.file,
+    1,
+    `mysql digest ${workflow.digest} does not match docker-compose.yml (${compose.digest}). ` +
+      'CI would then test against a database production does not run. Change both together.',
+  );
+}
+
 // --- Report ----------------------------------------------------------------
 
 if (failures.length > 0) {
@@ -152,5 +186,6 @@ if (failures.length > 0) {
 }
 
 console.log(
-  'invariants hold: safe-filter allowlist, no inline styles, nonced scripts, visibility chokepoint',
+  'invariants hold: safe-filter allowlist, no inline styles, nonced scripts, visibility chokepoint, ' +
+    'matching mysql pin',
 );

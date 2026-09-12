@@ -42,8 +42,13 @@ jobs:
       # collation explicitly and 8.4 already defaults to utf8mb4_0900_ai_ci.
       # A future table without an explicit collation would diverge from
       # production silently.
+      #
+      # The digest is the same one docker-compose.yml pins, and it is the
+      # point: this job's whole claim is that the migrations and the
+      # visibility suites passed against the database production runs, which
+      # a tag resolved twice cannot promise. Change both together.
       mysql:
-        image: mysql:8.4
+        image: mysql:8.4@sha256:85b9bf2e29cf836ecb8c2a15a935d4ba0c606631dff1dd79531a11983c638f2a
         env:
           # Throwaway values for an ephemeral container that exists for the
           # length of one job. Nothing secret belongs in a workflow file.
