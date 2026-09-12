@@ -281,6 +281,16 @@ only in what they can ask:
   the snippet shown on the **public** person's page, to anybody, and no
   read-time check ever looked at it again.
 
+- `assembleDocument` decides at build time and holds the build's `Viewer` --
+  `ANONYMOUS` for a `public` build -- so it asks about that audience. It fills
+  `titles` with the marker for a withheld target and hands
+  `referencesToPandoc` a set of citable slugs, because a citation to a source
+  the viewer may not see is dropped from the bibliography and would otherwise
+  still be emitted as `[@slug]`: a private slug printed into the document, and
+  a key pointing at nothing. `referencesToPandoc` makes **no** visibility
+  decision of its own -- both arguments arrive filtered, and its required
+  fourth parameter is what stops a caller forgetting the second one.
+
 `mention.anchor_text` is the deliberate exception, and stays the target's
 title: it names the row's own target, and a backlink list carrying it is only
 ever rendered on that target's page -- which a reader who may not see the
@@ -382,6 +392,11 @@ Pandoc over them and stores the output.
 > The worker makes **no visibility decisions** and does no reference parsing.
 > Moving either into `worker/` would put a second copy of the rule outside the
 > chokepoint, or a second parser to fall out of step. Don't.
+
+Which means the assembly is the last place a withheld reference can be caught,
+and `tests/integration/build-assembly.test.ts` pins both halves against a real
+assembly rather than against the rewrite in isolation -- the defect was in what
+`assembleDocument` handed the rewrite, not in the rewrite itself.
 
 A compiled file holds many sections at once, so it is the one place a mistake
 would leak everything. `manuscript_build.audience` records what it was

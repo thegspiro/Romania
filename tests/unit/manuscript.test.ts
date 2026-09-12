@@ -13,6 +13,7 @@ import {
   demoteHeadings,
   isSectionRole,
   referencesToPandoc,
+  WITHHELD_IN_PANDOC,
   sectionAnchor,
 } from '../../src/content/manuscripts.js';
 import {
@@ -77,43 +78,88 @@ describe('referencesToPandoc', () => {
     ['person:ion-antonescu', 'Ion Antonescu'],
     ['essay:conclusion', 'Conclusion'],
   ]);
+  // Both maps arrive already filtered for the build's viewer; this function
+  // makes no visibility decision of its own.
+  const citable = new Set(['hooligan-year']);
 
   it('turns a citation with a locator into Pandoc citation syntax', () => {
-    expect(referencesToPandoc('As argued.[[cite:hooligan-year|45-47]]', anchors, titles)).toBe(
-      'As argued.[@hooligan-year, 45-47]',
-    );
+    expect(
+      referencesToPandoc('As argued.[[cite:hooligan-year|45-47]]', anchors, titles, citable),
+    ).toBe('As argued.[@hooligan-year, 45-47]');
   });
 
   it('omits the locator when none was given', () => {
-    expect(referencesToPandoc('[[cite:hooligan-year]]', anchors, titles)).toBe('[@hooligan-year]');
+    expect(referencesToPandoc('[[cite:hooligan-year]]', anchors, titles, citable)).toBe(
+      '[@hooligan-year]',
+    );
   });
 
   it('renders a mention as plain text, using the resolved title when unlabelled', () => {
-    expect(referencesToPandoc('[[person:ion-antonescu]] spoke.', anchors, titles)).toBe(
+    expect(referencesToPandoc('[[person:ion-antonescu]] spoke.', anchors, titles, citable)).toBe(
       'Ion Antonescu spoke.',
     );
-    expect(referencesToPandoc('[[person:ion-antonescu|the Marshal]]', anchors, titles)).toBe(
-      'the Marshal',
-    );
+    expect(
+      referencesToPandoc('[[person:ion-antonescu|the Marshal]]', anchors, titles, citable),
+    ).toBe('the Marshal');
   });
 
-  it('falls back to a readable slug when the title is unknown', () => {
-    // Better than printing "ion-antonescu" into a finished PDF.
-    expect(referencesToPandoc('[[person:maria-ionescu]]', anchors, new Map())).toBe(
+  it('falls back to a readable slug when the reference resolved to nothing', () => {
+    // A broken reference has no record behind it to protect, so the slug read
+    // as words is the operator's own typing and better than "ion-antonescu"
+    // in a finished PDF. A target that exists but is withheld is a different
+    // case, and carries the marker instead -- see below.
+    expect(referencesToPandoc('[[person:maria-ionescu]]', anchors, new Map(), citable)).toBe(
       'maria ionescu',
     );
   });
 
+  it('never prints the title of a target the build may not show', () => {
+    // assembleDocument puts the marker in the map for a withheld target, so
+    // the catalogue title never reaches the document -- and neither does the
+    // slug, which the fallback above would otherwise supply.
+    const withheld = new Map([['person:maria-doe', WITHHELD_IN_PANDOC]]);
+    const result = referencesToPandoc(
+      'The witness [[person:maria-doe]] spoke.',
+      anchors,
+      withheld,
+      citable,
+    );
+    expect(result).toBe(`The witness ${WITHHELD_IN_PANDOC} spoke.`);
+    expect(result).not.toContain('Maria');
+    expect(result).not.toContain('maria-doe');
+  });
+
+  it('keeps the words the prose used, even for a withheld target', () => {
+    const withheld = new Map([['person:maria-doe', WITHHELD_IN_PANDOC]]);
+    expect(
+      referencesToPandoc('[[person:maria-doe|a neighbour]] spoke.', anchors, withheld, citable),
+    ).toBe('a neighbour spoke.');
+  });
+
+  it('withholds a citation whose source is not in the bibliography', () => {
+    // Emitting [@slug] for a source the viewer may not see would print the
+    // private slug and leave Pandoc with a key pointing at nothing.
+    const result = referencesToPandoc(
+      'As argued.[[cite:secret-file|12]]',
+      anchors,
+      titles,
+      citable,
+    );
+    expect(result).toBe(`As argued.${WITHHELD_IN_PANDOC}`);
+    expect(result).not.toContain('secret-file');
+    expect(result).not.toContain('@');
+  });
+
   it('cross-references a mention whose target is also a section here', () => {
-    expect(referencesToPandoc('See [[essay:conclusion]].', anchors, titles)).toBe(
+    expect(referencesToPandoc('See [[essay:conclusion]].', anchors, titles, citable)).toBe(
       'See [Conclusion](#sec-essay-conclusion).',
     );
   });
 
   it('leaves text with no references untouched', () => {
-    expect(referencesToPandoc('Plain prose [with a link](http://x).', anchors, titles)).toBe(
-      'Plain prose [with a link](http://x).',
-    );
+    expect(
+      referencesToPandoc('Plain prose [with a link](http://x).', anchors, titles, citable),
+    ).toBe('Plain prose [with a link](http://x).');
   });
 
   it('rewrites several references in one paragraph without losing the text between', () => {
@@ -121,6 +167,7 @@ describe('referencesToPandoc', () => {
       '[[person:ion-antonescu|He]] wrote to [[essay:conclusion]].[[cite:hooligan-year|12]]',
       anchors,
       titles,
+      citable,
     );
     expect(result).toBe('He wrote to [Conclusion](#sec-essay-conclusion).[@hooligan-year, 12]');
   });
