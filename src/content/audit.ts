@@ -30,7 +30,8 @@ export type AuditAction =
   | 'source.publish'
   | 'source.unpublish'
   | 'zotero.sync'
-  | 'zotero.sync.full';
+  | 'zotero.sync.full'
+  | 'backup.requested';
 
 export interface AuditEntry {
   actor: string;

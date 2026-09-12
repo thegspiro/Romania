@@ -47,6 +47,11 @@ services:
       start_period: 40s
     security_opt:
       - no-new-privileges:true
+    # The image already runs as uid 1000, so the process holds no capabilities
+    # it can use. Dropping the bounding set closes the remaining path: a setuid
+    # binary reachable through a future dependency cannot regain them.
+    cap_drop:
+      - ALL
     logging:
       driver: json-file
       options: { max-size: '10m', max-file: '5' }
@@ -79,6 +84,10 @@ services:
         condition: service_started
     security_opt:
       - no-new-privileges:true
+    # Same reasoning as `web`: already uid 1000, so this only removes what it
+    # could never legitimately use.
+    cap_drop:
+      - ALL
     logging:
       driver: json-file
       options: { max-size: '10m', max-file: '5' }
@@ -106,14 +115,29 @@ services:
     healthcheck:
       # `mysqladmin ping` succeeds before the server finishes initialising on
       # a first run, so the query below is used instead.
+      #
+      # The password goes through MYSQL_PWD rather than -p. An argv element is
+      # readable by every process in the container via /proc, and a health
+      # check re-runs it every ten seconds for the life of the deployment, so
+      # that exposure is continuous rather than momentary. `$$` escapes
+      # Compose's interpolation, leaving the shell to expand the variable the
+      # container already has -- which also keeps the password out of
+      # `docker compose config` output.
       test:
-        ['CMD', 'mysql', '-h', '127.0.0.1', '-u', 'root', '-p${DB_ROOT_PASSWORD}', '-e', 'SELECT 1']
+        ['CMD-SHELL', 'MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h 127.0.0.1 -u root -e "SELECT 1"']
       interval: 10s
       timeout: 5s
       retries: 15
       start_period: 60s
     security_opt:
       - no-new-privileges:true
+    # No cap_drop here, unlike `web` and `worker`. Both of those are already
+    # uid 1000 from the first instruction, so dropping the bounding set takes
+    # away nothing they use. This image starts as root and drops to the mysql
+    # user itself, which needs CHOWN, SETUID, SETGID and DAC_OVERRIDE among
+    # others; naming that set from memory and getting it wrong is a database
+    # that will not start, and nothing in CI runs this composition to catch it.
+    # Worth doing with a real deployment to test against, not before.
     logging:
       driver: json-file
       options: { max-size: '10m', max-file: '3' }
