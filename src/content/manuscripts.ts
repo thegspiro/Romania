@@ -23,11 +23,16 @@ import {
   type PoolConnection,
 } from '../db/pool.js';
 import { slugify, uniqueSlug } from './slug.js';
-import { visibilityFilter, type Viewer, type Visibility } from './visibility.js';
+import { canView, visibilityFilter, type Viewer, type Visibility } from './visibility.js';
 import { parseStoredCslItem, type CslItem } from '../citations/csl.js';
 import { parseReferences, referenceHref, targetKind } from './references.js';
 import { resolveTargets } from './mentions.js';
-import { countWords, locateTimelineBlocks, parseTimelineDirectives } from './markdown.js';
+import {
+  countWords,
+  locateTimelineBlocks,
+  parseTimelineDirectives,
+  WITHHELD_LABEL,
+} from './markdown.js';
 import { resolveTimelineDirectives, timelineDirectiveKey, type TimelineEntry } from './timeline.js';
 
 export const SECTION_ROLES = ['front_matter', 'body', 'appendix', 'back_matter'] as const;
@@ -585,10 +590,29 @@ export function demoteHeadings(markdown: string, levels: number): string {
  * target is itself a section of this manuscript, which becomes an internal
  * cross-reference.
  */
+/**
+ * What a withheld reference looks like in a compiled document.
+ *
+ * The brackets are escaped so Pandoc prints them rather than reading the text
+ * as a reference link, and the wording is the one the web page and a withheld
+ * citation already use, so a reader meets the same phrase everywhere.
+ */
+export const WITHHELD_IN_PANDOC = `\\[${WITHHELD_LABEL}\\]`;
+
+/**
+ * Rewrites this application's reference syntax into Pandoc's.
+ *
+ * `titles` and `citableSlugs` are both **already filtered for the build's
+ * viewer** by `assembleDocument`; this function makes no visibility decision
+ * of its own and must not be given an unfiltered map. A compiled file holds
+ * many sections at once, so it is the one output where a substituted string
+ * reaches every reader of the document at once.
+ */
 export function referencesToPandoc(
   markdown: string,
   sectionAnchors: ReadonlyMap<string, string>,
   titles: ReadonlyMap<string, string>,
+  citableSlugs: ReadonlySet<string>,
 ): string {
   const references = parseReferences(markdown);
   if (references.length === 0) return markdown;
@@ -601,6 +625,13 @@ export function referencesToPandoc(
     cursor = reference.index + reference.raw.length;
 
     if (reference.kind === 'cite') {
+      // A source the viewer may not see is absent from the bibliography, so a
+      // citation key here would render as a dangling `[@slug]` -- printing the
+      // private source's slug into the document and pointing at nothing.
+      if (!citableSlugs.has(reference.slug)) {
+        result += WITHHELD_IN_PANDOC;
+        continue;
+      }
       // Pandoc citation keys accept our slug charset unchanged.
       result +=
         reference.argument === undefined
@@ -610,6 +641,10 @@ export function referencesToPandoc(
     }
 
     const key = `${targetKind(reference.kind)}:${reference.slug}`;
+    // An absent entry means the reference resolved to nothing at all -- a
+    // deleted target or a typo -- and the slug read as words is the operator's
+    // own typing, with no record behind it to protect. A target that exists
+    // but is withheld is present in the map, carrying the marker.
     const label = reference.argument ?? titles.get(key) ?? reference.slug.replace(/-/g, ' ');
     const anchor = sectionAnchors.get(key);
     result += anchor === undefined ? label : `[${label}](#${anchor})`;
@@ -706,9 +741,24 @@ export async function assembleDocument(
   // slug. Resolved in one query across all bodies.
   const allReferences = [...bodies.values()].flatMap((body) => parseReferences(body));
   const resolved = await resolveTargets(db, allReferences);
-  const titles = new Map([...resolved].map(([key, row]) => [key, row.title]));
+
+  // Filtered for this build's viewer, which for a public build is ANONYMOUS.
+  // A catalogue title is never substituted for a reference the reader may not
+  // follow: the prose named a slug, and the title is a different string the
+  // operator never wrote into the sentence, which can say far more than they
+  // did. A withheld target carries the marker rather than being left out, so
+  // the fallback below stays reserved for a reference that resolved to
+  // nothing -- the slug is no safer than the title for one that did.
+  const titles = new Map(
+    [...resolved].map(([key, row]) => [
+      key,
+      canView(viewer, row.visibility) ? row.title : WITHHELD_IN_PANDOC,
+    ]),
+  );
   for (const section of sections) {
-    // A section's title in this manuscript wins over its own title.
+    // A section's title in this manuscript wins over its own title. Every
+    // section survived the viewer's filter in `listSections`, so this cannot
+    // reintroduce a title the marker just withheld.
     titles.set(`${section.kind}:${section.slug}`, section.title);
   }
 
@@ -721,41 +771,17 @@ export async function assembleDocument(
     viewer,
   );
 
-  const citedSlugs = new Set<string>();
-  const parts: string[] = [];
-  let wordCount = 0;
-
-  const ordered = [
-    ...sections.filter((section) => section.role === 'front_matter'),
-    ...sections.filter((section) => section.role === 'body'),
-    ...sections.filter((section) => section.role === 'appendix'),
-    ...sections.filter((section) => section.role === 'back_matter'),
-  ];
-
-  for (const section of ordered) {
-    const body = bodies.get(section.itemId) ?? '';
-    for (const reference of parseReferences(body)) {
-      if (reference.kind === 'cite') citedSlugs.add(reference.slug);
-    }
-
-    const heading = `${'#'.repeat(Math.min(section.depth + 1, 6))} ${section.title} {#${sectionAnchor(section.kind, section.slug)}}`;
-    // Timelines first: the block becomes ordinary Markdown, which the
-    // reference rewrite then walks like any other prose.
-    const transformed = referencesToPandoc(
-      timelinesToPandoc(demoteHeadings(body, section.depth + 1), timelineEntries),
-      anchors,
-      titles,
-    );
-
-    parts.push(`${heading}\n\n${transformed.trim()}`);
-    wordCount += countWords(body);
-  }
-
-  // Only sources the viewer may see reach the bibliography. A citation to a
-  // source they may not see is dropped from the reference list and reported,
-  // rather than disclosing its title in a footnote.
+  // Resolved BEFORE the sections are rewritten, because the rewrite has to
+  // know which citations it may emit. Only sources the viewer may see reach
+  // the bibliography; a citation to one they may not see would otherwise
+  // become a `[@slug]` key pointing at nothing, printing the private source's
+  // slug into the document.
+  const citedSlugs = new Set(
+    allReferences.filter((reference) => reference.kind === 'cite').map((r) => r.slug),
+  );
   const bibliography: CslItem[] = [];
   const withheldCitations: string[] = [];
+  const citableSlugs = new Set<string>();
 
   if (citedSlugs.size > 0) {
     const slugs = [...citedSlugs];
@@ -770,9 +796,38 @@ export async function assembleDocument(
       [...slugs, ...visible.params],
     );
 
-    const found = new Set(rows.map((row) => String(row.slug)));
-    for (const row of rows) bibliography.push(parseStoredCslItem(row.csl_json));
-    for (const slug of slugs) if (!found.has(slug)) withheldCitations.push(slug);
+    for (const row of rows) {
+      citableSlugs.add(String(row.slug));
+      bibliography.push(parseStoredCslItem(row.csl_json));
+    }
+    for (const slug of slugs) if (!citableSlugs.has(slug)) withheldCitations.push(slug);
+  }
+
+  const parts: string[] = [];
+  let wordCount = 0;
+
+  const ordered = [
+    ...sections.filter((section) => section.role === 'front_matter'),
+    ...sections.filter((section) => section.role === 'body'),
+    ...sections.filter((section) => section.role === 'appendix'),
+    ...sections.filter((section) => section.role === 'back_matter'),
+  ];
+
+  for (const section of ordered) {
+    const body = bodies.get(section.itemId) ?? '';
+
+    const heading = `${'#'.repeat(Math.min(section.depth + 1, 6))} ${section.title} {#${sectionAnchor(section.kind, section.slug)}}`;
+    // Timelines first: the block becomes ordinary Markdown, which the
+    // reference rewrite then walks like any other prose.
+    const transformed = referencesToPandoc(
+      timelinesToPandoc(demoteHeadings(body, section.depth + 1), timelineEntries),
+      anchors,
+      titles,
+      citableSlugs,
+    );
+
+    parts.push(`${heading}\n\n${transformed.trim()}`);
+    wordCount += countWords(body);
   }
 
   return {
