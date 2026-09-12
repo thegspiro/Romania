@@ -422,6 +422,31 @@ Secure, SameSite=Lax cookies with the `__Host-` prefix; login rate limiting
 and lockout; all SQL through bound parameters; uploads typed by magic bytes
 and stripped of EXIF; an audit trail that outlives the rows it describes.
 
+**The containers are hardened as well**, because an application-level rule only
+holds for as long as the application is the only thing running:
+
+- All three drop **every Linux capability**, and run with
+  `no-new-privileges`. `web` and `worker` are already an unprivileged uid, so
+  dropping the bounding set closes the path that remained: a setuid binary
+  arriving through some future dependency cannot regain what is no longer
+  there. `db` cannot drop everything — that image starts as root and lowers
+  itself to the mysql user — so it keeps exactly four, `CHOWN`,
+  `DAC_OVERRIDE`, `SETGID` and `SETUID`, each one established by removing it
+  and watching the container fail rather than by reasoning about it.
+- All three run on a **read-only root filesystem**. What stays writable is
+  only what has to be: the files and backups volumes, the MySQL data directory
+  and its socket directory, a `tmpfs` for `/tmp`, and the worker's Tectonic
+  package cache. "Nothing here should be writing to the image" stops being
+  something review has to notice and becomes something the kernel refuses.
+- The web port is published on **`127.0.0.1` only**, so nothing reaches the
+  application except through your reverse proxy. On `0.0.0.0` it would also be
+  reachable over plain HTTP, where the session cookie is readable in transit.
+
+The first two are not checked by reading the compose file. CI brings the real
+stack up and asserts them on the running containers, so a capability trimmed too
+far, or a writable path that quietly closed, fails a pull request rather than a
+deployment.
+
 **Search engines are blocked by default.** `robots.txt` disallows everything
 and every response carries `X-Robots-Tag: noindex`. Research that has been
 crawled, cached and archived cannot be un-crawled, so the default is the
@@ -452,6 +477,29 @@ docker compose exec web /app/scripts/entrypoint.sh admin create-admin
 You also need a **reverse proxy terminating TLS** and a domain name. HTTPS is
 not optional: WebAuthn refuses to run outside a secure context, so passkeys
 will not work over plain HTTP on any host but `localhost`.
+
+**Do not edit `docker-compose.yml` to point at your own storage.** Putting the
+data on real host directories instead of Docker volumes is what
+`docker-compose.unraid.yml` is for, applied alongside the base file rather than
+replacing it:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.unraid.yml up -d
+```
+
+Compose merges a service's volumes by target path, so each entry there replaces
+the named volume at that path. Keeping it in a second file is what lets an
+update pull a new `docker-compose.yml` without resolving a merge conflict in
+the file that defines your deployment.
+[`docs/unraid.md`](docs/unraid.md) has the paths, and the `COMPOSE_FILE` export
+that saves repeating the `-f` pair.
+
+> **The stack ships hardened, which constrains what you can bolt onto it.**
+> Every container drops the Linux capabilities it does not need and runs on a
+> read-only root filesystem, so a path you add is writable only if you add it
+> as a volume or a `tmpfs`. Anything else fails with `EROFS` — which is the
+> intent, but it reads as a broken install when you are not expecting it. The
+> [Security](#security) section says what each container keeps and why.
 
 > **The image is published to GHCR**, built for `linux/amd64` and
 > `linux/arm64` by the same pipeline that runs the tests — so `docker compose

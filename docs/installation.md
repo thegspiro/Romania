@@ -242,11 +242,17 @@ Then register a **second passkey on a different device** from
 
 ## Where the data lives
 
-| Volume     | Mounted at       | Holds                                      |
-| ---------- | ---------------- | ------------------------------------------ |
-| `database` | `/var/lib/mysql` | The MySQL data directory                   |
-| `files`    | `/data/files`    | Uploads and derivatives, addressed by hash |
-| `backups`  | `/data/backups`  | Database dumps and file archives           |
+| Volume           | Mounted at          | Holds                                      |
+| ---------------- | ------------------- | ------------------------------------------ |
+| `database`       | `/var/lib/mysql`    | The MySQL data directory                   |
+| `files`          | `/data/files`       | Uploads and derivatives, addressed by hash |
+| `backups`        | `/data/backups`     | Database dumps and file archives           |
+| `tectonic-cache` | `/home/node/.cache` | TeX packages Tectonic fetched for a PDF    |
+
+The first three are yours and want backing up. `tectonic-cache` is a cache and
+does not: it exists because the containers run on a read-only root filesystem,
+and because a `tmpfs` would make every restart re-download the same TeX — which
+on a host with no outbound network means the next PDF simply fails.
 
 By default these are Docker named volumes. On a host that backs up specific
 paths — which is the usual arrangement on Unraid and on a cloud host with
