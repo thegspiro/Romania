@@ -5,9 +5,10 @@
  * are reachable only through a lookup that re-checks the owning item's
  * visibility, on every request, with no caching of the decision.
  *
- * It joins through `artifact_detail`, so a `file_object` that no artifact
- * owns -- a compiled manuscript, for instance -- is not servable here at all.
- * Those have their own admin-only route, which checks the build's audience.
+ * It joins through the items that can own a file -- an artifact or a source --
+ * so a `file_object` that neither owns, a compiled manuscript for instance, is
+ * not servable here at all. Those have their own admin-only route, which
+ * checks the build's audience.
  */
 import type { RowDataPacket } from 'mysql2/promise';
 import { execute, queryOne, type Pool, type PoolConnection } from '../db/pool.js';
@@ -76,6 +77,30 @@ export async function findFileObject(
   };
 }
 
+/**
+ * The items that can own a file, as one relation of (file, owning item).
+ *
+ * `file_object` is content-addressed: `insertFileObject` reuses a row for
+ * identical bytes, so one file may be owned by several items at once -- two
+ * artifacts, or an artifact and the source it was scanned from.
+ *
+ * The rule, unchanged by adding sources, is **visible if any owning item is
+ * visible**. The bytes are one object; publishing the artifact publishes them,
+ * and there is no coherent way for the same bytes to be simultaneously public
+ * and private. `tests/integration/files.test.ts` states that explicitly so it
+ * reads as a decision rather than an accident of the join.
+ *
+ * UNION ALL rather than UNION: duplicates cost nothing under `LIMIT 1`, and
+ * de-duplicating would sort the whole relation for no benefit.
+ */
+const FILE_OWNERS = `
+  SELECT file_object_id, content_item_id FROM artifact_detail
+   WHERE file_object_id IS NOT NULL
+  UNION ALL
+  SELECT file_object_id, content_item_id FROM source_detail
+   WHERE file_object_id IS NOT NULL
+`;
+
 export interface ServableFile {
   mimeType: string;
   byteSize: number;
@@ -105,8 +130,8 @@ export async function findServableFile(
       db,
       `SELECT fo.mime_type, fo.byte_size, fo.storage_key, fo.original_filename, fo.sha256
          FROM file_object fo
-         JOIN artifact_detail ad ON ad.file_object_id = fo.id
-         JOIN content_item ci ON ci.id = ad.content_item_id
+         JOIN (${FILE_OWNERS}) owner ON owner.file_object_id = fo.id
+         JOIN content_item ci ON ci.id = owner.content_item_id
         WHERE fo.id = ? AND ${visible.sql}
         LIMIT 1`,
       [fileObjectId, ...visible.params],
@@ -126,8 +151,8 @@ export async function findServableFile(
     `SELECT fd.mime_type, fd.byte_size, fd.storage_key, fo.original_filename, fo.sha256
        FROM file_derivative fd
        JOIN file_object fo ON fo.id = fd.file_object_id
-       JOIN artifact_detail ad ON ad.file_object_id = fo.id
-       JOIN content_item ci ON ci.id = ad.content_item_id
+       JOIN (${FILE_OWNERS}) owner ON owner.file_object_id = fo.id
+       JOIN content_item ci ON ci.id = owner.content_item_id
       WHERE fd.file_object_id = ? AND fd.variant = ? AND ${visible.sql}
       LIMIT 1`,
     [fileObjectId, variant, ...visible.params],

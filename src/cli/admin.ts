@@ -14,6 +14,7 @@
  *   node dist/cli/admin.js revoke-passkey --username u --id 3
  *   node dist/cli/admin.js recovery-codes --username u
  *   node dist/cli/admin.js sessions-revoke --username u
+ *   node dist/cli/admin.js export --out /data/backups/export
  */
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
@@ -37,6 +38,8 @@ import {
 import { generateRecoveryCodes, hashRecoveryCode } from '../auth/recovery.js';
 import { destroyUserSessions } from '../auth/session.js';
 import { recordAudit } from '../content/audit.js';
+import { exportCorpus } from '../content/export.js';
+import { ANONYMOUS, adminViewer } from '../content/visibility.js';
 
 const USERNAME_PATTERN = /^[a-z0-9][a-z0-9._-]{2,63}$/i;
 
@@ -183,10 +186,13 @@ function usage(): string {
     '  revoke-passkey     Remove one passkey by id',
     '  recovery-codes     Generate a fresh set of recovery codes',
     '  sessions-revoke    Sign out every session for an account',
+    '  export             Write the whole corpus as Markdown and CSL-JSON',
     '',
     'Options:',
     '  --username <name>  Account to act on',
     '  --name <text>      Display name (create-admin only)',
+    '  --out <directory>  Where to write an export (export only)',
+    '  --public           Export only published material (export only)',
   ].join('\n');
 }
 
@@ -318,6 +324,37 @@ async function run(argv: string[]): Promise<number> {
         const user = await requireUser(pool, username);
         const revoked = await destroyUserSessions(pool, user.id);
         console.log(`Revoked ${revoked} session(s) for "${username}".`);
+        return 0;
+      }
+
+      case 'export': {
+        const out = (flags.get('out') ?? '').trim();
+        if (out === '') {
+          console.error('export needs --out <directory>.');
+          return 2;
+        }
+
+        // An administrator by default: this is a disaster-recovery tool, and
+        // an export that quietly omitted the unpublished half would be worse
+        // than useless the day it is needed. --public is the deliberate
+        // opposite, for a copy that is safe to hand to somebody.
+        const isPublic = flags.get('public') === 'true';
+        const summary = await exportCorpus(pool, isPublic ? ANONYMOUS : adminViewer(0), out);
+
+        console.log(`Exported to ${summary.directory}`);
+        console.log(`  essays      ${summary.essays}`);
+        console.log(`  sources     ${summary.sources}`);
+        console.log(
+          `  artifacts   ${summary.artifacts} ` +
+            `(${summary.artifactFiles} with a file, ${summary.transcriptions} transcribed)`,
+        );
+        for (const [kind, count] of Object.entries(summary.entities)) {
+          console.log(`  ${kind.padEnd(11)} ${count}`);
+        }
+        if (summary.audience === 'admin') {
+          console.log('');
+          console.log('This export contains unpublished material. The directory is 0700.');
+        }
         return 0;
       }
 

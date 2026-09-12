@@ -37,6 +37,22 @@
       <div class="prose">{{ summaryHtml | safe }}</div>
     {% endif %}
 
+    {#
+      The transcription goes through renderProse, the same pipeline an essay
+      body uses -- so a reference to something the viewer may not see comes
+      back as escaped display text, with no href and no slug. Nothing here
+      decides that; the renderer does.
+    #}
+    {% if transcriptionHtml %}
+      <section class="transcription">
+        <h2>Transcription</h2>
+        <div
+          class="prose"
+          {% if artifact.transcriptionLanguage %}lang="{{ artifact.transcriptionLanguage }}"{% endif %}
+        >{{ transcriptionHtml | safe }}</div>
+      </section>
+    {% endif %}
+
     <section>
       <h2>Provenance</h2>
       <dl class="details">
