@@ -136,8 +136,15 @@
     <p class="hint">
       Assembles every section into one document. A <strong>public</strong>
       build contains only what a visitor could already read; an
-      <strong>administrator</strong> build contains everything, and is never
-      downloadable by anyone else.
+      <strong>administrator</strong> build contains everything, and can never be
+      published for download.
+    </p>
+    <p class="hint">
+      Compiling does not publish anything. To offer a document on the
+      manuscript’s page, publish one public build below — and only one at a
+      time, so the address stays the same. Every section that went into it is
+      re-checked on each request: unpublish one and the download stops, with no
+      trace that it was ever there.
     </p>
 
     <form method="post" action="/admin/manuscripts/{{ manuscript.id }}/build" class="filter-form">
@@ -166,6 +173,7 @@
             <th scope="col">Audience</th>
             <th scope="col">Sections</th>
             <th scope="col">State</th>
+            <th scope="col">Public download</th>
             <th scope="col"><span class="visually-hidden">Download</span></th>
           </tr>
         </thead>
@@ -183,6 +191,29 @@
                     <summary class="muted small">Why</summary>
                     <pre class="build-log">{{ build.log }}</pre>
                   </details>
+                {% endif %}
+              </td>
+              <td>
+                {#
+                  Only a succeeded public build can become a download, and only
+                  one per manuscript. The refusals are reported as messages
+                  rather than predicted here: publishBuild decides.
+                #}
+                {% if build.publishedAt %}
+                  <form method="post"
+                        action="/admin/manuscripts/{{ manuscript.id }}/builds/{{ build.id }}/withdraw">
+                    <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+                    <span class="badge badge-public">Published</span>
+                    <button type="submit">Withdraw</button>
+                  </form>
+                {% elif build.state == 'succeeded' and build.audience == 'public' %}
+                  <form method="post"
+                        action="/admin/manuscripts/{{ manuscript.id }}/builds/{{ build.id }}/publish">
+                    <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+                    <button type="submit">Publish</button>
+                  </form>
+                {% else %}
+                  <span class="muted small">—</span>
                 {% endif %}
               </td>
               <td>

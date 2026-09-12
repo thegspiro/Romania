@@ -176,6 +176,46 @@ export const FLASH_MESSAGES: Readonly<Record<string, Flash>> = Object.freeze({
     kind: 'success',
     text: 'Compilation queued. Refresh in a moment for the result.',
   },
+  build_published: {
+    kind: 'success',
+    text:
+      'This build is now the manuscript’s public download. ' +
+      'Every section in it is re-checked on each request, so unpublishing one stops the download.',
+  },
+  build_withdrawn: {
+    kind: 'success',
+    text: 'Download withdrawn. The link stops working on the next request.',
+  },
+  build_not_succeeded: {
+    kind: 'error',
+    text: 'That build has not finished compiling, so there is nothing to publish.',
+  },
+  build_no_output: {
+    kind: 'error',
+    text: 'That build produced no file. Compile it again.',
+  },
+  build_not_public_audience: {
+    kind: 'error',
+    text:
+      'That build was assembled for an administrator, so it contains private sections ' +
+      'and can never be published. Compile a public build instead.',
+  },
+  build_manuscript_not_public: {
+    kind: 'error',
+    text: 'Publish the manuscript itself before offering a download of it.',
+  },
+  build_no_recorded_items: {
+    kind: 'error',
+    text:
+      'This build predates the record of what went into it, so its contents cannot be ' +
+      're-checked. Compile it again and publish the new build.',
+  },
+  build_contains_unpublished: {
+    kind: 'error',
+    text:
+      'Something this build was compiled from is no longer published, so the file would ' +
+      'disclose it. Compile it again, or publish those sections first.',
+  },
 
   geocode_queued: {
     kind: 'success',

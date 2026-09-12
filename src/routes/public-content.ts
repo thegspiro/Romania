@@ -39,7 +39,8 @@ import {
   listEventsMentionedBy,
   listEventsRelatedTo,
 } from '../content/timeline.js';
-import { findServableFile } from '../files/repository.js';
+import { BUILD_MEDIA, findPublicDownload } from '../content/builds.js';
+import { findFileObject, findServableFile } from '../files/repository.js';
 import { resolveStoragePath } from '../files/storage.js';
 import { findMappablePlace } from '../content/places.js';
 import { parseSlug } from './form.js';
@@ -331,9 +332,58 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
         abstractHtml:
           manuscript.abstractMarkdown === null ? null : renderFragment(manuscript.abstractMarkdown),
         wordCount: sections.reduce((total, section) => total + section.wordCount, 0),
+        // What a visitor may download, asked exactly as the download route
+        // asks it -- so an administrator sees the link only when there really
+        // is one, rather than a link that 404s for everybody else.
+        download: await findPublicDownload(pool, slug),
         canonicalUrl: `${config.PUBLIC_BASE_URL}${manuscript.href}`,
       },
       { noindex: manuscript.noindex || manuscript.visibility !== 'public' },
+    );
+  });
+
+  /**
+   * The manuscript's published download, if it has one.
+   *
+   * A compiled file is written once and then never revisited, so this route
+   * asks everything again on every request: `findPublicDownload` re-checks the
+   * manuscript, the build, and every section that went into the document. Any
+   * one of them no longer published means null, and null means 404 -- never a
+   * 403, which would confirm that a manuscript exists at this slug.
+   *
+   * Deliberately not `/files/:id/:variant`: no artifact or source owns a
+   * compiled build, so that route 404s for one, and this is the only door.
+   */
+  app.get('/manuscripts/:slug/download', async (request, reply) => {
+    const slug = parseSlug(request);
+
+    const build = await findPublicDownload(pool, slug);
+    if (build === null || build.fileObjectId === null) throw notFound(`download for ${slug}`);
+
+    const file = await findFileObject(pool, build.fileObjectId);
+    if (file === null) throw notFound(`download for ${slug} is missing`);
+
+    const path = resolveStoragePath(config.STORAGE_ROOT, file.storageKey);
+    try {
+      await stat(path);
+    } catch {
+      throw notFound(`download for ${slug} is missing from storage`);
+    }
+
+    const media = BUILD_MEDIA[build.format];
+
+    return (
+      reply
+        .type(media.mimeType)
+        // attachment, not inline: an HTML build rendered in place would run in
+        // this origin, and a compiled document is meant to be saved anyway.
+        .header('Content-Disposition', `attachment; filename="${slug}.${media.extension}"`)
+        // Never cached by a shared cache. The bytes are public now and the
+        // answer is recomputed per request; a proxy holding them would go on
+        // serving a document after a section was withdrawn.
+        .header('Cache-Control', 'private, no-store')
+        .header('X-Content-Type-Options', 'nosniff')
+        .send(createReadStream(path))
     );
   });
 

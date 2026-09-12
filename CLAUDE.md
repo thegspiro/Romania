@@ -400,11 +400,38 @@ assembly rather than against the rewrite in isolation -- the defect was in what
 
 A compiled file holds many sections at once, so it is the one place a mistake
 would leak everything. `manuscript_build.audience` records what it was
-assembled for; a `public` build is assembled with `ANONYMOUS`, and the
-download route requires an authenticated administrator. Compiled outputs are
-deliberately not reachable through `/files/:id/:variant` — no artifact owns
+assembled for; a `public` build is assembled with `ANONYMOUS`. Compiled outputs
+are deliberately not reachable through `/files/:id/:variant` — no artifact owns
 them, so that route 404s for them, which is the intended behaviour and is
 tested.
+
+**A compiled document is downloadable only after it is published, and only
+while everything inside it still is.** Compiling makes nothing public. An
+administrator publishes one build, and `publishBuild` — not the route — holds
+every condition: it succeeded, it produced bytes, it was assembled for
+`public`, the manuscript itself is published, it records what went into it,
+and none of those items has since been withdrawn. `manuscript_published_build`
+is keyed on the manuscript, so "at most one published build" is a primary key
+rather than a rule someone has to remember; publishing a newer one replaces the
+older, which is what a reader following a stable URL should get.
+
+`manuscript_build_item` is the record of what was assembled, written in the
+same transaction as the build row, and `/manuscripts/:slug/download` re-checks
+every one of those items on **every request** — invariant 3 applied to a file
+that was written once. Two decisions ride on it:
+
+- It has **no foreign key to `content_item`**. A cascade would delete the row
+  when the chapter was deleted, leaving a build that appears to contain fewer
+  items and is therefore _more_ servable. Without the key a deleted chapter
+  fails the re-check instead.
+- A build with **no recorded items cannot be published at all**. That is how a
+  document compiled before the withholding fix is kept out of public reach
+  without a version flag to remember: recompiling is the way forward, and
+  recompiling is also what rewrites its withheld references.
+
+Every refusal and every failed re-check answers 404, never 403. The admin
+download route is unchanged and still serves any build, published or not, to an
+authenticated administrator.
 
 ---
 
@@ -509,8 +536,10 @@ comments explaining which is which.
   by `scripts/vendor-assets.mjs`, so no third party sees a visitor's IP.
 - Write to `mention` or `citation` from anywhere but `rebuildReferences`. A
   hand-edited projection is a listing that no longer matches the prose.
-- Serve a compiled build to anyone but an authenticated administrator, or
-  assemble a `public` build with anything but `ANONYMOUS`.
+- Serve a compiled build to anyone but an authenticated administrator, unless
+  it is the manuscript's published build and `findPublicDownload` has just
+  re-checked every item in it. Never assemble a `public` build with anything
+  but `ANONYMOUS`, and never publish a build whose `audience` is `admin`.
 - Put a visibility decision, or reference parsing, into `worker/`.
 - Leave a gap or a "withheld" placeholder where a private section was filtered
   out of a listing. The absence must be indistinguishable from never having
@@ -587,37 +616,37 @@ the properties being asserted actually live.
 
 ## Where things are
 
-| Concern                                 | File                                |
-| --------------------------------------- | ----------------------------------- |
-| Who may see what                        | `src/content/visibility.ts`         |
-| Share links, tokens, reviewer comments  | `src/content/sharing.ts`            |
-| The reviewer's routes                   | `src/routes/review.ts`              |
-| Config validation                       | `src/config.ts`                     |
-| Chicago rendering, HTML sanitising      | `src/citations/render.ts`           |
-| CSL-JSON model, form mapping            | `src/citations/csl.ts`              |
-| Passkey ceremonies                      | `src/auth/webauthn.ts`              |
-| Sessions, CSRF comparison, IP packing   | `src/auth/session.ts`               |
-| Security headers, CSP, robots policy    | `src/http/security.ts`              |
-| Request lifecycle                       | `src/http/server.ts`                |
-| Slugs (mirrored in Python)              | `src/content/slug.ts`               |
-| Reference syntax, context extraction    | `src/content/references.ts`         |
-| Prose → HTML, the visible/not decision  | `src/content/markdown.ts`           |
-| Projections and backlinks               | `src/content/mentions.ts`           |
-| Corpus export, portable formats         | `src/content/export.ts`             |
-| Corpus-wide search, snippets            | `src/content/search.ts`             |
-| Mappable places, geocode queueing       | `src/content/places.ts`             |
-| Essay revisions, restore rules          | `src/content/essays.ts`             |
-| Line diff for the comparison view       | `src/content/diff.ts`               |
-| Outline, navigation, assembly           | `src/content/manuscripts.ts`        |
-| Build records, staging, enqueue         | `src/content/builds.ts`             |
-| Graph traversal with per-hop filtering  | `src/content/graph.ts`              |
-| Dates, chronological reads, the band    | `src/content/timeline.ts`           |
-| Path safety, magic bytes, hashing       | `src/files/storage.ts`              |
-| Access-checked file lookup, file owners | `src/files/repository.ts`           |
-| Zotero sync, link and merge rules       | `worker/jobs/zotero_sync.py`        |
-| Sync queueing and state for the admin   | `src/content/zotero.ts`             |
-| Job runner                              | `worker/runner.py`                  |
-| Pandoc invocation                       | `worker/jobs/manuscript_compile.py` |
+| Concern                                     | File                                |
+| ------------------------------------------- | ----------------------------------- |
+| Who may see what                            | `src/content/visibility.ts`         |
+| Share links, tokens, reviewer comments      | `src/content/sharing.ts`            |
+| The reviewer's routes                       | `src/routes/review.ts`              |
+| Config validation                           | `src/config.ts`                     |
+| Chicago rendering, HTML sanitising          | `src/citations/render.ts`           |
+| CSL-JSON model, form mapping                | `src/citations/csl.ts`              |
+| Passkey ceremonies                          | `src/auth/webauthn.ts`              |
+| Sessions, CSRF comparison, IP packing       | `src/auth/session.ts`               |
+| Security headers, CSP, robots policy        | `src/http/security.ts`              |
+| Request lifecycle                           | `src/http/server.ts`                |
+| Slugs (mirrored in Python)                  | `src/content/slug.ts`               |
+| Reference syntax, context extraction        | `src/content/references.ts`         |
+| Prose → HTML, the visible/not decision      | `src/content/markdown.ts`           |
+| Projections and backlinks                   | `src/content/mentions.ts`           |
+| Corpus export, portable formats             | `src/content/export.ts`             |
+| Corpus-wide search, snippets                | `src/content/search.ts`             |
+| Mappable places, geocode queueing           | `src/content/places.ts`             |
+| Essay revisions, restore rules              | `src/content/essays.ts`             |
+| Line diff for the comparison view           | `src/content/diff.ts`               |
+| Outline, navigation, assembly               | `src/content/manuscripts.ts`        |
+| Build records, staging, enqueue, publishing | `src/content/builds.ts`             |
+| Graph traversal with per-hop filtering      | `src/content/graph.ts`              |
+| Dates, chronological reads, the band        | `src/content/timeline.ts`           |
+| Path safety, magic bytes, hashing           | `src/files/storage.ts`              |
+| Access-checked file lookup, file owners     | `src/files/repository.ts`           |
+| Zotero sync, link and merge rules           | `worker/jobs/zotero_sync.py`        |
+| Sync queueing and state for the admin       | `src/content/zotero.ts`             |
+| Job runner                                  | `worker/runner.py`                  |
+| Pandoc invocation                           | `worker/jobs/manuscript_compile.py` |
 
 ### The published image
 
@@ -679,8 +708,13 @@ both stay green — which two hand-kept copies could not actually guarantee.
 
 ## What is deliberately not built yet
 
-Public downloads of compiled documents (`manuscript_build.audience` is what makes
-that a config change rather than a rewrite); an S3 storage backend.
+An S3 storage backend.
+
+Public downloads of compiled documents used to be listed here, with a note that
+`manuscript_build.audience` made it a config change rather than a rewrite. That
+turned out to be half true: the column was the right place to start from, and
+the work was in the two rules around it -- an explicit publish action, and a
+record of what went into each document so every request can re-check it.
 
 A search service such as Meilisearch remains the one **side-cart** candidate,
 and nothing needs it today. Corpus-wide search shipped as `src/content/search.ts`

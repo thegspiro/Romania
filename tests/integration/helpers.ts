@@ -150,6 +150,8 @@ export async function createHarness(overrides: Record<string, string> = {}): Pro
 export async function truncateContent(pool: Pool): Promise<void> {
   await execute(pool, 'SET FOREIGN_KEY_CHECKS = 0');
   for (const table of [
+    'manuscript_build_item',
+    'manuscript_published_build',
     'manuscript_build',
     'manuscript_section',
     'source_zotero_link',

@@ -46,7 +46,7 @@ What is built and working:
 | **Corpus export** — Markdown, CSL-JSON, and a rehearsed restore           | Complete                                                                                                            |
 | **Corpus-wide search** — every kind at once, with snippets                | Complete (admin-only; a query, not an index)                                                                        |
 | **Maps** — places, with queued geocoding                                  | Complete (no basemap unless a tile host is configured)                                                              |
-| Public downloads of compiled documents                                    | **Not yet** (deliberately admin-only for now — see below)                                                           |
+| **Public downloads of compiled documents**                                | Complete (published one build at a time; re-checked on every request)                                               |
 
 Each of those is a separate change set on top of this one. The architecture
 below is what makes them additive rather than rewrites.
@@ -223,9 +223,15 @@ A compiled file is one object containing many sections, so it is the single
 place where one mistake would leak everything at once. `manuscript_build`
 records the `audience` it was assembled for — `admin` or `public` — and a
 public build is assembled with an **anonymous viewer**, so it can only contain
-what an anonymous reader could already read one page at a time. Downloads
-require an authenticated administrator; the column is what makes opening them
-up later a configuration change rather than a rewrite.
+what an anonymous reader could already read one page at a time.
+
+Compiling still makes nothing downloadable. An administrator **publishes** one
+build, deliberately, and only a succeeded `public` build of a published
+manuscript can be published at all. Each build also records which items were
+assembled into it, and the public download route re-checks every one of them on
+**every request**: unpublish a chapter and the download stops answering, with
+no trace that it was ever there. An `admin` build can never be published, and
+every refusal is a 404 rather than a 403.
 
 ### Transcriptions
 
@@ -502,8 +508,22 @@ word count, and a download link once they succeed.
 **Build for the audience you mean.** An `admin` build contains every section
 you can see, private ones included. A `public` build is assembled as an
 anonymous reader and contains only what is already published — which is the
-one to send anybody. Both are downloadable only while signed in, and the
-filename records which it was (`manuscript-public-12.pdf`).
+one to send anybody. From this page both are downloadable only while signed
+in, and the filename records which it was (`manuscript-public-12.pdf`).
+
+**Publishing a download is a separate press.** Next to a succeeded `public`
+build, _Publish_ makes it the file offered on the manuscript's own page at
+`/manuscripts/<slug>/download`; _Withdraw_ takes it away again, from the next
+request onwards. Only one build per manuscript is published at a time, so the
+address stays the same when you publish a newer one.
+
+The build has to be one this application knows the contents of, which means one
+compiled after this feature existed — an older build cannot be re-checked, so
+it cannot be published, and recompiling is the way forward. After that, every
+download re-asks the question: if a chapter inside the document is unpublished
+or deleted, the download 404s until you compile and publish again. That is
+deliberate. The bytes were written once and cannot know what you withdrew
+afterwards.
 
 If a build fails, its row carries Pandoc's stderr; the usual causes are a
 malformed YAML value on the manuscript's title-page fields and, for PDF, a TeX
