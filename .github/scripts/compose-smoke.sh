@@ -104,6 +104,42 @@ value="$(docker exec dissertation-web-1 printenv DB_PASSWORD 2>/dev/null || true
 [ -n "$value" ] || die "web lost DB_PASSWORD, which it does need"
 ok "web still holds DB_PASSWORD, which it does need"
 
+# --- a read-only root, and the holes deliberately left in it ----------------
+#
+# Asserted by writing, not by reading the flag back: `read_only: true` with a
+# volume or tmpfs in the wrong place produces a container that starts happily
+# and fails the first time it needs to write, which is exactly the failure this
+# is meant to prevent.
+for service in web worker db; do
+  flag="$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "dissertation-${service}-1")"
+  [ "$flag" = "true" ] || die "$service does not have a read-only root filesystem"
+done
+ok "web, worker and db all run on a read-only root"
+
+writable() {
+  docker exec "$1" sh -c "(: >'$2/.probe') 2>/dev/null && rm -f '$2/.probe'"
+}
+
+writable dissertation-web-1 /tmp || die "web cannot write to /tmp"
+writable dissertation-web-1 /data/files || die "web cannot write to STORAGE_ROOT"
+ok "web can still write /tmp and STORAGE_ROOT"
+
+writable dissertation-worker-1 /tmp || die "worker cannot write to /tmp"
+writable dissertation-worker-1 /data/files || die "worker cannot write to STORAGE_ROOT"
+writable dissertation-worker-1 /data/backups || die "worker cannot write to BACKUP_ROOT"
+# The one that is easy to get wrong: a volume mounted where the image creates
+# nothing arrives owned by root, and this container is not root.
+writable dissertation-worker-1 /home/node/.cache \
+  || die "worker cannot write Tectonic's cache -- every PDF would fail at runtime"
+ok "worker can write /tmp, the data directories and Tectonic's cache"
+
+# The complement: the root filesystem really is read-only, so the flag is doing
+# something rather than merely being set.
+if writable dissertation-web-1 /app; then
+  die "web can write to /app, so the read-only root is not in effect"
+fi
+ok "web cannot write to /app"
+
 # --- the operator's own commands --------------------------------------------
 $COMPOSE exec -T web /app/scripts/entrypoint.sh preflight >/tmp/preflight.out 2>&1 \
   || { cat /tmp/preflight.out >&2; die "preflight reported the install as not ready"; }

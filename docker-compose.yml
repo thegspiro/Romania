@@ -88,6 +88,13 @@ services:
     # binary reachable through a future dependency cannot regain them.
     cap_drop:
       - ALL
+    # Nothing in this role writes outside the volumes below and /tmp: uploads
+    # and derivatives go to STORAGE_ROOT, and the rest are temporary files. A
+    # read-only root turns "the code should not be writing there" into
+    # something the kernel enforces rather than something review has to notice.
+    read_only: true
+    tmpfs:
+      - /tmp
     logging:
       driver: json-file
       options: { max-size: '10m', max-file: '5' }
@@ -124,6 +131,7 @@ services:
     volumes:
       - files:/data/files
       - backups:/data/backups
+      - tectonic-cache:/home/node/.cache
     depends_on:
       db:
         condition: service_healthy
@@ -135,6 +143,16 @@ services:
     # could never legitimately use.
     cap_drop:
       - ALL
+    # Same as `web`, with one addition. Tectonic downloads TeX packages on
+    # demand and caches them under ~/.cache; with nowhere writable it fails
+    # outright on a read-only root. A volume rather than tmpfs on purpose:
+    # tmpfs would re-download after every restart, and on a host with no
+    # outbound network the first PDF after a restart would simply fail. The
+    # Dockerfile creates that directory owned by node, which is what makes the
+    # volume writable -- see the comment there.
+    read_only: true
+    tmpfs:
+      - /tmp
     logging:
       driver: json-file
       options: { max-size: '10m', max-file: '5' }
@@ -159,6 +177,14 @@ services:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD must be set in .env}
     volumes:
       - database:/var/lib/mysql
+    # The data directory is the volume above; everything else this image writes
+    # is the socket and pid file under /var/run/mysqld. Both entries below were
+    # arrived at by removing them: without /var/run/mysqld the entrypoint stops
+    # with "Unable to start server".
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/mysqld
     healthcheck:
       # `mysqladmin ping` succeeds before the server finishes initialising on
       # a first run, so the query below is used instead.
@@ -217,3 +243,6 @@ volumes:
   database:
   files:
   backups:
+  # Tectonic's package cache, kept across restarts so a compile does not
+  # re-download the TeX it already had.
+  tectonic-cache:
