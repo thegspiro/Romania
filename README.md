@@ -578,6 +578,14 @@ prunes to the newest 14 of each. Point that at a share the host itself backs
 up — a backup inside the container it protects is not a backup. To run it
 nightly, add a cron entry on the host that issues the same statement.
 
+### Updating
+
+`git pull` then `docker compose up -d --build`. The database, files and
+backups live in volumes the rebuild reattaches, and migrations are additive,
+so an update does not touch your data. [UPDATING.md](UPDATING.md) is the full
+runbook — what to back up first, how to roll back, and the two changes that
+are not ordinary updates.
+
 ### Locked out?
 
 1. **Lost your passkey** → sign in with your password and a recovery code, then
