@@ -1328,3 +1328,38 @@ button.danger {
   color: var(--ink);
   padding: 0 0.1rem;
 }
+
+/* --- Maps ---------------------------------------------------------------- */
+
+/* A height is required: Leaflet measures its container, and a container with
+   no height renders a map nobody can see. */
+.map-canvas {
+  height: 20rem;
+  margin: 1rem 0 0;
+  border: 1px solid var(--rule);
+  background: var(--accent-soft);
+}
+
+.map-canvas-large {
+  height: 32rem;
+}
+
+.map-section {
+  margin-top: 2rem;
+}
+
+.place-list {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  font-family: var(--sans);
+}
+
+.place-list li {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: baseline;
+}

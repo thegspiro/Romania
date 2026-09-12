@@ -1,0 +1,48 @@
+{#
+  One place, on a map.
+
+  Progressive enhancement, like the network above it: the coordinates are
+  already printed in the details list on this page, so nothing is lost when
+  Leaflet does not load. The container stays empty and the status line says so.
+
+  Every value the script needs arrives as a data attribute, escaped by
+  autoescape. There is no inline script and no inline style, so the CSP needs
+  no exception for this section.
+
+  With no MAP_TILE_URL configured the marker draws on a plain canvas: correct
+  relative position, no basemap, and no request to anybody but this server.
+#}
+{% if point %}
+  <section class="map-section">
+    <h2>Location</h2>
+    <p class="hint">
+      {% if point.precision == 'exact' %}
+        Located exactly.
+      {% elif point.precision == 'approximate' %}
+        Located approximately — the point marks the settlement, not a building.
+      {% elif point.precision == 'region' %}
+        Located to a region only — the point marks an area, not a site.
+      {% else %}
+        Precision unrecorded; treat the position as indicative.
+      {% endif %}
+      {% if not mapTileUrl %}
+        No basemap is configured, so only the marker is drawn.
+      {% endif %}
+    </p>
+
+    <div
+      id="place-map"
+      class="map-canvas"
+      data-latitude="{{ point.latitude }}"
+      data-longitude="{{ point.longitude }}"
+      data-title="{{ point.title }}"
+      data-precision="{{ point.precision }}"
+      data-tile-url="{{ mapTileUrl }}"
+      data-tile-attribution="{{ mapTileAttribution }}"
+      role="img"
+      aria-label="Map showing the location of {{ point.title }}"
+    ></div>
+
+    <p id="place-map-status" class="muted small" role="status"></p>
+  </section>
+{% endif %}
