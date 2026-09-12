@@ -11,7 +11,8 @@ import type { AppContext } from '../http/server.js';
 import { queryOne } from '../db/pool.js';
 import { renderPage } from '../http/context.js';
 import { badRequest, notFound } from '../http/errors.js';
-import { isVisibility } from '../content/visibility.js';
+import { isVisibility, type Viewer } from '../content/visibility.js';
+import { buildGraph, indirectConnections, type IndirectConnections } from '../content/graph.js';
 import {
   ENTITY_KINDS,
   ENTITY_LABELS,
@@ -274,6 +275,7 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
           relationships: await listRelationshipsFor(pool, id, request.viewer),
           predicateChoices: await listPredicateChoices(pool, kind),
           mentions: await listMentionsOf(pool, id, request.viewer),
+          ...(await connectionsFor(record, request.viewer)),
         },
         { noindex: true, flash: flashFor(request) },
       );
@@ -339,6 +341,7 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
             relationships: await listRelationshipsFor(pool, id, request.viewer),
             predicateChoices: await listPredicateChoices(pool, kind),
             mentions: await listMentionsOf(pool, id, request.viewer),
+            ...(await connectionsFor(existing, request.viewer)),
           },
           { status: 400, noindex: true },
         );
@@ -560,6 +563,25 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
       `${safeReturn(returnTo)}?msg=relationship_${requested === 'public' ? 'published' : 'unpublished'}`,
     );
   });
+
+  /**
+   * Two hops out, for the editor.
+   *
+   * The same pure derivation the public page uses, over a graph `buildGraph`
+   * has already filtered at every hop -- run with the administrator's own
+   * viewer, so the operator sees the private connections they are in the
+   * middle of recording rather than the published subset.
+   *
+   * No year: the editor has no year control, and narrowing the network here
+   * would answer a question nobody asked.
+   */
+  async function connectionsFor(
+    record: { id: number; kind: string; slug: string; title: string },
+    viewer: Viewer,
+  ): Promise<{ connected: IndirectConnections; graphTruncated: boolean }> {
+    const graph = await buildGraph(pool, record, viewer, 2);
+    return { connected: indirectConnections(graph), graphTruncated: graph.truncated };
+  }
 
   // --- The vocabulary ------------------------------------------------------
   //

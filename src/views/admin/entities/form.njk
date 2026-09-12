@@ -165,6 +165,17 @@
     {% set returnTo = '/admin/' + path + '/' + record.id + '/edit' %}
     {% include "partials/relationships.njk" %}
     {% include "partials/mentions.njk" %}
+    {#
+      The same second hop the public page shows, read with the administrator's
+      viewer. Useful here rather than decorative: it is where an edge worth
+      asserting becomes visible -- two people already connected through a third
+      are the pair most likely to want a relationship of their own.
+
+      Only when there is something to say, as on the public page.
+    #}
+    {% if connected.items.length > 0 %}
+      {% include "partials/connected-through.njk" %}
+    {% endif %}
 
     <form method="post" action="/admin/{{ path }}/{{ record.id }}/delete" class="danger-form">
       <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
