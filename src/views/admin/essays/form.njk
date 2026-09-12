@@ -126,6 +126,122 @@
   </form>
 
   {% if mode == 'edit' %}
+    <section class="shares">
+      <h2>Send this chapter for review</h2>
+      <p class="hint">
+        A link lets one person read <em>this chapter only</em>, without signing
+        in, until it expires. Everything else stays private to them — a person
+        or a source this chapter names is withheld from them exactly as it is
+        from any visitor.
+      </p>
+
+      <form method="post" action="/admin/essays/{{ essay.id }}/shares" class="inline-form">
+        <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+        <label for="shareLabel">For</label>
+        <input type="text" id="shareLabel" name="label" maxlength="190" placeholder="Prof. Ionescu, draft 2" />
+        <label for="expiresInDays">Expires in</label>
+        <input
+          type="number"
+          id="expiresInDays"
+          name="expiresInDays"
+          value="{{ defaultExpiryDays }}"
+          min="{{ minExpiryDays }}"
+          max="{{ maxExpiryDays }}"
+          step="1"
+        />
+        <span class="hint">days</span>
+        <button type="submit">Create link</button>
+      </form>
+
+      {% if shares.length > 0 %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th scope="col">For</th>
+              <th scope="col">Expires</th>
+              <th scope="col">Opened</th>
+              <th scope="col">State</th>
+              <th scope="col"><span class="visually-hidden">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for share in shares %}
+              <tr>
+                <td>{{ share.label if share.label else '—' }}</td>
+                <td class="muted small">{{ share.expiresAt.toISOString().slice(0, 10) }}</td>
+                <td class="muted small">
+                  {% if share.viewCount > 0 %}
+                    {{ share.viewCount }} time{{ 's' if share.viewCount != 1 }},
+                    last {{ share.lastViewedAt.toISOString().slice(0, 10) }}
+                  {% else %}
+                    Not yet
+                  {% endif %}
+                </td>
+                <td>
+                  {% if share.state == 'live' %}
+                    <span class="badge badge-public">Live</span>
+                  {% else %}
+                    <span class="badge badge-private">{{ share.state | capitalize }}</span>
+                  {% endif %}
+                </td>
+                <td class="row-actions">
+                  {% if share.state == 'live' %}
+                    <form
+                      method="post"
+                      action="/admin/essays/{{ essay.id }}/shares/{{ share.id }}/revoke"
+                      class="inline-form"
+                    >
+                      <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+                      <button type="submit" class="link-button">Revoke</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    </section>
+
+    {% if shareComments.length > 0 %}
+      <section class="share-comments">
+        <h2>
+          Comments from reviewers
+          {% if unresolvedComments > 0 %}
+            <span class="badge badge-alert">{{ unresolvedComments }} open</span>
+          {% endif %}
+        </h2>
+
+        <ol class="comment-list">
+          {% for comment in shareComments %}
+            <li class="{{ 'resolved' if comment.resolvedAt }}">
+              <p class="muted small">
+                {% if comment.blockIndex %}
+                  <a href="/essays/{{ essay.slug }}#p{{ comment.blockIndex }}">Paragraph {{ comment.blockIndex }}</a>
+                {% else %}
+                  On the chapter
+                {% endif %}
+                {% if comment.shareLabel %}· from {{ comment.shareLabel }}{% endif %}
+                · {{ comment.createdAt.toISOString().slice(0, 16) | replace('T', ' ') }}
+              </p>
+              <p>{{ comment.body }}</p>
+              <form
+                method="post"
+                action="/admin/essays/{{ essay.id }}/comments/{{ comment.id }}/resolve"
+                class="inline-form"
+              >
+                <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+                <input type="hidden" name="resolved" value="{{ 'false' if comment.resolvedAt else 'true' }}" />
+                <button type="submit" class="link-button">
+                  {{ 'Reopen' if comment.resolvedAt else 'Mark dealt with' }}
+                </button>
+              </form>
+            </li>
+          {% endfor %}
+        </ol>
+      </section>
+    {% endif %}
+
     <form method="post" action="/admin/essays/{{ essay.id }}/delete" class="danger-form">
       <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
       <h2>Delete</h2>

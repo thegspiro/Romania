@@ -37,7 +37,26 @@ import { resolveForRender, resolveTimelines } from '../content/render-context.js
 import { searchAllEntities } from '../content/entities.js';
 import { listPlacementsOf } from '../content/manuscripts.js';
 import { recordAudit } from '../content/audit.js';
-import { actorId, filterQuery, flashFor, parseId, readCheckbox, readString } from './form.js';
+import {
+  countUnresolvedComments,
+  issueShare,
+  listShareComments,
+  listShares,
+  revokeShare,
+  setCommentResolved,
+  DEFAULT_EXPIRY_DAYS,
+  MAX_EXPIRY_DAYS,
+  MIN_EXPIRY_DAYS,
+} from '../content/sharing.js';
+import {
+  actorId,
+  filterQuery,
+  flashFor,
+  parseId,
+  readCheckbox,
+  readInteger,
+  readString,
+} from './form.js';
 
 function readEssayForm(body: unknown): { input: EssayInput; errors: string[] } {
   const errors: string[] = [];
@@ -187,6 +206,15 @@ export function registerAdminEssayRoutes(admin: FastifyInstance, context: AppCon
         unresolved: [...new Set(unresolved)],
         privateCitations: [...new Set(privateCitations)],
         placements: await listPlacementsOf(pool, id, request.viewer),
+        shares: await listShares(pool, id),
+        shareComments: await listShareComments(pool, id),
+        unresolvedComments: await countUnresolvedComments(pool, id),
+        defaultExpiryDays: DEFAULT_EXPIRY_DAYS,
+        minExpiryDays: MIN_EXPIRY_DAYS,
+        maxExpiryDays: MAX_EXPIRY_DAYS,
+        // Shown once, immediately after issuing, and never again: the token is
+        // stored hashed and cannot be recovered.
+        issuedShareUrl: (request.query as { link?: string }).link ?? null,
         revisionCount: await countEssayRevisions(pool, id),
       },
       { noindex: true, flash: flashFor(request) },
@@ -280,6 +308,94 @@ export function registerAdminEssayRoutes(admin: FastifyInstance, context: AppCon
       request.log,
     );
     return reply.redirect('/admin/essays?msg=essay_deleted');
+  });
+
+  // --- Share links ---------------------------------------------------------
+
+  /**
+   * Issues a link that lets one person read one unpublished chapter.
+   *
+   * The deliberate exception to the rule the rest of the application enforces,
+   * so it is narrow on purpose: one essay, a mandatory expiry, revocable at
+   * any time, and the token is shown exactly once because only its hash is
+   * kept.
+   */
+  admin.post('/admin/essays/:id/shares', async (request, reply) => {
+    const id = parseId(request);
+    const essay = await findEssayById(pool, id, request.viewer);
+    if (essay === null) throw notFound(`essay ${id}`);
+
+    const issued = await issueShare(pool, {
+      essayId: id,
+      label: readString(request.body, 'label'),
+      expiresInDays: readInteger(request.body, 'expiresInDays', DEFAULT_EXPIRY_DAYS),
+    });
+
+    await recordAudit(
+      pool,
+      {
+        actor: actorId(request),
+        action: 'source.update',
+        itemId: id,
+        detail: {
+          kind: 'essay',
+          share: 'issued',
+          shareId: issued.share.id,
+          // The label, never the token.
+          label: issued.share.label,
+        },
+        ip: request.ip,
+      },
+      request.log,
+    );
+
+    // The token travels back in the query string so the page can show it once.
+    // It is already in the operator's browser history either way, which is why
+    // the page says to copy it and move on.
+    const url = `${config.PUBLIC_BASE_URL}/review/${issued.token}`;
+    return reply.redirect(
+      `/admin/essays/${id}/edit?msg=share_issued&link=${encodeURIComponent(url)}`,
+    );
+  });
+
+  admin.post('/admin/essays/:id/shares/:shareId/revoke', async (request, reply) => {
+    const id = parseId(request);
+    const shareId = parseId(request, 'shareId');
+
+    const essay = await findEssayById(pool, id, request.viewer);
+    if (essay === null) throw notFound(`essay ${id}`);
+    if (!(await revokeShare(pool, id, shareId))) throw notFound(`share ${shareId}`);
+
+    await recordAudit(
+      pool,
+      {
+        actor: actorId(request),
+        action: 'source.update',
+        itemId: id,
+        detail: { kind: 'essay', share: 'revoked', shareId },
+        ip: request.ip,
+      },
+      request.log,
+    );
+    return reply.redirect(`/admin/essays/${id}/edit?msg=share_revoked`);
+  });
+
+  /** Marks a reviewer's comment dealt with, or puts it back. */
+  admin.post('/admin/essays/:id/comments/:commentId/resolve', async (request, reply) => {
+    const id = parseId(request);
+    const commentId = parseId(request, 'commentId');
+
+    const essay = await findEssayById(pool, id, request.viewer);
+    if (essay === null) throw notFound(`essay ${id}`);
+
+    const resolved = readString(request.body, 'resolved') !== 'false';
+    if (!(await setCommentResolved(pool, id, commentId, resolved))) {
+      throw notFound(`comment ${commentId}`);
+    }
+
+    return reply.redirect(
+      `/admin/essays/${id}/edit?msg=${resolved ? 'comment_resolved' : 'comment_reopened'}`,
+    );
   });
 
   // --- Revisions -----------------------------------------------------------

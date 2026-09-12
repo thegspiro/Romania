@@ -27,6 +27,7 @@ What is built and working:
 | Schema for all entity types                                               | Complete (sources, artifacts, essays, people, organizations, places, events, relationships, citations, tags, files) |
 | **Sources** — admin CRUD, publish/unpublish, public pages                 | Complete (a source can hold the scan or PDF of the work itself)                                                     |
 | **Essays** — Markdown editor, reference picker, server-rendered preview   | Complete                                                                                                            |
+| **Share links** — one chapter to a supervisor, with anchored comments     | Complete (expiring, revocable, one essay each)                                                                      |
 | **Revision history** — every save recorded, compared and restorable       | Complete (append-only; restoring writes a new revision)                                                             |
 | **People, organizations, places, events** — admin CRUD and public pages   | Complete                                                                                                            |
 | **Artifacts** — catalogue records, file upload, access-controlled serving | Complete (with a transcription, which is prose and links like any other)                                            |
@@ -330,6 +331,42 @@ lossy for exactly the things a dissertation depends on — footnotes, citations,
 floats, tracked changes — so DOCX is produced from the same source directly.
 
 ---
+
+### Sending a chapter to a supervisor
+
+Humanities supervision runs on a draft and a reply. Without a way to do that
+here, the real draft leaves for Word and this becomes the place a stale copy
+lives — so the editor can issue a **share link**: one URL that lets one person
+read one unpublished chapter without signing in.
+
+This is the single deliberate exception to the rule the rest of the application
+enforces, so it is kept narrow on purpose:
+
+- **One essay per link.** Not a manuscript, not a set. A leaked URL exposes one
+  chapter.
+- **The link widens exactly one item.** A person, a source or another essay
+  that the chapter names stays withheld from the holder exactly as it would
+  from any visitor — the reviewer is a `Viewer` like any other, and
+  `visibilityFilter` decides what they see.
+- **Expiry is mandatory**, between 1 and 180 days, and **revocation takes
+  effect on the next request** rather than at the deadline.
+- **The token is shown once.** Only `sha256(token)` is stored, the same
+  contract as a session token and a recovery code, so a dump of the table lets
+  nobody read anything.
+- **Unknown, expired and revoked links all answer 404**, identically.
+  Distinguishing them would say whether a chapter exists behind a guess.
+- Responses are `no-store`, `noindex`, and `Referrer-Policy: no-referrer` —
+  the credential is in the URL, so it must not be handed to anything the page
+  links to. `/review/` is disallowed in `robots.txt` even when indexing is on.
+
+The reviewer comments by paragraph number, anchored to the same `#pN` numbering
+backlinks use, so a comment lands beside the paragraph it was about and editing
+elsewhere does not move it. Comments appear on the editor, can be marked dealt
+with, and **survive revocation of the link that carried them** — the feedback
+is worth more than the link.
+
+> Treat a share link like a password. Anyone holding it can read the chapter
+> until it expires or you revoke it.
 
 ## Security
 

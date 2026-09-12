@@ -155,6 +155,8 @@ export async function truncateContent(pool: Pool): Promise<void> {
     'source_zotero_link',
     'zotero_library_state',
     'manuscript_detail',
+    'essay_share_comment',
+    'essay_share',
     'essay_revision',
     'mention',
     'citation',

@@ -33,6 +33,17 @@ Rules that follow:
 - New content defaults to `private` in the schema. Do not change that default.
 - A visibility filter supplied by a query string is honoured only for an
   administrator — otherwise `?visibility=private` becomes an enumeration tool.
+- There is **one** exception, and it lives inside the chokepoint rather than
+  around it: a `share` viewer. A valid share link widens `visibilityFilter` by
+  exactly one content item id and nothing else, so a private person, source or
+  essay named in the shared chapter stays withheld from the holder. It is
+  expressed as a `Viewer` kind on purpose — a share served by a read that
+  skipped the filter would mean two answers to "may this viewer see this?", and
+  only one of them auditable. `tests/integration/share-links.test.ts` pins the
+  widening and what it does not reach.
+- `canView` deliberately does **not** honour a share viewer's extra id. It is
+  asked about reference targets, and the answer for a link holder is the same
+  as for a visitor: only if published.
 
 ---
 
@@ -221,6 +232,23 @@ a call number out of every footnote while the column still showed it. Do not
 
 A deletion in Zotero sets `deleted_in_zotero_at` and stops. Deleting the source
 would leave a dangling `[[cite:...]]` in prose already written.
+
+**A share link is a credential, and `resolveShare` is the only door.** It
+hashes the token, looks it up, and refuses expired and revoked links; every
+caller goes through it, so the two checks cannot be remembered at one call site
+and forgotten at another. The refusal reason is logged and never returned --
+unknown, expired and revoked all answer 404, because distinguishing them says
+whether a chapter exists behind a guessed token.
+
+- Only `sha256(token)` is stored, like a session token and a recovery code.
+  The token is returned once, by `issueShare`, and cannot be recovered.
+- `essay_share_comment.share_id` is ON DELETE SET NULL, not CASCADE: revoking
+  a link must not delete the feedback that came through it.
+- `block_index` on a comment is an anchor, not a foreign key. Prose is edited,
+  and a comment whose paragraph is gone is shown unanchored rather than
+  discarded.
+- `/review/` responses are `no-store` and `no-referrer`. The credential is in
+  the URL, so a referrer header would hand it to every host the page links to.
 
 **Manuscripts are a flat ordered list with a depth column**, not a
 self-referencing tree. Ordering, prev/next, subtree moves and compilation are
@@ -422,6 +450,8 @@ the properties being asserted actually live.
 | Concern                                 | File                                |
 | --------------------------------------- | ----------------------------------- |
 | Who may see what                        | `src/content/visibility.ts`         |
+| Share links, tokens, reviewer comments  | `src/content/sharing.ts`            |
+| The reviewer's routes                   | `src/routes/review.ts`              |
 | Config validation                       | `src/config.ts`                     |
 | Chicago rendering, HTML sanitising      | `src/citations/render.ts`           |
 | CSL-JSON model, form mapping            | `src/citations/csl.ts`              |
