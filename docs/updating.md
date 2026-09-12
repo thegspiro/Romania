@@ -68,12 +68,15 @@ Run everything from the directory holding `docker-compose.yml` and your
 
 ### 1. Back up, and confirm the backup exists
 
-Enqueue the job:
-
 ```sh
-docker compose exec db mysql -u root -p"$DB_ROOT_PASSWORD" dissertation \
-  -e "INSERT INTO job (kind, payload) VALUES ('backup.run', '{\"keep\": 14}')"
+docker compose exec web /app/scripts/entrypoint.sh admin enqueue-backup
 ```
+
+That queues the job the worker performs. `--keep <n>` sets how many of each
+kind to retain (default 14); `--no-files` backs up the database only. It
+refuses to stack a second job while one is pending or running, and says so
+rather than queueing another — so a nightly cron and a pre-update backup by
+hand cannot end up holding two `mysqldump`s open at once.
 
 The worker picks it up on its next poll and writes `database-<stamp>.sql.gz`
 and `files-<stamp>.tar.gz` to `BACKUP_ROOT`. **It is asynchronous**, so do not
@@ -81,15 +84,13 @@ move on until it has finished — restarting the stack mid-dump kills the backup
 you are relying on:
 
 ```sh
-docker compose exec db mysql -u root -p"$DB_ROOT_PASSWORD" dissertation \
-  -e "SELECT id, state, attempts, last_error FROM job WHERE kind='backup.run' ORDER BY id DESC LIMIT 1"
-
+docker compose logs --tail=20 worker
 docker compose exec web ls -lh /data/backups
 ```
 
-Wait for `state` to read `succeeded`. A file still named `.partial` means the
-dump is mid-write; the job renames only after a complete, successful one, so a
-partial file is never mistaken for a good backup.
+You want both files present with a recent timestamp. A file still named
+`.partial` means the dump is mid-write; the job renames only after a complete,
+successful one, so a partial file is never mistaken for a good backup.
 
 If the worker is not running — which is exactly when you are most likely to be
 updating — dump directly instead:
@@ -102,16 +103,13 @@ docker compose exec db sh -c \
 ```
 
 `--single-transaction` gives a consistent snapshot without locking the site
-out; every table is InnoDB.
+out; every table is InnoDB. This is the one step here that still needs the
+database's root password; `enqueue-backup` exists so the ordinary path does
+not.
 
 **Copy the backup off the machine** if it is not already replicated. A copy
 sitting in the same appdata directory as the database it protects is not a
 backup.
-
-> If you run the database elsewhere — RDS, Cloud SQL — there is no `db`
-> service to exec into. Connect with your own client and run the same
-> statements, or use the web container's MySQL client:
-> `docker compose exec web mysql -h "$DB_HOST" -u "$DB_USER" -p "$DB_NAME" -e "…"`.
 
 ### 2. Record where you are
 
@@ -358,10 +356,18 @@ next `git pull` will fight with.
 ## Keeping backups running between updates
 
 The backup job is enqueued, not scheduled — nothing in the container runs cron.
-On Unraid, add the `INSERT` from step 1 to a User Scripts entry on a nightly
-schedule; on another host, a host crontab line issuing the same statement does
-the same thing. The job prunes to the newest `keep` of each kind, so it will
-not fill the share.
+Put the command from step 1 on a schedule the host keeps: a User Scripts entry
+on Unraid, a crontab line anywhere else.
+
+```sh
+cd /path/to/the/clone && docker compose exec -T web \
+  /app/scripts/entrypoint.sh admin enqueue-backup --keep 14
+```
+
+`-T` because cron has no TTY. The job prunes to the newest `keep` of each kind,
+so it will not fill the share, and `enqueue-backup` declines to stack a second
+job while one is still running — so a nightly entry firing during a long dump
+is harmless.
 
 A pre-update backup you took by hand should never be your only one.
 
@@ -374,9 +380,13 @@ Nothing above changes, with two notes:
 - Run it from the clone (`/mnt/user/appdata/dissertation/repo` in
   [`unraid.md`](unraid.md)), not from a Compose Manager project directory on
   the flash drive.
-- Your `docker-compose.override.yml` is gitignored, so the pull will not touch
-  your bind mounts. Ownership does not need re-applying unless you have run
-  Docker Safe New Permissions since the last start.
+- Pass the Unraid overlay on every command —
+  `-f docker-compose.yml -f docker-compose.unraid.yml`, or set `COMPOSE_FILE`
+  once as [`unraid.md`](unraid.md) shows. A rebuild that forgets it points the
+  stack back at the named volumes, and the site returns looking empty because
+  it is talking to a different, blank database.
+- Ownership does not need re-applying unless you have run Docker Safe New
+  Permissions since the last start.
 
 ## When the database is managed elsewhere
 

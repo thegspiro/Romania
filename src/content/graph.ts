@@ -327,3 +327,176 @@ export async function buildGraph(
 
   return { centre: centre.id, year, nodes: [...nodes.values()], edges: kept, truncated };
 }
+
+// --- Two hops out ----------------------------------------------------------
+
+/**
+ * How many indirect connections a page lists, and how many routes it shows for
+ * each. Both are presentation limits, not visibility ones -- what is omitted
+ * here was already visible, and the page says it is showing part.
+ */
+const MAX_CONNECTIONS = 25;
+const MAX_ROUTES = 4;
+
+/**
+ * One side of a two-hop route, stated in the direction it was asserted.
+ *
+ * Both ends are named rather than one, so a hop reads correctly whichever way
+ * its edge points and no inverse wording is needed. That keeps this text a
+ * transcription of the drawing rather than a second phrasing of it -- the
+ * inverse belongs to `listRelationshipsFor`, which reads an edge from one
+ * item's point of view instead of drawing it.
+ */
+export interface ConnectionHop {
+  from: { title: string; href: string };
+  to: { title: string; href: string };
+  /** The edge's own reading, role and period folded in, as the drawing shows. */
+  label: string;
+  relation: 'asserted' | 'mentioned';
+}
+
+/** One way through: the item in the middle, and the hop on either side of it. */
+export interface ConnectionRoute {
+  through: GraphNode;
+  /** Centre to intermediary, then intermediary to the far item. */
+  hops: ConnectionHop[];
+}
+
+export interface IndirectConnection {
+  node: GraphNode;
+  routes: ConnectionRoute[];
+  /** Routes past the per-connection cap, so the page can say there are more. */
+  moreRoutes: number;
+}
+
+export interface IndirectConnections {
+  items: IndirectConnection[];
+  /** How many there were before the cap. */
+  total: number;
+}
+
+/** Enough to tell two edges of one graph apart; the pair and period are unique. */
+function edgeKey(edge: GraphEdge): string {
+  return `${edge.relation}:${String(edge.source)}:${String(edge.target)}:${edge.display}`;
+}
+
+/** Deterministic across platforms, where `localeCompare` is not. */
+function byText(left: string, right: string): number {
+  if (left < right) return -1;
+  return left > right ? 1 : 0;
+}
+
+/** A route of two asserted edges is a stronger claim than one built on prose. */
+function routeWeight(route: ConnectionRoute): number {
+  return route.hops.filter((hop) => hop.relation === 'asserted').length;
+}
+
+/**
+ * Items two hops from the centre, and what connects them.
+ *
+ * This is the reading the network view has always had and the page never did:
+ * "these two were both in that ministry" is the sort of thing a corpus knows
+ * and nobody typed. Until now it existed only as JSON handed to Cytoscape, so
+ * it could not be read without JavaScript, searched in the page, or printed.
+ *
+ * **Nothing here decides visibility, and nothing here queries.** It is a pure
+ * derivation from a `Graph` that `buildGraph` already filtered at every hop:
+ * a private node is never traversed *through*, so an item reachable only via
+ * one is simply not in the graph, and is therefore not in this list -- with no
+ * gap where it was. Adding a query here would put a second copy of the rule
+ * outside the chokepoint; do not.
+ *
+ * A node at distance 2 is by construction not also a direct neighbour -- the
+ * walk would have given it distance 1 -- so "indirect" needs no separate test.
+ */
+export function indirectConnections(
+  graph: Graph,
+  options: { limit?: number; routes?: number } = {},
+): IndirectConnections {
+  const limit = Math.min(Math.max(Math.trunc(options.limit ?? MAX_CONNECTIONS), 1), 200);
+  const routeLimit = Math.min(Math.max(Math.trunc(options.routes ?? MAX_ROUTES), 1), 20);
+
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+
+  // Edges indexed by both endpoints, so stepping from one node to the next is
+  // a lookup rather than a scan of every edge for every node.
+  const incident = new Map<number, GraphEdge[]>();
+  for (const edge of graph.edges) {
+    for (const id of [edge.source, edge.target]) {
+      const found = incident.get(id);
+      if (found === undefined) incident.set(id, [edge]);
+      else found.push(edge);
+    }
+  }
+
+  function otherEnd(edge: GraphEdge, id: number): number {
+    return edge.source === id ? edge.target : edge.source;
+  }
+
+  function hopOf(edge: GraphEdge): ConnectionHop | null {
+    const from = nodes.get(edge.source);
+    const to = nodes.get(edge.target);
+    if (from === undefined || to === undefined) return null;
+    return {
+      from: { title: from.title, href: from.href },
+      to: { title: to.title, href: to.href },
+      label: edge.display,
+      relation: edge.relation,
+    };
+  }
+
+  const found: { node: GraphNode; routes: ConnectionRoute[] }[] = [];
+
+  for (const far of graph.nodes) {
+    if (far.distance !== 2) continue;
+
+    const routes: ConnectionRoute[] = [];
+    const seen = new Set<string>();
+
+    for (const second of incident.get(far.id) ?? []) {
+      const middle = nodes.get(otherEnd(second, far.id));
+      // Only a direct neighbour can be the item in the middle. At depth 3 the
+      // far node also has edges to its own peers, which are not routes home.
+      if (middle === undefined || middle.distance !== 1) continue;
+
+      for (const first of incident.get(middle.id) ?? []) {
+        if (otherEnd(first, middle.id) !== graph.centre) continue;
+
+        const key = `${edgeKey(first)}|${edgeKey(second)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const firstHop = hopOf(first);
+        const secondHop = hopOf(second);
+        if (firstHop === null || secondHop === null) continue;
+        routes.push({ through: middle, hops: [firstHop, secondHop] });
+      }
+    }
+
+    if (routes.length === 0) continue;
+    routes.sort(
+      (left, right) =>
+        routeWeight(right) - routeWeight(left) || byText(left.through.title, right.through.title),
+    );
+    found.push({ node: far, routes });
+  }
+
+  // Most-connected first: several ways through is the finding, and burying it
+  // alphabetically is what made this material invisible in the first place.
+  found.sort(
+    (left, right) =>
+      right.routes.length - left.routes.length ||
+      right.routes.filter((route) => routeWeight(route) === 2).length -
+        left.routes.filter((route) => routeWeight(route) === 2).length ||
+      byText(left.node.title, right.node.title),
+  );
+
+  return {
+    items: found.slice(0, limit).map((entry) => ({
+      node: entry.node,
+      routes: entry.routes.slice(0, routeLimit),
+      moreRoutes: Math.max(entry.routes.length - routeLimit, 0),
+    })),
+    total: found.length,
+  };
+}

@@ -66,41 +66,43 @@ By default the compose file uses Docker named volumes, which live inside
 `/var/lib/docker` — on Unraid that is the Docker vDisk image, which is not what
 your array backs up and is not sized for a research corpus.
 
-Point the data at real paths instead. **Do this in an override file, not by
-editing `docker-compose.yml`**, so that `git pull` at update time does not
-conflict with your local changes:
+The repository ships an Unraid overlay for exactly this. Add it on the command
+line rather than editing anything:
 
 ```sh
-cat > docker-compose.override.yml <<'YAML'
-services:
-  web:
-    volumes:
-      - /mnt/user/appdata/dissertation/files:/data/files
-      - /mnt/user/backups/dissertation:/data/backups
-  worker:
-    volumes:
-      - /mnt/user/appdata/dissertation/files:/data/files
-      - /mnt/user/backups/dissertation:/data/backups
-  db:
-    volumes:
-      - /mnt/user/appdata/dissertation/mysql:/var/lib/mysql
-YAML
+docker compose -f docker-compose.yml -f docker-compose.unraid.yml up -d --build
 ```
 
-Compose reads `docker-compose.override.yml` automatically alongside
-`docker-compose.yml`, so nothing tracked has to change and the next `git pull`
-has nothing to conflict with. The file is gitignored as local configuration.
+`docker-compose.unraid.yml` points `/data/files`, `/data/backups` and MySQL's
+data directory at `/mnt/user` paths. Compose merges a service's volumes by
+target path, so each entry replaces the named volume at that path rather than
+adding a second mount beside it.
 
-A few notes on the paths themselves:
+It is committed on purpose: running on Unraid is then a flag on the command
+line rather than an edit to `docker-compose.yml`, which would conflict on every
+`git pull` — and leave you resolving a merge in the file that defines your
+deployment, at the worst possible moment.
 
-- **`files` and `mysql` belong on the cache pool.** `appdata` is normally a
-  cache-only share. MySQL on a spun-up array disk is slow and keeps disks awake.
-- **`backups` belongs somewhere the host itself backs up** — an array share
-  covered by your backup plugin, or one that replicates off the machine. A
-  backup stored inside the machine it protects is not a backup.
-- **`web` and `worker` must share the same `/data/files` path.** Compilation
-  hands work across that volume: the web app writes the assembled Markdown and
-  the worker reads it back. Keep both mounts identical.
+Edit that file if your shares differ. Two things about the paths matter:
+
+- **`files` and `mysql` belong on fast storage.** `appdata` is normally a
+  cache-only share. MySQL on an array disk, behind the parity calculation, is
+  noticeably slower than the same database on the cache pool.
+- **`web` and `worker` must keep the same `/data/files`.** Compilation hands
+  work across that volume: the web app writes the assembled Markdown and the
+  worker reads it back. Change both or neither.
+
+Since you will pass both files every time, it is worth making that the default
+for the shell you deploy from:
+
+```sh
+export COMPOSE_FILE=docker-compose.yml:docker-compose.unraid.yml
+```
+
+Every `docker compose` command in these pages then works as written. Without
+it, remember the `-f` pair on **every** invocation — a `docker compose up -d`
+that forgets them silently reverts to the named volumes, and the site comes
+back up looking empty because it is pointed at a different, blank database.
 
 ## 4. Run the containers as Unraid's own user
 
@@ -244,14 +246,19 @@ exposed on the LAN over plain HTTP.
 
 ## Backups
 
-Enqueue a backup as [the README describes](../README.md#backups). The worker
-writes a compressed dump and a file archive to `BACKUP_ROOT` and prunes to the
-newest 14 of each.
+```sh
+docker compose exec web /app/scripts/entrypoint.sh admin enqueue-backup
+```
+
+The worker writes a compressed dump and a file archive to `BACKUP_ROOT` and
+prunes to the newest 14 of each.
 
 Because `BACKUP_ROOT` is a share in the layout above, Unraid's own backup
-tooling — the Appdata Backup plugin, a `rsync` User Script, or an unassigned
-device — can take it off the machine from there. To run the backup nightly, add
-a User Script on the schedule you want that issues the same statement.
+tooling — the Appdata Backup plugin, an `rsync` User Script, or an unassigned
+device — can take it off the machine from there. To run it nightly, put the
+same command in a User Script on the schedule you want; see
+[`updating.md`](updating.md#keeping-backups-running-between-updates) for the
+exact line.
 
 ---
 
@@ -259,8 +266,9 @@ a User Script on the schedule you want that issues the same statement.
 
 See [`updating.md`](updating.md). The short version on Unraid: back up first and
 wait for it to finish, then `git pull && docker compose up -d --build` from the
-clone. Your `docker-compose.override.yml` is untracked, so the pull will not
-touch it.
+clone. `docker-compose.unraid.yml` is tracked, so a pull may update it —
+harmless unless you edited your share paths into it, in which case git will
+say so rather than overwrite them.
 
 ---
 

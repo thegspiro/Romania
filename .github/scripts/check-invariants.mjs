@@ -199,6 +199,82 @@ if (distinct.size > 1) {
   }
 }
 
+// --- Secrets the web service must not be handed ----------------------------
+
+// `env_file: [.env]` hands the whole file to every service that uses it, so a
+// credential added for the worker reaches the internet-facing container too --
+// readable from /proc and from `docker inspect` whether or not any code there
+// reads it. That is not hypothetical: the Zotero key arrived this way, while
+// CLAUDE.md said the web service never holds it.
+//
+// So every secret-looking variable .env.example documents must be either read
+// by src/ or explicitly emptied in the `web` service. Adding the next
+// worker-only credential then fails here until somebody decides which it is.
+const SECRET_SUFFIX = /(_KEY|_PASSWORD|_SECRET|_TOKEN)$/;
+
+/** The `web:` service block, by indentation -- no YAML parser needed. */
+function webServiceBlock(contents) {
+  const lines = contents.split('\n');
+  const start = lines.findIndex((line) => /^ {2}web:\s*$/.test(line));
+  if (start === -1) return null;
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => /^ {2}\S/.test(line));
+  return (end === -1 ? rest : rest.slice(0, end)).join('\n');
+}
+
+const composePath = join(ROOT, 'docker-compose.yml');
+const webBlock = webServiceBlock(readFileSync(composePath, 'utf8'));
+if (webBlock === null) {
+  fail(composePath, 1, 'no `web:` service found; this check needs updating.');
+} else {
+  // Names src/ actually LOOKS UP, not names it merely mentions. The first
+  // version of this check asked whether the string appeared anywhere under
+  // src/, and ZOTERO_API_KEY appears in a help message on the sources page --
+  // so the one leak that motivated the check was the one case it passed.
+  const ENV_LOOKUP =
+    /(?:read|readSecret)\(\s*env\s*,\s*'([A-Z][A-Z0-9_]*)'|process\.env(?:\.([A-Z][A-Z0-9_]*)|\[\s*'([A-Z][A-Z0-9_]*)')/g;
+
+  const readByWeb = new Set();
+  for (const file of walk(join(ROOT, 'src'), '.ts')) {
+    const contents = readFileSync(file, 'utf8');
+    for (const match of contents.matchAll(ENV_LOOKUP)) {
+      const name = match[1] ?? match[2] ?? match[3];
+      if (name !== undefined) readByWeb.add(name);
+    }
+  }
+
+  const documented = new Set();
+  const envExample = join(ROOT, '.env.example');
+  for (const line of readFileSync(envExample, 'utf8').split('\n')) {
+    const match = /^#?\s*([A-Z][A-Z0-9_]*)=/.exec(line);
+    if (match?.[1] !== undefined) documented.add(match[1]);
+  }
+
+  // A NAME_FILE variant is the same secret by another delivery route, so the
+  // base name's verdict governs both. config.ts builds it as `${name}_FILE`,
+  // which is why searching src/ for the literal would never find it.
+  const bases = new Set(
+    [...documented]
+      .map((name) => name.replace(/_FILE$/, ''))
+      .filter((name) => SECRET_SUFFIX.test(name)),
+  );
+
+  for (const base of [...bases].sort()) {
+    if (readByWeb.has(base)) continue;
+    for (const name of [base, `${base}_FILE`]) {
+      if (!documented.has(name)) continue;
+      if (webBlock.includes(`${name}: ''`)) continue;
+      fail(
+        composePath,
+        1,
+        `${name} is documented in .env.example, is never read under src/, and is not ` +
+          'emptied in the `web` service -- so env_file hands the internet-facing container ' +
+          `a credential it cannot use. Add "${name}: ''" to web's environment, or read it.`,
+      );
+    }
+  }
+}
+
 // --- Report ----------------------------------------------------------------
 
 if (failures.length > 0) {
@@ -210,5 +286,5 @@ if (failures.length > 0) {
 
 console.log(
   'invariants hold: safe-filter allowlist, no inline styles, nonced scripts, visibility chokepoint, ' +
-    'matching mysql pin',
+    'matching mysql pin, no stray secrets on web',
 );

@@ -44,9 +44,9 @@ What is built and working:
 | **Zotero sync** — pull a library in and keep it in step                   | Complete (incremental; deletions are flagged, never obeyed)                                                         |
 | Deployment — Docker, Compose, migrations, CLI                             | Complete                                                                                                            |
 | **Corpus export** — Markdown, CSL-JSON, and a rehearsed restore           | Complete                                                                                                            |
+| **Corpus-wide search** — every kind at once, with snippets                | Complete (admin-only; a query, not an index)                                                                        |
 | Maps                                                                      | **Not yet** (Leaflet is vendored; coordinates are in the schema)                                                    |
 | Public downloads of compiled documents                                    | **Not yet** (deliberately admin-only for now — see below)                                                           |
-| Search beyond `LIKE`                                                      | **Not yet** (a search service is the first side-cart candidate)                                                     |
 
 Each of those is a separate change set on top of this one. The architecture
 below is what makes them additive rather than rewrites.
@@ -481,6 +481,7 @@ docker compose exec web /app/scripts/entrypoint.sh <command>
 | `admin revoke-passkey --username u --id 3` | Remove one passkey                         |
 | `admin recovery-codes --username u`        | Generate a fresh set of codes              |
 | `admin sessions-revoke --username u`       | Sign out everywhere                        |
+| `admin enqueue-backup [--keep n]`          | Queue a database and file backup           |
 | `preflight`                                | Report on the whole install and exit       |
 | `migrate status`                           | Show which migrations are applied          |
 | `migrate up`                               | Apply pending migrations                   |
@@ -569,14 +570,22 @@ mangles them silently.
 Enqueue a backup job:
 
 ```sh
-docker compose exec db mysql -u root -p"$DB_ROOT_PASSWORD" dissertation \
-  -e "INSERT INTO job (kind, payload) VALUES ('backup.run', '{\"keep\": 14}')"
+docker compose exec web /app/scripts/entrypoint.sh admin enqueue-backup
 ```
 
+`--keep <n>` changes how many of each kind to retain (default 14, max 365);
+`--no-files` backs up the database only. A second request while one is pending
+or running is refused rather than stacked, so a cron entry that fires during a
+long dump does not queue a duplicate.
+
 The worker writes a compressed dump and a file archive to `BACKUP_ROOT` and
-prunes to the newest 14 of each. Point that at a share the host itself backs
-up — a backup inside the container it protects is not a backup. To run it
-nightly, add a cron entry on the host that issues the same statement.
+prunes to the newest of each. Point that at a share the host itself backs up —
+a backup inside the container it protects is not a backup. To run it nightly,
+put the command above in the host's crontab.
+
+> Earlier versions documented a raw `INSERT` run as the database's root user.
+> That works, but it puts the root password in shell history and in the host's
+> process list, every night. Use the command above instead.
 
 ### Updating
 

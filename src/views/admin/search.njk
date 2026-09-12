@@ -1,0 +1,65 @@
+{% extends "layouts/admin.njk" %}
+{% import "partials/macros.njk" as ui %}
+
+{% block adminTitle %}Search{% endblock %}
+
+{% block adminContent %}
+  <div class="page-heading">
+    <h1>Search</h1>
+  </div>
+
+  <form method="get" action="/admin/search" class="filter-form" role="search">
+    <label for="q">Find</label>
+    <input
+      type="search"
+      id="q"
+      name="q"
+      value="{{ search }}"
+      placeholder="Words to find anywhere"
+      autofocus
+    />
+
+    <label for="kind">Kind</label>
+    <select id="kind" name="kind">
+      <option value="">Everything</option>
+      {% for option in kinds %}
+        <option value="{{ option.value }}"{% if kind == option.value %} selected{% endif %}>{{ option.label }}</option>
+      {% endfor %}
+    </select>
+
+    <button type="submit">Search</button>
+  </form>
+
+  {% if not searched %}
+    <p class="muted">
+      Every word has to appear somewhere in an item, in any order. Titles,
+      catalogue metadata, essay bodies, transcriptions and biographies are all
+      searched, and accents are ignored — <em>Iasi</em> finds <em>Iași</em>.
+    </p>
+  {% elif results.length == 0 %}
+    <p class="empty">Nothing matches {{ words | join(' ') }}.</p>
+  {% else %}
+    <p class="muted">{{ total }} result{{ 's' if total != 1 }}</p>
+
+    <ol class="search-results">
+      {% for result in results %}
+        <li class="search-result">
+          <p class="search-result-heading">
+            <a href="{{ result.href }}">{{ result.title }}</a>
+            <span class="search-result-kind">{{ result.label }}</span>
+            {{ ui.badge(result.visibility) }}
+          </p>
+          {% if result.snippet %}
+            <p class="search-snippet">
+              {%- for segment in result.snippet.segments -%}
+                {%- if segment.match -%}<mark>{{ segment.text }}</mark>{%- else -%}{{ segment.text }}{%- endif -%}
+              {%- endfor -%}
+            </p>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+
+    {{ ui.pagination('/admin/search', page, pageCount, search, filterQuery) }}
+  {% endif %}
+{% endblock %}

@@ -297,9 +297,15 @@ what the application sends and not what MySQL expects, which presents as
 it inside MySQL:
 
 ```sh
-docker compose exec db mysql -u root -p"$DB_ROOT_PASSWORD" \
-  -e "ALTER USER 'dissertation'@'%' IDENTIFIED BY 'the-new-password';"
+docker compose exec db sh -c \
+  'mysql -u root -p"$MYSQL_ROOT_PASSWORD" \
+     -e "ALTER USER \"dissertation\"@\"%\" IDENTIFIED BY \"the-new-password\";"'
 ```
+
+The password is read inside the container, from the `db` service's own
+environment. Writing `-p"$DB_ROOT_PASSWORD"` unquoted would expand it in your
+host shell instead, where `.env` is not exported and the variable is usually
+empty.
 
 ---
 

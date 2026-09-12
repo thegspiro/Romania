@@ -32,6 +32,26 @@ services:
       # override .env and send every connection back to a container that a
       # cloud deployment has deleted.
       DB_HOST: ${DB_HOST:-db}
+      # `env_file` loads the whole of .env, which is what keeps adding a
+      # setting from meaning editing this file too. The cost is that it also
+      # hands this container credentials it has no code to read, and an
+      # environment variable is readable from /proc and from `docker inspect`
+      # whether or not anything reads it.
+      #
+      # Emptied rather than left out: an `environment` entry with no value
+      # resolves from .env again, which looks like an unset and is not.
+      #
+      # DB_ROOT_PASSWORD is the bundled database's, and the application never
+      # connects as root -- holding it here would turn a compromise of this
+      # container into root on the database rather than the app account.
+      DB_ROOT_PASSWORD: ''
+      # The Zotero key belongs to the worker alone; CLAUDE.md says the web
+      # service never holds it, and until now that was true of the code and
+      # false of the container. Nothing here reads it: the sync button is
+      # decided by ZOTERO_LIBRARY_ID, and the job that needs the key runs in
+      # the worker.
+      ZOTERO_API_KEY: ''
+      ZOTERO_API_KEY_FILE: ''
       HTTP_HOST: 0.0.0.0
       HTTP_PORT: '8080'
       STORAGE_ROOT: /data/files
@@ -55,6 +75,11 @@ services:
       start_period: 40s
     security_opt:
       - no-new-privileges:true
+    # The image already runs as uid 1000, so the process holds no capabilities
+    # it can use. Dropping the bounding set closes the remaining path: a setuid
+    # binary reachable through a future dependency cannot regain them.
+    cap_drop:
+      - ALL
     logging:
       driver: json-file
       options: { max-size: '10m', max-file: '5' }
@@ -79,6 +104,9 @@ services:
     env_file: [.env]
     environment:
       DB_HOST: ${DB_HOST:-db}
+      # Same reasoning as `web`. The Zotero key is deliberately NOT emptied
+      # here: this is the process that calls the API.
+      DB_ROOT_PASSWORD: ''
       STORAGE_ROOT: /data/files
       BACKUP_ROOT: /data/backups
       # Migrations belong to the web role; see scripts/entrypoint.sh.
@@ -93,6 +121,10 @@ services:
         condition: service_started
     security_opt:
       - no-new-privileges:true
+    # Same reasoning as `web`: already uid 1000, so this only removes what it
+    # could never legitimately use.
+    cap_drop:
+      - ALL
     logging:
       driver: json-file
       options: { max-size: '10m', max-file: '5' }
@@ -120,14 +152,53 @@ services:
     healthcheck:
       # `mysqladmin ping` succeeds before the server finishes initialising on
       # a first run, so the query below is used instead.
+      #
+      # The password goes through MYSQL_PWD rather than -p. An argv element is
+      # readable by every process in the container via /proc, and a health
+      # check re-runs it every ten seconds for the life of the deployment, so
+      # that exposure is continuous rather than momentary. `$$` escapes
+      # Compose's interpolation, leaving the shell to expand the variable the
+      # container already has -- which also keeps the password out of
+      # `docker compose config` output.
       test:
-        ['CMD', 'mysql', '-h', '127.0.0.1', '-u', 'root', '-p${DB_ROOT_PASSWORD}', '-e', 'SELECT 1']
+        ['CMD-SHELL', 'MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h 127.0.0.1 -u root -e "SELECT 1"']
       interval: 10s
       timeout: 5s
       retries: 15
       start_period: 60s
     security_opt:
       - no-new-privileges:true
+    # Unlike `web` and `worker`, this image starts as root and drops to the
+    # mysql user itself, so it cannot simply drop everything. The four below
+    # are the minimum, each established by removing it and watching the
+    # container fail:
+    #
+    #   SETGID, SETUID  gosu dropping root to the mysql user. Without them:
+    #                   "setgid: Operation not permitted", before any datadir
+    #                   work at all.
+    #   DAC_OVERRIDE    the entrypoint reads and writes files it does not own
+    #                   while still root. Without it: "find:
+    #                   '/var/lib/mysql-files': Permission denied".
+    #   CHOWN           `chown -R mysql:mysql` over the data directory.
+    #
+    # CHOWN is the one worth not trimming. A Docker-managed volume inherits
+    # the image's ownership, so the chown is a no-op and the container comes
+    # up perfectly well without the capability -- which is exactly how you
+    # would conclude it is unnecessary. A bind mount does not: it arrives
+    # owned by whoever owns the host path, the chown is real, and without
+    # CHOWN the container dies with "chown: changing ownership of
+    # '/var/lib/mysql': Operation not permitted". docker-compose.unraid.yml
+    # bind-mounts this directory, so that is the deployment this repository
+    # ships, not the edge case.
+    #
+    # FOWNER is not needed; it was tried and removed.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
     logging:
       driver: json-file
       options: { max-size: '10m', max-file: '3' }
