@@ -2,11 +2,7 @@
 
 {% block title %}{{ record.title }} — Dissertation Research{% endblock %}
 
-{% block head %}
-  <link rel="canonical" href="{{ canonicalUrl }}" />
-  {# Only where there is a map to draw; every other entity page loads nothing. #}
-  {% if point %}<link rel="stylesheet" href="/assets/vendor/leaflet/leaflet.css" />{% endif %}
-{% endblock %}
+{% block head %}<link rel="canonical" href="{{ canonicalUrl }}" />{% endblock %}
 
 {% block content %}
   <article class="entity">
@@ -151,7 +147,6 @@
       {% include "partials/chronology.njk" %}
     {% endif %}
 
-    {% include "partials/place-map.njk" %}
     {% include "partials/relationships.njk" %}
     {% include "partials/mentions.njk" %}
     {% include "partials/graph.njk" %}
@@ -167,8 +162,4 @@
 {% block scripts %}
   <script nonce="{{ nonce }}" src="/assets/vendor/cytoscape/cytoscape.min.js"></script>
   <script nonce="{{ nonce }}" src="/assets/js/graph.js"></script>
-  {% if point %}
-    <script nonce="{{ nonce }}" src="/assets/vendor/leaflet/leaflet.js"></script>
-    <script nonce="{{ nonce }}" src="/assets/js/map.js"></script>
-  {% endif %}
 {% endblock %}

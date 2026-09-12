@@ -83,32 +83,6 @@ const OriginString = z.string().refine((value) => {
 }, 'must be an absolute http(s) origin such as https://example.org (no trailing path)');
 
 /**
- * A slippy-map tile template, such as `https://tiles.example.org/{z}/{x}/{y}.png`.
- *
- * Empty means no basemap, which is the default and the private option: markers
- * are drawn on a plain canvas and the browser contacts nobody but this server.
- * Setting it is a deliberate trade -- tile URLs encode the coordinates and zoom
- * level being looked at, so the tile host learns which places are being read,
- * including the private ones an administrator is reviewing.
- *
- * A `{s}` subdomain placeholder is rejected rather than supported. The host has
- * to be a literal so that exactly one origin can be added to `img-src`; a
- * pattern there would either widen the policy to a wildcard or produce a source
- * the browser silently ignores. Subdomain sharding buys nothing over HTTP/2.
- */
-const TileUrlString = z.string().refine((value) => {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-  if (url.hostname.includes('{') || url.hostname.includes('}')) return false;
-  return value.includes('{z}') && value.includes('{x}') && value.includes('{y}');
-}, 'must be an http(s) tile template containing {z}, {x} and {y}, with a literal host (no {s} placeholder)');
-
-/**
  * The secrets `.env.example` ships. They exist to be replaced, and they are
  * published in this repository, so a deployment still carrying one has a
  * database password that anybody can read. Checked only in production: the
@@ -128,78 +102,60 @@ function isWithinRelyingParty(host: string, rpId: string): boolean {
   return host === rpId || host.endsWith(`.${rpId}`);
 }
 
-const schema = z
-  .object({
-    NODE_ENV: z.enum(['development', 'test', 'production']),
-    LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']),
+const schema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']),
+  LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']),
 
-    HTTP_HOST: z.string().min(1),
-    HTTP_PORT: IntegerString(1, 65535),
-    PUBLIC_BASE_URL: OriginString,
-    TRUST_PROXY: BooleanString,
+  HTTP_HOST: z.string().min(1),
+  HTTP_PORT: IntegerString(1, 65535),
+  PUBLIC_BASE_URL: OriginString,
+  TRUST_PROXY: BooleanString,
 
-    DB_HOST: z.string().min(1),
-    DB_PORT: IntegerString(1, 65535),
-    DB_NAME: z.string().min(1).max(64),
-    DB_USER: z.string().min(1).max(64),
-    DB_PASSWORD: z.string().min(1),
-    DB_CONNECTION_LIMIT: IntegerString(1, 100),
+  DB_HOST: z.string().min(1),
+  DB_PORT: IntegerString(1, 65535),
+  DB_NAME: z.string().min(1).max(64),
+  DB_USER: z.string().min(1).max(64),
+  DB_PASSWORD: z.string().min(1),
+  DB_CONNECTION_LIMIT: IntegerString(1, 100),
 
-    SESSION_TTL_HOURS: IntegerString(1, 8760),
-    SESSION_SECURE_COOKIES: BooleanString,
+  SESSION_TTL_HOURS: IntegerString(1, 8760),
+  SESSION_SECURE_COOKIES: BooleanString,
 
-    // A bare registrable domain: no scheme, no port, no path. Browsers compare
-    // this against the origin's effective domain on every ceremony.
-    WEBAUTHN_RP_ID: z
-      .string()
-      .min(1)
-      .regex(
-        /^(localhost|([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})$/i,
-        'must be a bare domain such as example.org or "localhost" (no scheme, port or path)',
-      ),
-    WEBAUTHN_RP_NAME: z.string().min(1).max(190),
-    WEBAUTHN_ORIGINS: z.array(OriginString).min(1),
+  // A bare registrable domain: no scheme, no port, no path. Browsers compare
+  // this against the origin's effective domain on every ceremony.
+  WEBAUTHN_RP_ID: z
+    .string()
+    .min(1)
+    .regex(
+      /^(localhost|([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})$/i,
+      'must be a bare domain such as example.org or "localhost" (no scheme, port or path)',
+    ),
+  WEBAUTHN_RP_NAME: z.string().min(1).max(190),
+  WEBAUTHN_ORIGINS: z.array(OriginString).min(1),
 
-    ARGON2_MEMORY_KIB: IntegerString(8192, 1_048_576),
-    ARGON2_TIME_COST: IntegerString(1, 20),
-    ARGON2_PARALLELISM: IntegerString(1, 16),
+  ARGON2_MEMORY_KIB: IntegerString(8192, 1_048_576),
+  ARGON2_TIME_COST: IntegerString(1, 20),
+  ARGON2_PARALLELISM: IntegerString(1, 16),
 
-    LOGIN_MAX_ATTEMPTS: IntegerString(1, 1000),
-    LOGIN_WINDOW_MINUTES: IntegerString(1, 1440),
-    LOGIN_LOCKOUT_MINUTES: IntegerString(1, 1440),
+  LOGIN_MAX_ATTEMPTS: IntegerString(1, 1000),
+  LOGIN_WINDOW_MINUTES: IntegerString(1, 1440),
+  LOGIN_LOCKOUT_MINUTES: IntegerString(1, 1440),
 
-    STORAGE_ROOT: z.string().min(1),
-    UPLOAD_MAX_BYTES: IntegerString(1, 10_737_418_240),
+  STORAGE_ROOT: z.string().min(1),
+  UPLOAD_MAX_BYTES: IntegerString(1, 10_737_418_240),
 
-    ALLOW_SEARCH_INDEXING: BooleanString,
+  ALLOW_SEARCH_INDEXING: BooleanString,
 
-    // The web service enqueues a Zotero sync but never calls the API itself, so
-    // it needs to know which library is configured and nothing more. The API key
-    // is read by the worker alone -- there is no reason for the process facing
-    // the internet to hold a credential it cannot use.
-    ZOTERO_LIBRARY_TYPE: z.enum(['user', 'group']),
-    ZOTERO_LIBRARY_ID: z
-      .string()
-      .regex(/^\d+$/, 'must be the numeric library id shown on zotero.org')
-      .optional(),
-
-    // Unset by default, and the maps work without it. See TileUrlString above
-    // for what setting it discloses.
-    MAP_TILE_URL: TileUrlString.optional(),
-    MAP_TILE_ATTRIBUTION: z.string().max(500).optional(),
-  })
-  .superRefine((value, context) => {
-    // Every tile provider worth using requires credit, and the attribution has
-    // to be configured alongside the URL rather than hard-coded, because the
-    // right wording depends on whose tiles they are.
-    if (value.MAP_TILE_URL !== undefined && (value.MAP_TILE_ATTRIBUTION ?? '').trim() === '') {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['MAP_TILE_ATTRIBUTION'],
-        message: 'is required when MAP_TILE_URL is set, to credit the tile provider',
-      });
-    }
-  });
+  // The web service enqueues a Zotero sync but never calls the API itself, so
+  // it needs to know which library is configured and nothing more. The API key
+  // is read by the worker alone -- there is no reason for the process facing
+  // the internet to hold a credential it cannot use.
+  ZOTERO_LIBRARY_TYPE: z.enum(['user', 'group']),
+  ZOTERO_LIBRARY_ID: z
+    .string()
+    .regex(/^\d+$/, 'must be the numeric library id shown on zotero.org')
+    .optional(),
+});
 
 export type Config = Readonly<
   z.infer<typeof schema> & {
@@ -261,9 +217,6 @@ export function loadConfig(env: EnvSource = process.env): Config {
 
     ZOTERO_LIBRARY_TYPE: read(env, 'ZOTERO_LIBRARY_TYPE', 'user'),
     ZOTERO_LIBRARY_ID: read(env, 'ZOTERO_LIBRARY_ID'),
-
-    MAP_TILE_URL: read(env, 'MAP_TILE_URL'),
-    MAP_TILE_ATTRIBUTION: read(env, 'MAP_TILE_ATTRIBUTION'),
   };
 
   const result = schema.safeParse(candidate);

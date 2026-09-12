@@ -32,7 +32,6 @@ import { registerAdminRoutes } from '../routes/admin.js';
 import { registerPublicRoutes } from '../routes/public.js';
 import { registerPublicContentRoutes } from '../routes/public-content.js';
 import { registerTimelineRoutes } from '../routes/timeline.js';
-import { registerMapRoutes } from '../routes/map.js';
 import { registerReviewRoutes } from '../routes/review.js';
 
 export interface AppContext {
@@ -160,7 +159,6 @@ export async function buildServer(context: AppContext): Promise<FastifyInstance>
   registerPublicRoutes(app, context);
   registerPublicContentRoutes(app, context);
   registerTimelineRoutes(app, context);
-  registerMapRoutes(app, context);
   registerReviewRoutes(app, context);
 
   app.setNotFoundHandler(async (request, reply) => {

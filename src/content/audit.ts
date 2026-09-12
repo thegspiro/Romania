@@ -30,8 +30,7 @@ export type AuditAction =
   | 'source.publish'
   | 'source.unpublish'
   | 'zotero.sync'
-  | 'zotero.sync.full'
-  | 'place.geocode';
+  | 'zotero.sync.full';
 
 export interface AuditEntry {
   actor: string;
