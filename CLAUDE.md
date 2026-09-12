@@ -213,6 +213,27 @@ draft text by definition, the routes are behind the admin guard and check the
 essay with `findEssayById` first, and there is no public path to one. Do not
 add a viewer parameter; it would imply there could be.
 
+**Search is a query, not an index.** `src/content/search.ts` spans the kinds
+that the per-kind `?q=` listings leave separate. `db/migrations/0002` records
+why there is no FULLTEXT index -- `innodb_ft_min_token_size` silently drops
+terms shorter than three characters, and `utf8mb4_0900_ai_ci` already makes
+`LIKE` accent-blind, so "Iasi" finds "Iasi" written with diacritics. Two rules:
+
+- **Every branch of the union applies `visibilityFilter`.** A union is the
+  shape where one forgotten branch leaks while the other six still behave,
+  so the branches are generated from one description of each kind rather than
+  written out by hand, and `tests/integration/search.test.ts` asserts a
+  private item of _every_ kind stays invisible.
+- **A snippet is stricter than the page.** Prose holds `[[person:slug]]`, so
+  text cut from raw Markdown would print a private slug. `readableProse`
+  rewrites every reference before anything is cut, and a reference the viewer
+  may not follow contributes **nothing** -- where `renderProse` falls back to
+  the target's title. A page shows one item the reader asked for; a result set
+  shows fragments of everything at once, and that difference is the reason.
+
+Snippets are returned as `{ text, match }` segments rather than markup, so
+highlighting never needs `| safe`.
+
 **A map is a second view of rows the place pages already show.**
 `src/content/places.ts` reads through `visibilityFilter` like anything else, so
 a private place is _absent_ from the overview rather than withheld with a gap,
@@ -506,6 +527,7 @@ the properties being asserted actually live.
 | Prose → HTML, the visible/not decision  | `src/content/markdown.ts`           |
 | Projections and backlinks               | `src/content/mentions.ts`           |
 | Corpus export, portable formats         | `src/content/export.ts`             |
+| Corpus-wide search, snippets            | `src/content/search.ts`             |
 | Mappable places, geocode queueing       | `src/content/places.ts`             |
 | Essay revisions, restore rules          | `src/content/essays.ts`             |
 | Line diff for the comparison view       | `src/content/diff.ts`               |
@@ -558,15 +580,14 @@ both stay green — which two hand-kept copies could not actually guarantee.
 
 ## What is deliberately not built yet
 
-Public downloads of compiled documents (`manuscript_build.audience` is what
-makes that a config change rather than a rewrite); search beyond `LIKE`; an S3
-storage backend.
+Public downloads of compiled documents (`manuscript_build.audience` is what makes
+that a config change rather than a rewrite); an S3 storage backend.
 
-A search service such as Meilisearch is the one remaining **side-cart**
-candidate, and nothing needs it today: Pandoc and Tectonic are already in the
-image and MySQL handles the graph queries at this scale. Reach for a separate
-service only when something truly cannot live in the application, not to avoid
-writing a query.
+A search service such as Meilisearch remains the one **side-cart** candidate,
+and nothing needs it today. Corpus-wide search shipped as `src/content/search.ts`
+-- a union of per-kind reads, no index and no new service -- which is the
+precedent holding: reach for a separate service only when something truly
+cannot live in the application, not to avoid writing a query.
 
 Zotero sync used to be listed here as the other candidate. It shipped as a
 worker job instead -- one handler, one migration, no new service -- which is

@@ -56,6 +56,7 @@ import { registerAdminEntityRoutes } from './admin-entities.js';
 import { registerAdminEssayRoutes } from './admin-essays.js';
 import { registerAdminArtifactRoutes } from './admin-artifacts.js';
 import { registerAdminManuscriptRoutes } from './admin-manuscripts.js';
+import { registerAdminSearchRoutes } from './admin-search.js';
 
 /** Collects the source form into the repository's input shape. */
 function readSourceForm(body: unknown): { input: SourceInput; errors: string[] } {
@@ -178,6 +179,7 @@ export async function registerAdminRoutes(
       registerAdminEssayRoutes(admin, context);
       registerAdminArtifactRoutes(admin, context);
       registerAdminManuscriptRoutes(admin, context);
+      registerAdminSearchRoutes(admin, context);
 
       admin.get('/admin', async (request, reply) => {
         const counts = await queryOne<
