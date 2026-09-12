@@ -2,8 +2,9 @@
 
 Unraid is a first-class target for this application — the job queue is a MySQL
 table rather than Redis specifically so there is one fewer service to run here.
-But the install does not look like a normal Unraid install, and two things
-about it will bite you if nobody says them first.
+But the install does not look like a normal Unraid install: there is no image to
+pull and no template to add, and the container's user has to be told about
+Unraid's before the first start.
 
 Read [`installation.md`](installation.md) for what the configuration values
 mean. This page covers what is different on Unraid.
@@ -101,34 +102,56 @@ A few notes on the paths themselves:
   hands work across that volume: the web app writes the assembled Markdown and
   the worker reads it back. Keep both mounts identical.
 
-## 4. Fix the ownership before the first start
+## 4. Run the containers as Unraid's own user
 
-This is the step that catches people.
+This is the step that catches people, and it is worth understanding rather than
+pasting.
 
-**The application containers run as uid 1000, gid 1000** — the `node` user from
-the base image. **Unraid shares are owned by `nobody:users`, which is uid 99,
-gid 100.** These do not match, and there is no `PUID`/`PGID` support to
-reconcile them: the Dockerfile sets `USER node` and the uid is fixed at build
-time.
+Unraid owns its shares as `nobody:users` — **uid 99, gid 100**. The application
+image is built from `node:22-bookworm-slim`, whose `node` user is **uid 1000**.
+Those do not match.
 
-An unwritable data directory is caught at startup by `scripts/check-storage.sh`
-rather than surfacing as a 500 on the first upload, so the symptom is a
-container that refuses to start with a message naming the path and the uid to
-`chown` to. That is the intended behaviour — but it means an install that
-skipped this step fails at step 5 rather than working.
+Whether the mismatch actually breaks anything depends on the mode bits as much
+as the ownership. A share left at Unraid's usual `0777` is writable by anyone,
+uid 1000 included, and such an install works. But a directory you create over
+SSH is `root:root 0755`, which uid 1000 cannot write to at all — and that is the
+path these instructions take. Even where writing succeeds, everything the
+container creates comes out owned by uid 1000, which is an unknown user to
+Unraid: awkward over SMB, and awkward for any other container that needs to
+read it.
 
-Create the directories and hand them to uid 1000:
+So set the uid the image is built with:
+
+```sh
+# in .env, alongside the rest of the configuration
+APP_UID=99
+APP_GID=100
+```
+
+`docker-compose.yml` passes both to the build, so the containers run as
+`nobody:users` and every file they write belongs to Unraid's own user. The
+default stays 1000:1000, so nothing changes for a non-Unraid host.
+
+This is a **build-time** setting — it is baked into the image, not read at
+start — so it takes effect on the next `docker compose up -d --build`. The
+container still never runs as root.
+
+Then create the directories:
 
 ```sh
 mkdir -p /mnt/user/appdata/dissertation/files \
          /mnt/user/backups/dissertation
-chown -R 1000:1000 /mnt/user/appdata/dissertation/files \
-                   /mnt/user/backups/dissertation
+chown -R 99:100 /mnt/user/appdata/dissertation/files \
+                /mnt/user/backups/dissertation
 ```
 
-**Do not chown the MySQL directory to 1000.** The `db` service is the official
-MySQL image and runs as its own `mysql` user, which is a different uid. Let the
-container create and own that directory — make the parent only:
+The `chown` is still needed for directories you create yourself, because `mkdir`
+as root makes them `root:root` whatever the container runs as.
+
+**Do not chown the MySQL directory.** The `db` service is the official MySQL
+image and runs as its own `mysql` user, which is neither 99 nor 1000 and is not
+affected by `APP_UID`. Let the container create and own that directory — make
+the parent only:
 
 ```sh
 mkdir -p /mnt/user/appdata/dissertation/mysql
@@ -141,10 +164,32 @@ guessing:
 docker compose run --rm --entrypoint sh db -c 'id mysql'
 ```
 
-> **Unraid's "Docker Safe New Permissions" tool will undo this.** It resets
-> ownership across shares to `nobody:users`. If you run it — or the New
-> Permissions tool — re-apply the `chown -R 1000:1000` above afterwards, or the
-> containers will stop starting with a `check-storage` failure.
+### If you skip this
+
+An unwritable data directory is caught at startup by `scripts/check-storage.sh`,
+which does a real write rather than testing a mode bit — so a read-only mount
+and a full filesystem fail it too. The container refuses to start and the
+message names the path and the uid to `chown` to, which is the uid the image was
+actually built with. It is a loud failure at step 5 rather than a 500 on the
+first upload months later.
+
+### Changing it later
+
+`APP_UID` decides who writes _new_ files; it does not move the ones already
+there. If you change it on a running install, chown the existing data to match
+in the same maintenance window:
+
+```sh
+docker compose down
+chown -R 99:100 /mnt/user/appdata/dissertation/files \
+                /mnt/user/backups/dissertation
+docker compose up -d --build
+```
+
+> **Unraid's "Docker Safe New Permissions" tool resets share ownership** to
+> `nobody:users`. With `APP_UID=99` and `APP_GID=100` that is now what the
+> containers want, so the tool stops being something that breaks this install —
+> which is most of the reason to set them rather than chowning to 1000.
 
 ## 5. Start it
 
@@ -228,11 +273,13 @@ They are recorded here so an operator is not the one to discover them.
    install paths (Community Applications, the Docker tab) cannot be used, and
    every update is a local rebuild of a ~3 GB image. Publishing the existing
    multi-arch build to GHCR would make both work.
-2. **No `PUID`/`PGID` support.** The uid is baked in at build time as 1000,
-   which does not match Unraid's default share ownership of 99:100. Every
-   Unraid install therefore needs a manual `chown`, and Docker Safe New
-   Permissions silently undoes it. The usual fix is an entrypoint that adjusts
-   the runtime uid, or documenting a `user:` override once it has been tested.
+2. ~~**No `PUID`/`PGID` support.**~~ Fixed: `APP_UID` and `APP_GID` are build
+   arguments, defaulting to 1000:1000 and set to 99:100 on Unraid — see
+   [step 4](#4-run-the-containers-as-unraids-own-user). Done at build time
+   rather than as a runtime `PUID`/`PGID` because there is no published image
+   to keep host-neutral, and the alternative is a root entrypoint that drops
+   privileges — a worse trade for a rebuild that already happens on every
+   install and update.
 3. **Compose Manager integration is unverified.** The guidance above about
    project directories is reasoned from how the plugin stores projects, not
    tested on a live box. It should be confirmed and then stated plainly.

@@ -228,6 +228,20 @@ snapshots — replace them with bind mounts to paths the host actually protects.
 See [`unraid.md`](unraid.md) for how to do that without the edit being undone
 by the next `git pull`.
 
+**A bind mount carries the host's ownership**, and the container has to be able
+to write to it. The containers run as uid 1000 by default — the base image's
+`node` user. Where the host uses something else, set it at build time rather
+than chowning around it:
+
+```sh
+APP_UID=99      # in .env; 99:100 is nobody:users, which is what Unraid uses
+APP_GID=100
+```
+
+Both default to 1000, so leaving them unset builds exactly what it always did.
+They are baked into the image, so a change takes effect on the next
+`docker compose up -d --build` — and the container still never runs as root.
+
 **`web` and `worker` must share `/data/files`.** Compilation hands work across
 that volume: the web app writes the assembled Markdown there and the worker
 reads it back. The compose file already mounts the same volume into both; keep
@@ -265,15 +279,15 @@ and is not built yet.
 
 ## When something is wrong
 
-| What you see                                         | What it means                                                                               |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `wait-for-db: gave up after 120s … Access denied`    | `DB_PASSWORD` does not match what the database was created with. See below.                 |
-| `wait-for-db: gave up after 120s … Unknown database` | `DB_NAME` does not exist on the host `DB_HOST` points at.                                   |
-| `check-storage: … is not writable`                   | A bind-mounted path is owned by the wrong uid. The message names the uid to `chown` to.     |
-| `DB_PASSWORD must be set in .env`                    | Compose could not interpolate it — the variable is missing from `.env` entirely.            |
-| The app starts but passkeys fail in the browser      | The page is not on HTTPS, or `WEBAUTHN_RP_ID` does not match the domain in the address bar. |
-| Signing in loops back to the login page              | The proxy is not sending `X-Forwarded-Proto`, so the secure cookie is never issued.         |
-| A PDF build fails on a TeX package                   | Tectonic fetches packages on demand and the container has no outbound network.              |
+| What you see                                         | What it means                                                                                                                                              |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wait-for-db: gave up after 120s … Access denied`    | `DB_PASSWORD` does not match what the database was created with. See below.                                                                                |
+| `wait-for-db: gave up after 120s … Unknown database` | `DB_NAME` does not exist on the host `DB_HOST` points at.                                                                                                  |
+| `check-storage: … is not writable`                   | A bind-mounted path is owned by the wrong uid. The message names the uid the image was built with — `chown` to it, or set `APP_UID`/`APP_GID` and rebuild. |
+| `DB_PASSWORD must be set in .env`                    | Compose could not interpolate it — the variable is missing from `.env` entirely.                                                                           |
+| The app starts but passkeys fail in the browser      | The page is not on HTTPS, or `WEBAUTHN_RP_ID` does not match the domain in the address bar.                                                                |
+| Signing in loops back to the login page              | The proxy is not sending `X-Forwarded-Proto`, so the secure cookie is never issued.                                                                        |
+| A PDF build fails on a TeX package                   | Tectonic fetches packages on demand and the container has no outbound network.                                                                             |
 
 **Changing `DB_PASSWORD` after the first start does not change the database.**
 The bundled MySQL container reads `MYSQL_PASSWORD` only when it initialises an

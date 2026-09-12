@@ -149,6 +149,58 @@ RUN python3 -m venv /opt/venv \
     && rm -f /tmp/requirements.txt
 ENV PATH="/opt/venv/bin:${PATH}"
 
+# The uid and gid the application runs as.
+#
+# The default is the base image's own `node` user, 1000:1000, so an unset build
+# produces exactly the image it always did. They exist because a bind-mounted
+# host directory carries the host's ownership and the container has to be able
+# to write to it: on Unraid a share is owned by nobody:users, 99:100, and a
+# directory created there over SSH is root:root 0755 -- neither of which a
+# process running as 1000 can write to. Set them through docker-compose.yml,
+# which reads APP_UID and APP_GID from .env.
+#
+# Done at build time rather than by starting as root and dropping privileges.
+# There is no published image, so every deployment builds its own anyway and a
+# host-specific uid costs nothing; the alternative would put a root entrypoint
+# in front of every container to save a rebuild that already happens.
+#
+# Placed after the venv so changing them rebuilds only the layers below, and
+# before the COPYs so `--chown=node:node` resolves to the adjusted ids rather
+# than needing a second full copy of the tree to correct them.
+#
+# Two things the block gets right that are easy to get wrong:
+#
+#   - A gid that already exists is joined, not renamed. Debian ships gid 100 as
+#     `users`, which is exactly the one Unraid uses, so groupmod would fail.
+#   - A uid already held by another account is refused rather than shared via
+#     usermod -o. Debian ships uid 100 as `_apt`, and two users behind one uid
+#     is not a thing to discover later.
+#
+# The RUN carries no comments of its own: a `#` line inside a continued
+# instruction is stripped by the Dockerfile parser before the shell sees it,
+# and this file should not lean on that.
+ARG APP_UID=1000
+ARG APP_GID=1000
+RUN set -eu; \
+    current_uid="$(id -u node)"; \
+    current_gid="$(id -g node)"; \
+    if [ "$APP_GID" != "$current_gid" ]; then \
+      if getent group "$APP_GID" >/dev/null 2>&1; then \
+        usermod -g "$APP_GID" node; \
+      else \
+        groupmod -g "$APP_GID" node; \
+      fi; \
+    fi; \
+    if [ "$APP_UID" != "$current_uid" ]; then \
+      existing="$(getent passwd "$APP_UID" | cut -d: -f1 || true)"; \
+      if [ -n "$existing" ]; then \
+        echo "APP_UID=$APP_UID is already used by '$existing' in this image; pick another." >&2; \
+        exit 1; \
+      fi; \
+      usermod -u "$APP_UID" node; \
+    fi; \
+    id node
+
 # Application code. Ownership is set here rather than with a later chown, which
 # would duplicate every file into a new layer.
 COPY --chown=node:node --from=build /app/node_modules ./node_modules
@@ -165,9 +217,9 @@ RUN chmod +x scripts/*.sh
 # mount (development, CI) rather than failing on first write.
 RUN mkdir -p /data/files /data/backups && chown -R node:node /data
 
-# The `node` user ships with the base image as uid/gid 1000, which is what
-# Unraid shares are normally owned by. Never run as root: a template injection
-# or a path traversal is much cheaper to contain as an unprivileged user.
+# Never run as root: a template injection or a path traversal is much cheaper
+# to contain as an unprivileged user. Named rather than numeric so the uid keeps
+# a passwd entry -- anything that calls getpwuid, or wants a HOME, still works.
 USER node
 
 EXPOSE 8080

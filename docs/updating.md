@@ -165,6 +165,13 @@ Most values have safe defaults, and the application validates the whole
 configuration at startup and refuses to start if something required is missing
 — so a genuinely necessary value fails loudly rather than silently.
 
+Two are the exception, because they are **build** arguments rather than runtime
+configuration: `APP_UID` and `APP_GID` decide the uid the containers run as and
+are baked into the image. Changing either takes a `--build`, which step 3 does
+anyway — but it does not move data already on disk. If you change them, chown
+the bind-mounted directories to match in the same window, or the containers will
+not be able to read what they wrote yesterday.
+
 ---
 
 ## Rolling back
