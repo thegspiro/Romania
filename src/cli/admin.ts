@@ -16,6 +16,7 @@
  *   node dist/cli/admin.js sessions-revoke --username u
  *   node dist/cli/admin.js export --out /data/backups/export
  *   node dist/cli/admin.js enqueue-backup [--keep 14] [--no-files]
+ *   node dist/cli/admin.js reproject
  */
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
@@ -46,6 +47,7 @@ import {
   requestBackup,
 } from '../content/backups.js';
 import { exportCorpus } from '../content/export.js';
+import { reprojectAll } from '../content/mentions.js';
 import { ANONYMOUS, adminViewer } from '../content/visibility.js';
 
 const USERNAME_PATTERN = /^[a-z0-9][a-z0-9._-]{2,63}$/i;
@@ -195,6 +197,7 @@ function usage(): string {
     '  sessions-revoke    Sign out every session for an account',
     '  export             Write the whole corpus as Markdown and CSL-JSON',
     '  enqueue-backup     Queue a database and file backup for the worker',
+    '  reproject          Rebuild mention and citation rows from the prose',
     '',
     'Options:',
     '  --username <name>  Account to act on',
@@ -365,6 +368,31 @@ async function run(argv: string[]): Promise<number> {
           console.log('');
           console.log('This export contains unpublished material. The directory is 0700.');
         }
+        return 0;
+      }
+
+      case 'reproject': {
+        // The projection is written at save time and never revisited, so a
+        // change to how it is derived reaches old rows only when something
+        // re-runs it over them. This is that something -- an explicit command,
+        // not a hook, because re-deriving the whole corpus is not a thing that
+        // should happen as a side effect of anything.
+        console.log('Rebuilding references from prose. Each item is its own transaction.');
+
+        let lastReported = 0;
+        const summary = await reprojectAll(pool, (done, total) => {
+          // One line per 50, so a large corpus does not scroll a terminal off
+          // its own buffer while still showing that it is moving.
+          if (done - lastReported >= 50 || done === total) {
+            console.log(`  ${done}/${total}`);
+            lastReported = done;
+          }
+        });
+
+        console.log('');
+        console.log(`Reprojected ${summary.items} item${summary.items === 1 ? '' : 's'}:`);
+        console.log(`  mentions    ${summary.mentions}`);
+        console.log(`  citations   ${summary.citations}`);
         return 0;
       }
 

@@ -577,6 +577,7 @@ docker compose exec web /app/scripts/entrypoint.sh <command>
 | `admin recovery-codes --username u`        | Generate a fresh set of codes              |
 | `admin sessions-revoke --username u`       | Sign out everywhere                        |
 | `admin enqueue-backup [--keep n]`          | Queue a database and file backup           |
+| `admin reproject`                          | Rebuild mention rows from the prose        |
 | `preflight`                                | Report on the whole install and exit       |
 | `migrate status`                           | Show which migrations are applied          |
 | `migrate up`                               | Apply pending migrations                   |
