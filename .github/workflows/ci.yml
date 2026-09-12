@@ -15,6 +15,10 @@ on:
   pull_request:
   push:
     branches: [main]
+    # A version tag publishes a version-tagged image. Nothing in the
+    # repository creates one yet; the trigger exists so that when it does, the
+    # same validated pipeline is what produces the artifact.
+    tags: ['v*']
 
 permissions:
   contents: read
@@ -382,7 +386,11 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
-          tags: dissertation-platform:latest
+          # Must match the `image:` in docker-compose.yml, which is now the
+          # GHCR path: the stack is brought up with --no-build, so a tag that
+          # does not match sends compose to the registry for an image this job
+          # just built locally.
+          tags: ghcr.io/thegspiro/romania:latest
           load: true
           provenance: false
           cache-from: type=gha,scope=linux/amd64
@@ -477,3 +485,97 @@ jobs:
       # downloads are the right architecture rather than merely the right size.
       - name: Smoke test the image
         run: .github/scripts/smoke-test-image.sh dissertation-platform:ci
+
+  # --------------------------------------------------------------------------
+  # Publishing the image.
+  #
+  # Until this job existed, CI built the image on every pull request and threw
+  # it away, so the only way to install was to clone and build -- which on
+  # Unraid ruled out both Community Applications and the Docker tab, since each
+  # installs by pulling.
+  #
+  # It deliberately does NOT run on a pull request. A fork's token cannot write
+  # packages in any case, but the rule worth stating is the other one: an image
+  # built from code nobody has reviewed must not be the one an operator pulls.
+  # `needs` names every other job for the same reason -- a published image is
+  # an artifact somebody deploys, so it should not exist unless the tests,
+  # the invariants and both architectures passed.
+  publish:
+    name: publish the image
+    if: github.event_name == 'push'
+    needs: [node, python, migrations, rehearsal, compose, docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    permissions:
+      contents: read
+      # Only this job gets it. The workflow-level default stays contents:read,
+      # so a change elsewhere cannot quietly acquire the ability to publish.
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Resolve the image name and tags
+        id: meta
+        run: |
+          set -eu
+          # GHCR rejects an uppercase path and this repository is "Romania",
+          # so the owner/name pair is lowercased rather than hard-coded --
+          # a fork publishes to its own namespace without editing this file.
+          image="ghcr.io/$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+
+          # Always an immutable tag naming the exact commit, so a deployment
+          # can pin to something that will never move under it. `latest` moves,
+          # which is why it is not the only thing published.
+          tags="${image}:sha-$(printf '%s' "${GITHUB_SHA}" | cut -c1-12)"
+          case "${GITHUB_REF}" in
+            refs/heads/main) tags="${tags},${image}:latest" ;;
+            refs/tags/v*)    tags="${tags},${image}:${GITHUB_REF_NAME#v},${image}:latest" ;;
+          esac
+
+          printf 'image=%s\n' "$image" >> "$GITHUB_OUTPUT"
+          printf 'tags=%s\n' "$tags" >> "$GITHUB_OUTPUT"
+          printf 'publishing %s\n' "$tags"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@6524bf65af31da8d45b59e8c27de4bd072b392f5 # v3.8.0
+
+      # Plain `docker login` rather than docker/login-action: it is two lines,
+      # and every third-party action here has to be pinned to a commit and
+      # then kept current. The token is the job's own GITHUB_TOKEN, scoped by
+      # the `permissions` block above and gone when the job ends.
+      - name: Log in to GHCR
+        run: |
+          printf '%s' "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
+      # Both architectures in one invocation, which is what produces a single
+      # multi-architecture manifest rather than two unrelated images. It reads
+      # the cache the `docker` job just wrote for each platform, so this is
+      # close to a no-op rather than a second full build.
+      - name: Build and push
+        uses: docker/build-push-action@67a2d409c0a876cbe6b11854e3e25193efe4e62d # v6.12.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          push: true
+          # An attestation build produces a manifest list with extra entries
+          # that older clients and some mirrors handle badly. The images this
+          # publishes are meant to be pulled by `docker compose` on a NAS, so
+          # the plain manifest is the compatible choice.
+          provenance: false
+          cache-from: |
+            type=gha,scope=linux/amd64
+            type=gha,scope=linux/arm64
+
+      # Prints the manifest that was actually published, so the log answers
+      # "did both architectures land under that tag?" without a registry visit.
+      - name: Show what was published
+        run: docker buildx imagetools inspect "${{ steps.meta.outputs.image }}:sha-$(printf '%s' "${GITHUB_SHA}" | cut -c1-12)"

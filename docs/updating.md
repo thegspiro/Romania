@@ -6,16 +6,21 @@ without losing anything. It assumes the Compose deployment from
 Linux host or a cloud VM. The steps are identical; only the volume paths
 differ.
 
-An update here is a **rebuild from source**, not an image pull. There is no
-published container image, so `docker compose pull` has nothing to fetch — the
-clone you installed from is the build context.
+An update moves two things: the **compose files and `.env` template** in your
+clone, and the **image**. Pull both — a new revision may change what the stack
+expects of its configuration, and a compose file from three months ago paired
+with today's image is a combination nobody tested.
 
 Read this once before your first update. The short version:
 
 ```sh
 git pull --ff-only origin main
-docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
+
+If you build locally rather than pull — which on Unraid is what running as uid
+99 requires — the second line is `docker compose up -d --build` instead, and
+`docker compose pull` does nothing useful.
 
 Everything below is about doing that safely and knowing how to reverse it.
 
@@ -24,8 +29,8 @@ Everything below is about doing that safely and knowing how to reverse it.
 ## Why the data survives a rebuild
 
 Nothing durable lives in the image or in a container's own filesystem. Three
-volumes hold everything, and `docker compose up -d --build` reattaches all
-three to the containers it recreates:
+volumes hold everything, and `docker compose up -d` reattaches all three to the
+containers it recreates — whether the new image was pulled or built:
 
 | Volume     | Mounted at       | Holds                                  |
 | ---------- | ---------------- | -------------------------------------- |
@@ -55,7 +60,7 @@ comes first.
 
 > **`docker compose down -v` deletes the volumes.** That flag is the one way
 > to lose the database through an ordinary-looking command. Plain
-> `docker compose down` keeps them, and so does `up -d --build`. On Unraid,
+> `docker compose down` keeps them, and so does `up -d`. On Unraid,
 > the equivalent mistake is deleting `/mnt/user/appdata/dissertation/mysql`
 > while "cleaning up appdata".
 
@@ -161,18 +166,24 @@ service for a managed database — the pull may conflict. Resolve it in favour
 of keeping your deletion, and consider moving everything that _can_ live in
 `docker-compose.override.yml` there so future pulls are clean.
 
-### 4. Rebuild and restart
+### 4. Fetch the new image and restart
 
 ```sh
-docker compose up -d --build
+docker compose pull          # or: skip, and add --build below
+docker compose up -d
 docker compose logs -f web
 ```
 
 In the log you want, in order: `entrypoint: applying database migrations`, the
 new versions being applied, then `entrypoint: starting web service`.
 
-The `db` service is a pinned upstream image and is not rebuilt; only `web` and
-`worker` come from this repository.
+The `db` service is a pinned upstream image and is not rebuilt or re-pulled by
+this; only `web` and `worker` come from this repository.
+
+`docker compose pull` with `IMAGE_TAG` unset follows `latest`, which moves with
+every merge to `main`. If you pinned `IMAGE_TAG` to a `sha-` tag, raise it in
+`.env` first — otherwise the pull re-fetches the tag you are already on and the
+restart changes nothing, which reads like a failed update.
 
 ### 5. Verify
 
@@ -259,13 +270,26 @@ db/migrations. Restore them before rolling back.`
 #    were on BEFORE the update, not the one you are on now.
 docker compose exec web /app/scripts/entrypoint.sh migrate down --to 13
 
-# 2. Now go back to the old code and rebuild.
+# 2. Now go back to the old revision.
 git checkout "$(cat /path/on/host/last-known-good.txt)"
-docker compose up -d --build
+
+#    Pin the image to that same commit and pull it, rather than rebuilding:
+#    every published commit carries an immutable sha- tag, so the rollback
+#    fetches the exact artifact that was running before.
+printf 'IMAGE_TAG=sha-%s\n' "$(git rev-parse --short=12 HEAD)" >> .env
+docker compose pull && docker compose up -d
+
+#    Building locally instead? Then it is `docker compose up -d --build`, and
+#    IMAGE_TAG is irrelevant.
 
 # 3. Confirm.
 docker compose run --rm web preflight
 ```
+
+Pinning is worth doing even if you were following `latest`: it stops the next
+`docker compose pull` from silently carrying you forward again to the revision
+you just rolled back from. Remove the line from `.env` when you roll forward
+deliberately.
 
 Step 1 needs a running `web` container. If the new version will not start at
 all, use `run` instead, which does not need a healthy service:
