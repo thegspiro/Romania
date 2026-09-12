@@ -19,6 +19,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   cookieHeader,
   createHarness,
+  csrfFrom,
   databaseAvailable,
   signIn,
   truncateContent,
@@ -614,6 +615,75 @@ describe.skipIf(!available)('relational browsing', () => {
         headers: { cookie: cookieHeader(jar) },
       });
       expect(section(asAdmin.body)).toContain('Mihai Antonescu');
+    });
+
+    /**
+     * The editor shows the same section, read with the administrator's viewer.
+     *
+     * That difference is the point of having it here: the editor is where an
+     * edge worth asserting becomes visible, and the connections the operator is
+     * in the middle of recording are exactly the unpublished ones a reader
+     * cannot reach.
+     */
+    it('shows the section on the editor, including a route a reader cannot take', async () => {
+      const { centre } = await chain({ middle: 'private' });
+
+      // The institution is unpublished, so no reader gets from one end to the
+      // other...
+      const anonymous = await harness.app.inject({ method: 'GET', url: '/people/the-subject' });
+      expect(anonymous.body).not.toContain('Connected through');
+
+      // ...but the operator is the one recording it.
+      const jar = await signIn(harness);
+      const form = await harness.app.inject({
+        method: 'GET',
+        url: `/admin/people/${String(centre)}/edit`,
+        headers: { cookie: cookieHeader(jar) },
+      });
+      expect(form.statusCode).toBe(200);
+      expect(section(form.body)).toContain('Mihai Antonescu');
+      expect(section(form.body)).toContain('Council of Ministers');
+    });
+
+    it('omits the section from the editor when there is no second hop', async () => {
+      const centre = await makeEntity(harness.pool, 'person', 'The Subject', 'public');
+      const jar = await signIn(harness);
+
+      const form = await harness.app.inject({
+        method: 'GET',
+        url: `/admin/people/${String(centre)}/edit`,
+        headers: { cookie: cookieHeader(jar) },
+      });
+      expect(form.body).not.toContain('Connected through');
+    });
+
+    it('keeps the section when a save is refused and the form comes back', async () => {
+      // The re-render after a validation failure is its own code path, and the
+      // one most likely to drift from the page it is supposed to reproduce.
+      const { centre } = await chain({});
+      const jar = await signIn(harness);
+      const form = await harness.app.inject({
+        method: 'GET',
+        url: `/admin/people/${String(centre)}/edit`,
+        headers: { cookie: cookieHeader(jar) },
+      });
+
+      const refused = await harness.app.inject({
+        method: 'POST',
+        url: `/admin/people/${String(centre)}`,
+        headers: {
+          cookie: cookieHeader(jar),
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        payload: new URLSearchParams({
+          _csrf: csrfFrom(form.body),
+          title: '',
+          visibility: 'public',
+        }).toString(),
+      });
+
+      expect(refused.statusCode).toBe(400);
+      expect(section(refused.body)).toContain('Mihai Antonescu');
     });
 
     it('narrows to the year the page was asked for, as the drawing does', async () => {
