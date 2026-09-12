@@ -9,7 +9,7 @@
  * Every check passes on the tree as it stands, so this locks in the current
  * state rather than demanding a cleanup.
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 const ROOT = new URL('../..', import.meta.url).pathname.replace(/\/$/, '');
@@ -275,6 +275,68 @@ if (webBlock === null) {
   }
 }
 
+// --- Unraid templates ------------------------------------------------------
+//
+// unraid/*.xml restate configuration that lives in .env.example: a Community
+// Applications template describes one container in full, so there is no
+// `env_file` to point at. Two copies of a configuration surface drift, and the
+// drift is silent -- an operator installing from the template simply never
+// sets the value, and the container fails at startup with a message about a
+// variable they were never shown.
+//
+// So every Variable a template names must be one .env.example documents. This
+// catches a rename or a removal; it deliberately does NOT require the reverse,
+// because most of .env.example is optional and a template that exposed all of
+// it would be unusable.
+
+const UNRAID_DIR = join(ROOT, 'unraid');
+
+if (existsSync(UNRAID_DIR)) {
+  const envExample = readFileSync(join(ROOT, '.env.example'), 'utf8');
+  const documentedNames = new Set(
+    [...envExample.matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=/gm)].map((match) => match[1]),
+  );
+
+  // Set by the entrypoint or the image rather than by .env.example, so they are
+  // legitimately absent from it.
+  const NOT_FROM_ENV_EXAMPLE = new Set(['RUN_MIGRATIONS']);
+
+  for (const file of walk(UNRAID_DIR, '.xml')) {
+    const contents = readFileSync(file, 'utf8');
+
+    // Parsed with a regex rather than an XML library on purpose: this script
+    // has no dependencies, and a malformed template fails the shape check
+    // below rather than passing silently.
+    if (!/<Container\s+version="2">/.test(contents)) {
+      fail(file, 1, 'not a <Container version="2"> template; CA will not read it.');
+      continue;
+    }
+    // Lowercase because GHCR rejects an uppercase path and this repository is
+    // "Romania"; the tag is part of the match so a stray uppercase one is caught
+    // as well.
+    if (!/<Repository>ghcr\.io\/[a-z0-9._/-]+(:[a-z0-9._-]+)?<\/Repository>/.test(contents)) {
+      fail(file, 1, 'Repository must be the published, lowercase ghcr.io image reference.');
+    }
+    if (!/<PostArgs>(web|worker)<\/PostArgs>/.test(contents)) {
+      fail(file, 1, 'PostArgs must select a role -- <PostArgs>web</PostArgs> or worker.');
+    }
+
+    for (const match of contents.matchAll(/<Config\b[^>]*\bType="Variable"[^>]*>/g)) {
+      const target = /\bTarget="([^"]+)"/.exec(match[0])?.[1];
+      if (target === undefined) continue;
+      if (NOT_FROM_ENV_EXAMPLE.has(target)) continue;
+      if (documentedNames.has(target)) continue;
+      const number = contents.slice(0, match.index).split('\n').length;
+      fail(
+        file,
+        number,
+        `${target} is offered by this template but is not documented in .env.example. ` +
+          'Either it was renamed there, or the template is offering a variable nothing reads.',
+      );
+    }
+  }
+}
+
 // --- Report ----------------------------------------------------------------
 
 if (failures.length > 0) {
@@ -286,5 +348,5 @@ if (failures.length > 0) {
 
 console.log(
   'invariants hold: safe-filter allowlist, no inline styles, nonced scripts, visibility chokepoint, ' +
-    'matching mysql pin, no stray secrets on web',
+    'matching mysql pin, no stray secrets on web, unraid templates in step',
 );

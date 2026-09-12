@@ -646,6 +646,27 @@ who needs another uid gives up pulling. That was a clean trade when every
 install built; it is a real limitation now. `docs/unraid.md` states both paths
 honestly rather than pretending the old rationale still holds.
 
+### The Unraid templates
+
+`unraid/dissertation-web.xml` and `unraid/dissertation-worker.xml` are
+Community Applications templates -- one image, the role chosen by `<PostArgs>`,
+which is the shape authentik uses on CA. They exist so the application can be
+installed from the Unraid Docker tab; they are not a replacement for the
+compose files, which remain what `docs/unraid.md` recommends.
+
+A CA template describes **one container**, so these cannot express the stack.
+Three things they make an operator keep in step by hand -- the database, an
+identical `/data/files` on both containers, and the uid -- are exactly what the
+compose files express for them. Say that plainly wherever they are documented
+rather than selling the template path as equivalent.
+
+**They restate configuration that lives in `.env.example`**, because a template
+has no `env_file` to point at. That is a second copy, so `check-invariants.mjs`
+fails when a template offers a `Type="Variable"` the file does not document --
+a rename there otherwise leaves an operator setting a variable nothing reads.
+The reverse is deliberately not checked: most of `.env.example` is optional and
+a template exposing all of it would be unusable.
+
 ### Pinned images
 
 Base images are pinned by digest with the tag kept beside them, for the reason
