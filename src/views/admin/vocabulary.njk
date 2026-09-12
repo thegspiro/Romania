@@ -1,0 +1,77 @@
+{% extends "layouts/admin.njk" %}
+
+{% block title %}Vocabulary — Admin{% endblock %}
+
+{#
+  What each relationship type is allowed to connect.
+
+  Migration 0014 seeded a value for every predicate it found. Those values are
+  a judgement about a history vocabulary rather than a fact about the schema,
+  and a refusal is hard, so they have to be correctable here: a domain that is
+  too narrow would block a claim the sources support, and fixing it must not
+  need a second migration.
+
+  Unchecking every box on a side stores "no opinion", not "connects nothing" --
+  a verb that connects nothing could never be used. Retiring a verb is deleting
+  it, which this screen deliberately does not do: `relationship.predicate_id`
+  is a RESTRICT foreign key, so a verb in use cannot be removed without first
+  deciding what happens to every edge asserted with it.
+
+  Every label here is operator-supplied text under autoescape. Nothing is
+  marked safe.
+#}
+{% block content %}
+  <h1>Vocabulary</h1>
+
+  <p class="hint">
+    Each relationship type may be limited to the kinds of item it makes sense
+    between — “Born in” joins a person to a place. A type with nothing ticked
+    on a side accepts any kind there, which is what every type did before this
+    screen existed.
+  </p>
+  <p class="hint">
+    Changing a type governs what may be asserted from now on. Connections
+    already recorded are never re-checked and never removed.
+  </p>
+
+  <ul class="vocabulary-list">
+    {% for predicate in predicates %}
+      <li>
+        <form method="post" action="/admin/vocabulary/{{ predicate.id }}" class="vocabulary-form">
+          <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+
+          <h2>{{ predicate.label }}</h2>
+          <p class="muted small">
+            Read the other way: {{ predicate.inverseLabel }}
+            {% if predicate.isSymmetric %} · says the same thing both ways{% endif %}
+            · <code>{{ predicate.code }}</code>
+          </p>
+
+          <fieldset>
+            <legend>From</legend>
+            {% for kind in kinds %}
+              <label class="checkbox">
+                <input type="checkbox" name="domainKinds" value="{{ kind }}"
+                       {% if predicate.domainKinds and kind in predicate.domainKinds %}checked{% endif %} />
+                {{ kind }}
+              </label>
+            {% endfor %}
+          </fieldset>
+
+          <fieldset>
+            <legend>To</legend>
+            {% for kind in kinds %}
+              <label class="checkbox">
+                <input type="checkbox" name="rangeKinds" value="{{ kind }}"
+                       {% if predicate.rangeKinds and kind in predicate.rangeKinds %}checked{% endif %} />
+                {{ kind }}
+              </label>
+            {% endfor %}
+          </fieldset>
+
+          <button type="submit">Save</button>
+        </form>
+      </li>
+    {% endfor %}
+  </ul>
+{% endblock %}

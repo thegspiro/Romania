@@ -36,6 +36,8 @@ export type AuditAction =
   | 'relationship.delete'
   | 'relationship.publish'
   | 'relationship.unpublish'
+  // Retyping a verb changes what may be asserted with it from then on.
+  | 'predicate.retype'
   | 'zotero.sync'
   | 'zotero.sync.full'
   | 'backup.requested'

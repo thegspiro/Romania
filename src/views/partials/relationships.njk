@@ -78,17 +78,26 @@
         "Has member" from the institution store the same row; the server swaps
         the ends for a reverse reading. A symmetric predicate appears once,
         because its two readings say the same thing.
+
+        The list is already narrowed to the readings that make sense on this
+        page's kind, and each option names what it may point at -- so the form
+        says what it accepts rather than leaving the operator to discover it
+        from a refusal. Both are done on the server; nothing here needs script.
       #}
       <p class="field">
         <label for="predicate">Relationship</label>
         <select id="predicate" name="predicate" required>
           {% for choice in predicateChoices %}
-            <option value="{{ choice.value }}">{{ choice.label }}</option>
+            <option value="{{ choice.value }}">
+              {{ choice.label }}{% if choice.targetKinds %} → {{ choice.targetKinds | join(', ') }}{% endif %}
+            </option>
           {% endfor %}
         </select>
         <span class="hint">
           Read from this page outward. Choosing “Has member” records the same
-          connection as choosing “Member of” from the other item's page.
+          connection as choosing “Member of” from the other item's page. The
+          kinds after each arrow are what that relationship accepts at the far
+          end; one with no arrow accepts anything.
         </span>
       </p>
 
