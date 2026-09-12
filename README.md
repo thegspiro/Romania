@@ -44,9 +44,9 @@ What is built and working:
 | **Zotero sync** — pull a library in and keep it in step                   | Complete (incremental; deletions are flagged, never obeyed)                                                         |
 | Deployment — Docker, Compose, migrations, CLI                             | Complete                                                                                                            |
 | **Corpus export** — Markdown, CSL-JSON, and a rehearsed restore           | Complete                                                                                                            |
+| **Corpus-wide search** — every kind at once, with snippets                | Complete (admin-only; a query, not an index)                                                                        |
 | Maps                                                                      | **Not yet** (Leaflet is vendored; coordinates are in the schema)                                                    |
 | Public downloads of compiled documents                                    | **Not yet** (deliberately admin-only for now — see below)                                                           |
-| Search beyond `LIKE`                                                      | **Not yet** (a search service is the first side-cart candidate)                                                     |
 
 Each of those is a separate change set on top of this one. The architecture
 below is what makes them additive rather than rewrites.

@@ -1284,3 +1284,47 @@ button.danger {
   padding-bottom: 1rem;
   border-bottom: 1px solid var(--rule);
 }
+
+/* --- Search results ------------------------------------------------------ */
+
+.search-results {
+  list-style: none;
+  margin: 1.25rem 0 0;
+  padding: 0;
+}
+
+.search-result {
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.search-result-heading {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: baseline;
+  font-family: var(--sans);
+}
+
+.search-result-kind {
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+}
+
+/* The snippet is prose, so it reads in the serif the rest of the material
+   uses, not the interface sans. */
+.search-snippet {
+  margin: 0.35rem 0 0;
+  font-family: var(--serif);
+  color: var(--ink-muted);
+  max-width: var(--measure);
+}
+
+.search-snippet mark {
+  background: var(--accent-soft);
+  color: var(--ink);
+  padding: 0 0.1rem;
+}
