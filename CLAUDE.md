@@ -615,6 +615,11 @@ tag** and `needs` every other job. Two rules follow and should stay true:
   must not be the one an operator pulls.
 - `packages: write` is granted to that job alone, not at workflow level, so
   nothing else can acquire the ability to publish by accident.
+- **`needs` must not name `migrations`.** That job is `pull_request`-only, so
+  on a push it is skipped -- and Actions skips any job whose `needs` names a
+  skipped one. The first merge after `publish` was added went green having
+  published nothing, because a skipped job reads as neither failure nor
+  absence. Anything added to `needs` has to be able to run on a push.
 
 `docker-compose.yml` names that image, so `up -d` pulls and `up -d --build`
 still builds -- and the `compose` job builds under the same tag, because it
