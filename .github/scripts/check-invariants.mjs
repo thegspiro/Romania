@@ -36,6 +36,10 @@ const SAFE_ALLOWLIST = new Map([
   ['summaryHtml', 'renderFragment'],
   ['biographyHtml', 'renderFragment'],
   ['abstractHtml', 'renderFragment'],
+  // An artifact's transcription is prose, rendered by renderProse in
+  // src/routes/public-content.ts with the request's viewer -- so a reference
+  // the viewer may not follow is already escaped text by the time it is here.
+  ['transcriptionHtml', 'renderProse'],
 ]);
 
 /** A line may opt out of the visibility rule by explaining itself. */
