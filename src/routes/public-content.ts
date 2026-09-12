@@ -41,6 +41,7 @@ import {
 } from '../content/timeline.js';
 import { findServableFile } from '../files/repository.js';
 import { resolveStoragePath } from '../files/storage.js';
+import { findMappablePlace } from '../content/places.js';
 import { parseSlug } from './form.js';
 
 export function registerPublicContentRoutes(app: FastifyInstance, context: AppContext): void {
@@ -107,6 +108,13 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
       // how coarsely the event itself is dated.
       const around = event === null ? [] : await listEventsAround(pool, event, request.viewer);
 
+      // A place with coordinates carries a single marker. The read is filtered
+      // like any other, so this is null for a place the viewer may not see --
+      // which cannot happen here, since `findEntityBySlug` already 404ed, but
+      // the point is that the map never learns anything the page did not.
+      const point =
+        kind === 'place' ? await findMappablePlace(pool, request.viewer, record.id) : null;
+
       return renderPage(
         config,
         request,
@@ -133,6 +141,9 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
           // without JavaScript. Re-parsed rather than echoed, so nothing from
           // the query string reaches the page unchecked.
           graphYear: parseGraphYear((request.query as { year?: unknown }).year),
+          point,
+          mapTileUrl: config.MAP_TILE_URL ?? '',
+          mapTileAttribution: config.MAP_TILE_ATTRIBUTION ?? '',
           canonicalUrl: `${config.PUBLIC_BASE_URL}${record.href}`,
         },
         { noindex: record.noindex || record.visibility !== 'public' },

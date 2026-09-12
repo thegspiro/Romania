@@ -1,0 +1,73 @@
+{% extends "layouts/base.njk" %}
+
+{% block title %}Map — Dissertation Research{% endblock %}
+
+{% block head %}<link rel="stylesheet" href="/assets/vendor/leaflet/leaflet.css" />{% endblock %}
+
+{% block content %}
+  <article class="prose-page">
+    <header class="page-heading">
+      <h1>Map</h1>
+    </header>
+
+    <p class="hint">
+      Every place with coordinates that you may see. A place without
+      coordinates is not on the map — nothing has been left out or withheld,
+      it simply has no position recorded.
+      {% if not mapTileUrl %}
+        No basemap is configured, so the markers are drawn on a plain canvas
+        and nothing outside this site is requested.
+      {% endif %}
+    </p>
+
+    {% if places.length == 0 %}
+      <p class="empty">No places have coordinates yet.</p>
+    {% else %}
+      <div
+        id="places-map"
+        class="map-canvas map-canvas-large"
+        data-places-url="/map/places.json"
+        data-tile-url="{{ mapTileUrl }}"
+        data-tile-attribution="{{ mapTileAttribution }}"
+        role="img"
+        aria-label="Map of every place with recorded coordinates"
+      ></div>
+
+      <p id="places-map-status" class="muted small" role="status"></p>
+
+      {% if truncated %}
+        <p class="hint">
+          Showing the first {{ maxPoints }} of {{ total }} places, in title
+          order. The list below matches what is drawn.
+        </p>
+      {% endif %}
+
+      {#
+        The same set as text. This is what makes the map an enhancement rather
+        than the only way to read the page: without JavaScript, or without
+        Leaflet, this list still answers "where is everything?".
+      #}
+      <section>
+        <h2>{{ total }} place{{ 's' if total != 1 }} with coordinates</h2>
+        <ul class="place-list">
+          {% for place in places %}
+            <li>
+              <a href="{{ place.href }}">{{ place.title }}</a>
+              <span class="muted small">
+                {{ place.latitude }}, {{ place.longitude }} ({{ place.precision }})
+              </span>
+              {% if place.visibility != 'public' %}
+                <span class="badge badge-private">Private</span>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endif %}
+  </article>
+{% endblock %}
+
+{% block scripts %}
+  <script nonce="{{ nonce }}" src="/assets/vendor/leaflet/leaflet.js"></script>
+  <script nonce="{{ nonce }}" src="/assets/js/map.js"></script>
+{% endblock %}

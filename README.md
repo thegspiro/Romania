@@ -44,7 +44,7 @@ What is built and working:
 | **Zotero sync** — pull a library in and keep it in step                   | Complete (incremental; deletions are flagged, never obeyed)                                                         |
 | Deployment — Docker, Compose, migrations, CLI                             | Complete                                                                                                            |
 | **Corpus export** — Markdown, CSL-JSON, and a rehearsed restore           | Complete                                                                                                            |
-| Maps                                                                      | **Not yet** (Leaflet is vendored; coordinates are in the schema)                                                    |
+| **Maps** — places, with queued geocoding                                  | Complete (no basemap unless a tile host is configured)                                                              |
 | Public downloads of compiled documents                                    | **Not yet** (deliberately admin-only for now — see below)                                                           |
 | Search beyond `LIKE`                                                      | **Not yet** (a search service is the first side-cart candidate)                                                     |
 

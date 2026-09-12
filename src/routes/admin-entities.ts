@@ -42,6 +42,7 @@ import {
   type EventBoundsInput,
 } from '../content/timeline.js';
 import { recordAudit } from '../content/audit.js';
+import { requestGeocode } from '../content/places.js';
 import { actorId, filterQuery, flashFor, parseId, readCheckbox, readString } from './form.js';
 
 /** Detail fields each kind reads from its form. */
@@ -270,6 +271,42 @@ export function registerAdminEntityRoutes(admin: FastifyInstance, context: AppCo
         { noindex: true, flash: flashFor(request) },
       );
     });
+
+    if (kind === 'place') {
+      // Registered before '/admin/places/:id' so the static segment is
+      // unambiguous; Fastify would prefer it either way.
+      //
+      // The web service never calls Nominatim. It queues the job and the
+      // worker does the lookup, for the same reason the Zotero API key lives
+      // only in the worker: the process facing the internet holds no
+      // credential and makes no outbound request on a visitor's behalf.
+      admin.post(`/admin/${path}/:id/geocode`, async (request, reply) => {
+        const id = parseId(request);
+        const existing = await findEntityById(pool, kind, id, request.viewer);
+        if (existing === null) throw notFound(`${kind} ${id}`);
+
+        const outcome = await requestGeocode(pool, id);
+
+        if (outcome === 'queued') {
+          await recordAudit(
+            pool,
+            {
+              actor: actorId(request),
+              action: 'place.geocode',
+              itemId: id,
+              ip: request.ip,
+            },
+            request.log,
+          );
+        }
+
+        return reply.redirect(
+          `/admin/${path}/${id}/edit?msg=${
+            outcome === 'queued' ? 'geocode_queued' : 'geocode_already_queued'
+          }`,
+        );
+      });
+    }
 
     admin.post(`/admin/${path}/:id`, async (request, reply) => {
       const id = parseId(request);
