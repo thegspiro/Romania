@@ -12,11 +12,14 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  LINKABLE_KINDS,
   columnToIsoDate,
   edgeLabel,
   formatPeriod,
+  isLinkableKind,
   isPeriodPrecision,
   isoDate,
+  parsePredicateChoice,
   type PeriodPrecision,
 } from '../../src/content/relationships.js';
 
@@ -134,5 +137,61 @@ describe('isPeriodPrecision', () => {
     for (const value of ['days', 'Year', '', null, 1, undefined]) {
       expect(isPeriodPrecision(value)).toBe(false);
     }
+  });
+});
+
+describe('isLinkableKind', () => {
+  it('accepts the four entity kinds and artifacts', () => {
+    for (const kind of LINKABLE_KINDS) expect(isLinkableKind(kind)).toBe(true);
+    expect(LINKABLE_KINDS).toContain('artifact');
+  });
+
+  it('refuses a source, whose authorship is already its CSL record', () => {
+    // A created_by edge beside the CSL author list would be a second answer
+    // to "who wrote this".
+    expect(isLinkableKind('source')).toBe(false);
+  });
+
+  it('refuses an essay, whose connections are projected from its prose', () => {
+    // `mention` rows are rebuilt from the text by rebuildReferences and
+    // written by nothing else; a hand-asserted edge would be the hand-edited
+    // projection this application refuses to keep.
+    expect(isLinkableKind('essay')).toBe(false);
+  });
+
+  it('refuses anything that is not a kind at all', () => {
+    expect(isLinkableKind('manuscript')).toBe(false);
+    expect(isLinkableKind('')).toBe(false);
+    expect(isLinkableKind(7)).toBe(false);
+    expect(isLinkableKind(null)).toBe(false);
+    expect(isLinkableKind(undefined)).toBe(false);
+  });
+});
+
+describe('parsePredicateChoice', () => {
+  it('reads both directions', () => {
+    expect(parsePredicateChoice('12:forward')).toEqual({ predicateId: 12, reverse: false });
+    expect(parsePredicateChoice('12:reverse')).toEqual({ predicateId: 12, reverse: true });
+  });
+
+  it('tolerates surrounding whitespace', () => {
+    expect(parsePredicateChoice('  3:reverse  ')).toEqual({ predicateId: 3, reverse: true });
+  });
+
+  it('refuses a direction that does not exist', () => {
+    // A hand-edited form must not be able to name a third reading.
+    expect(parsePredicateChoice('12:sideways')).toBeNull();
+    expect(parsePredicateChoice('12')).toBeNull();
+    expect(parsePredicateChoice('12:')).toBeNull();
+  });
+
+  it('refuses anything that is not a predicate id', () => {
+    expect(parsePredicateChoice('0:forward')).toBeNull();
+    expect(parsePredicateChoice('-1:forward')).toBeNull();
+    expect(parsePredicateChoice('1e3:forward')).toBeNull();
+    expect(parsePredicateChoice('9999999999:forward')).toBeNull();
+    expect(parsePredicateChoice('')).toBeNull();
+    expect(parsePredicateChoice(null)).toBeNull();
+    expect(parsePredicateChoice(42)).toBeNull();
   });
 });

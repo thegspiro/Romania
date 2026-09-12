@@ -147,6 +147,33 @@ export function edgeLabel(label: string, roleTitle: string | null, period: strin
   return period === null ? head : `${head}, ${period}`;
 }
 
+/**
+ * The kinds that may be either end of a typed edge.
+ *
+ * The table's foreign keys point at `content_item`, so the database would
+ * accept any kind. This is the narrower list the admin form offers, and the
+ * only one the route accepts.
+ *
+ * `artifact` is here because the starter vocabulary was seeded with `depicts`
+ * and `created_by` for it in migration 0002 and there has never been a way to
+ * use them: a photograph is *of* someone and *by* someone, and neither fact
+ * fits anywhere else on the record.
+ *
+ * `source` and `essay` are deliberately absent, for opposite reasons. A
+ * source's authorship already lives in its CSL-JSON and is rendered by
+ * citeproc -- a `created_by` edge beside it would be a second answer to "who
+ * wrote this". An essay's connections are `mention` rows, projected from its
+ * prose by `rebuildReferences` and written by nothing else; a hand-asserted
+ * edge saying the same thing would be exactly the hand-edited projection this
+ * application refuses to keep.
+ */
+export const LINKABLE_KINDS = ['person', 'organization', 'place', 'event', 'artifact'] as const;
+export type LinkableKind = (typeof LINKABLE_KINDS)[number];
+
+export function isLinkableKind(value: unknown): value is LinkableKind {
+  return typeof value === 'string' && (LINKABLE_KINDS as readonly string[]).includes(value);
+}
+
 export interface Predicate {
   id: number;
   code: string;
@@ -176,6 +203,76 @@ export async function listPredicates(db: Pool | PoolConnection): Promise<Predica
     inverseLabel: row.inverse_label,
     isSymmetric: row.is_symmetric === 1,
   }));
+}
+
+/**
+ * One reading of one predicate, as the relationship form offers it.
+ *
+ * An edge is stored in one direction, but it is asserted from whichever page
+ * the operator is standing on. Offering only the forward reading meant that
+ * recording "this institution had X as a member" required navigating to X and
+ * choosing "Member of" there -- so the natural direction to work in, outward
+ * from an institution, was the one the form did not support.
+ *
+ * A symmetric predicate appears once: `is_symmetric` marks the predicates
+ * whose inverse says the same thing, and "Associated with" twice in a list is
+ * a choice between identical options. This is the first thing to read that
+ * column -- it was loaded and never used, which meant a symmetric predicate
+ * whose two labels differed would have gone unnoticed.
+ */
+export interface PredicateChoice {
+  /** The form value: the predicate's id and which way to read it. */
+  value: string;
+  /** What the option says, read from the page the form is on. */
+  label: string;
+  predicateId: number;
+  /** True when choosing this makes the page's item the `to` end. */
+  reverse: boolean;
+}
+
+/** Every reading of every predicate, in one alphabetical list. */
+export async function listPredicateChoices(db: Pool | PoolConnection): Promise<PredicateChoice[]> {
+  const choices: PredicateChoice[] = [];
+
+  for (const predicate of await listPredicates(db)) {
+    choices.push({
+      value: `${String(predicate.id)}:forward`,
+      label: predicate.label,
+      predicateId: predicate.id,
+      reverse: false,
+    });
+    if (predicate.isSymmetric) continue;
+    choices.push({
+      value: `${String(predicate.id)}:reverse`,
+      label: predicate.inverseLabel,
+      predicateId: predicate.id,
+      reverse: true,
+    });
+  }
+
+  // Sorted across both readings rather than grouped by predicate: the operator
+  // is looking for a phrase, not for a row of the vocabulary table.
+  return choices.sort((left, right) =>
+    left.label < right.label ? -1 : left.label > right.label ? 1 : 0,
+  );
+}
+
+/**
+ * Reads a choice back from the form.
+ *
+ * Returns null for anything that is not one of the values `listPredicateChoices`
+ * produced, so a hand-edited form cannot name a direction that does not exist.
+ */
+export function parsePredicateChoice(
+  value: unknown,
+): { predicateId: number; reverse: boolean } | null {
+  if (typeof value !== 'string') return null;
+  const match = /^(\d{1,9}):(forward|reverse)$/.exec(value.trim());
+  if (match === null) return null;
+
+  const id = Number(match[1]);
+  if (!Number.isSafeInteger(id) || id <= 0) return null;
+  return { predicateId: id, reverse: match[2] === 'reverse' };
 }
 
 export interface RelationshipView {

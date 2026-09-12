@@ -8,6 +8,7 @@
  */
 import type { Pool } from '../../src/db/pool.js';
 import { createEntity, type EntityKind } from '../../src/content/entities.js';
+import { createArtifact, type ArtifactInput } from '../../src/content/artifacts.js';
 import { createEssay, type EssayInput } from '../../src/content/essays.js';
 import { createManuscript, type ManuscriptInput } from '../../src/content/manuscripts.js';
 import { createSource, type SourceInput } from '../../src/content/sources.js';
@@ -118,4 +119,28 @@ export async function makeSource(
   visibility: Visibility,
 ): Promise<number> {
   return createSource(pool, sourceInput({ title, visibility }));
+}
+
+/** An artifact with only the fields a test cares about filled in. */
+export async function makeArtifact(
+  pool: Pool,
+  title: string,
+  visibility: Visibility,
+  overrides: Partial<ArtifactInput> = {},
+): Promise<number> {
+  return createArtifact(pool, {
+    title,
+    titleOriginal: '',
+    language: '',
+    summary: '',
+    visibility,
+    noindex: false,
+    provenance: '',
+    repositoryName: '',
+    physicalLocation: '',
+    dateCreated: '',
+    creditLine: '',
+    rightsStatement: '',
+    ...overrides,
+  });
 }

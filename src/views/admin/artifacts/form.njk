@@ -109,6 +109,10 @@
       </form>
     </section>
 
+    {% set record = artifact %}
+    {% set editable = true %}
+    {% set returnTo = '/admin/artifacts/' + artifact.id + '/edit' %}
+    {% include "partials/relationships.njk" %}
     {% include "partials/mentions.njk" %}
 
     <form method="post" action="/admin/artifacts/{{ artifact.id }}/delete" class="danger-form">

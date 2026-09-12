@@ -7,6 +7,9 @@
   An edge may carry the office it was held in and the period it held for. Both
   are plain text under autoescape -- never marked safe, because the operator
   types them.
+
+  `record` is whichever item's page this is. Every kind that may be an end of
+  an edge sets it before including this, so one form serves them all.
 #}
 <section class="relationships">
   <h2>Roles and relationships</h2>
@@ -38,6 +41,20 @@
           {% if relationship.note %}<div class="muted small">{{ relationship.note }}</div>{% endif %}
 
           {% if isAdmin and editable %}
+            {#
+              Publication is a decision about now, so it has to be changeable
+              after the fact -- an edge recorded privately and published later
+              should not have to be deleted and entered again.
+            #}
+            <form method="post" action="/admin/relationships/{{ relationship.id }}/visibility" class="inline-form">
+              <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
+              <input type="hidden" name="returnTo" value="{{ returnTo }}" />
+              <input type="hidden" name="visibility"
+                     value="{{ 'private' if relationship.visibility == 'public' else 'public' }}" />
+              <button type="submit" class="link-button">
+                {{ 'Make private' if relationship.visibility == 'public' else 'Make public' }}
+              </button>
+            </form>
             <form method="post" action="/admin/relationships/{{ relationship.id }}/delete" class="inline-form">
               <input type="hidden" name="_csrf" value="{{ csrfToken }}" />
               <input type="hidden" name="returnTo" value="{{ returnTo }}" />
@@ -55,13 +72,24 @@
       <input type="hidden" name="fromItemId" value="{{ record.id }}" />
       <input type="hidden" name="returnTo" value="{{ returnTo }}" />
 
+      {#
+        Both readings of every predicate, so an edge can be asserted from
+        whichever page it is natural to be on. "Member of" from a person and
+        "Has member" from the institution store the same row; the server swaps
+        the ends for a reverse reading. A symmetric predicate appears once,
+        because its two readings say the same thing.
+      #}
       <p class="field">
-        <label for="predicateId">Relationship</label>
-        <select id="predicateId" name="predicateId" required>
-          {% for predicate in predicates %}
-            <option value="{{ predicate.id }}">{{ predicate.label }}</option>
+        <label for="predicate">Relationship</label>
+        <select id="predicate" name="predicate" required>
+          {% for choice in predicateChoices %}
+            <option value="{{ choice.value }}">{{ choice.label }}</option>
           {% endfor %}
         </select>
+        <span class="hint">
+          Read from this page outward. Choosing “Has member” records the same
+          connection as choosing “Member of” from the other item's page.
+        </span>
       </p>
 
       <p class="field">
@@ -71,6 +99,7 @@
           <option value="organization">Organization</option>
           <option value="place">Place</option>
           <option value="event">Event</option>
+          <option value="artifact">Artifact</option>
         </select>
       </p>
 
