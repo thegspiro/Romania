@@ -224,15 +224,51 @@ terms shorter than three characters, and `utf8mb4_0900_ai_ci` already makes
   so the branches are generated from one description of each kind rather than
   written out by hand, and `tests/integration/search.test.ts` asserts a
   private item of _every_ kind stays invisible.
-- **A snippet is stricter than the page.** Prose holds `[[person:slug]]`, so
-  text cut from raw Markdown would print a private slug. `readableProse`
-  rewrites every reference before anything is cut, and a reference the viewer
-  may not follow contributes **nothing** -- where `renderProse` falls back to
-  the target's title. A page shows one item the reader asked for; a result set
-  shows fragments of everything at once, and that difference is the reason.
+- **A snippet cuts nothing until every reference is resolved.** Prose holds
+  `[[person:slug]]`, so text cut from raw Markdown would print a private slug.
+  `readableProse` rewrites every reference first, and a reference the viewer
+  may not follow contributes nothing at all -- not the marker the page shows,
+  because a result set is a list of fragments and a row of markers reads as
+  noise rather than as prose.
 
 Snippets are returned as `{ text, match }` segments rather than markup, so
 highlighting never needs `| safe`.
+
+**A catalogue title is never substituted for a reference the reader may not
+follow.** The prose names a slug; the title is a different string the operator
+never wrote into the sentence, and it can say far more than they did -- "Maria
+Doe (informant, dosar 2231)" where the prose said only `[[person:maria-doe]]`.
+The rule applies wherever a reference becomes text, and the two places differ
+only in what they can ask:
+
+- `renderProse` decides at read time and holds a `Viewer`, so it asks about
+  this reader. Without the operator's own display text there is nothing left
+  that is safe to say, so it renders `[Reference withheld]` -- the same marker,
+  and the same markup, a withheld citation has always used. The slug is not a
+  fallback either: invariant 2 rules out the slug exactly as it rules out the
+  title.
+- `rebuildReferences` writes the stored context snippet at save time, has no
+  `Viewer` and cannot have one -- the row is written once and read by
+  everybody -- so it asks whether _anyone_ may see the target, via
+  `canView(ANONYMOUS, ...)`. This was the worse of the two: a public essay
+  naming a private person and a public one put the private person's title into
+  the snippet shown on the **public** person's page, to anybody, and no
+  read-time check ever looked at it again.
+
+`mention.anchor_text` is the deliberate exception, and stays the target's
+title: it names the row's own target, and a backlink list carrying it is only
+ever rendered on that target's page -- which a reader who may not see the
+target cannot open.
+
+**A stored projection outlives every visibility change made after it.**
+Publishing and unpublishing are plain `UPDATE content_item` statements; nothing
+revisits the rows derived from prose. So a change to how the projection is
+derived reaches old rows only when something re-runs it, and that something is
+`admin reproject` -- an explicit command rather than a hook, because
+re-deriving the whole corpus should never happen as a side effect. It is not a
+reconciliation job: every item goes through `rebuildReferences` over its own
+prose, exactly as a save would, taking the same `FOR UPDATE` lock, so there is
+still only one thing that writes `mention` and `citation`.
 
 **A map is a second view of rows the place pages already show.**
 `src/content/places.ts` reads through `visibilityFilter` like anything else, so

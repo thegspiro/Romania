@@ -17,12 +17,14 @@ import type { RowDataPacket } from 'mysql2/promise';
 import {
   execute,
   limitOffsetClause,
+  queryOne,
   queryRows,
+  withTransaction,
   type Pool,
   type PoolConnection,
 } from '../db/pool.js';
-import { visibilityFilter, type Viewer } from './visibility.js';
-import { blockAnchorsFor } from './markdown.js';
+import { ANONYMOUS, canView, visibilityFilter, type Viewer } from './visibility.js';
+import { blockAnchorsFor, WITHHELD_LABEL } from './markdown.js';
 import {
   extractContext,
   parseReferences,
@@ -107,9 +109,27 @@ export async function rebuildReferences(
     references.map((reference) => reference.index),
   );
 
-  // Titles let a reference with no display text read as its subject's name
-  // in the context snippet, rather than as a de-hyphenated slug.
-  const titles = new Map([...targets].map(([key, row]) => [key, row.title]));
+  // Titles let a reference with no display text read as its subject's name in
+  // the context snippet, rather than as a de-hyphenated slug.
+  //
+  // Only a **public** target's title goes in. This snippet is stored, and it is
+  // shown on the page of every item the citing prose names -- so a sentence
+  // that names a private person and a public one would otherwise print the
+  // private one's catalogue title on the public one's page, to anybody. There
+  // is no `Viewer` at this point and there cannot be one: the row is written
+  // once and read by everybody, so the only safe question to ask is the one
+  // `canView` answers for a visitor.
+  //
+  // Withheld targets are mapped to the marker rather than left out. Omitting
+  // them would fall through to `extractContext`'s own fallback, which is the
+  // de-hyphenated slug -- and invariant 2 rules out the slug exactly as it
+  // rules out the title.
+  const titles = new Map(
+    [...targets].map(([key, row]) => [
+      key,
+      canView(ANONYMOUS, row.visibility) ? row.title : `[${WITHHELD_LABEL}]`,
+    ]),
+  );
 
   // Replace wholesale rather than diff: the text is the truth, and a diff
   // would be a second place for the two to fall out of step.
@@ -168,6 +188,10 @@ export async function rebuildReferences(
         target.id,
         occurrence,
         anchors[position] ?? null,
+        // Unlike the context snippet, this one is safe as the title: it names
+        // the row's own target, and a backlink list carrying it is only ever
+        // rendered on that target's page -- which a reader who may not see the
+        // target cannot open at all.
         (reference.argument ?? target.title).slice(0, 500),
         extractContext(markdown, reference, { titles }).slice(0, 1000),
       ],
@@ -366,4 +390,94 @@ export async function listReferencesBlockingDeletion(
     [itemId, itemId],
   );
   return rows;
+}
+
+/**
+ * Every table whose column holds reference-bearing prose.
+ *
+ * The same four the entity specs and the search module name, written here
+ * because a reprojection has to reach all of them or it silently cleans only
+ * part of the corpus. Table and column names are constants in this module and
+ * never come from a request.
+ */
+const PROSE_SOURCES: readonly { table: string; column: string }[] = Object.freeze([
+  { table: 'essay_detail', column: 'body_markdown' },
+  { table: 'artifact_detail', column: 'transcription' },
+  { table: 'agent_detail', column: 'biography' },
+  { table: 'event_detail', column: 'body_markdown' },
+]);
+
+export interface ReprojectSummary {
+  items: number;
+  mentions: number;
+  citations: number;
+}
+
+/**
+ * Rebuilds `mention` and `citation` for every item that has prose.
+ *
+ * The projection is written once, at save time, and never revisited -- which
+ * is what makes it trustworthy, and also what makes a change to the rules
+ * retrospective only if something re-runs them. Publishing or unpublishing an
+ * item is a plain `UPDATE content_item`, so a stored context snippet outlives
+ * every visibility change made after it was written.
+ *
+ * That is why this exists and why it is a deliberate command rather than a
+ * hook: it is the one operation that re-derives old rows under today's rules.
+ * It is not a reconciliation job -- it takes no diff and makes no decision of
+ * its own. Each item goes through `rebuildReferences` over its own prose,
+ * exactly as a save would, so there is still only one thing that writes these
+ * tables.
+ *
+ * Each item is its own transaction, taking the same `FOR UPDATE` lock on the
+ * `content_item` row that a save takes, and re-reading the prose inside it. A
+ * save landing mid-run therefore either precedes this item's rebuild or
+ * follows it, and cannot be half-overwritten by prose read before it started.
+ */
+export async function reprojectAll(
+  pool: Pool,
+  onItem?: (done: number, total: number) => void,
+): Promise<ReprojectSummary> {
+  const pending: { id: number; table: string; column: string }[] = [];
+
+  for (const source of PROSE_SOURCES) {
+    const rows = await queryRows<RowDataPacket & { content_item_id: number }>(
+      pool,
+      `SELECT content_item_id FROM ${source.table} ORDER BY content_item_id ASC`,
+    );
+    for (const row of rows) {
+      pending.push({ id: Number(row.content_item_id), table: source.table, column: source.column });
+    }
+  }
+
+  const summary: ReprojectSummary = { items: 0, mentions: 0, citations: 0 };
+
+  for (const entry of pending) {
+    const result = await withTransaction(pool, async (connection) => {
+      // The same lock a save holds, so the two serialise rather than racing.
+      const locked = await queryOne<RowDataPacket & { id: number }>(
+        connection,
+        'SELECT id FROM content_item WHERE id = ? FOR UPDATE',
+        [entry.id],
+      );
+      if (locked === null) return null;
+
+      const row = await queryOne<RowDataPacket & { prose: string | null }>(
+        connection,
+        `SELECT ${entry.column} AS prose FROM ${entry.table} WHERE content_item_id = ?`,
+        [entry.id],
+      );
+      if (row === null) return null;
+
+      return rebuildReferences(connection, entry.id, row.prose ?? '');
+    });
+
+    if (result === null) continue;
+    summary.items += 1;
+    summary.mentions += result.mentions;
+    summary.citations += result.citations;
+    onItem?.(summary.items, pending.length);
+  }
+
+  return summary;
 }

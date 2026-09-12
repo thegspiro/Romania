@@ -182,22 +182,42 @@ function referencePlugin(md: MarkdownIt): void {
       );
     }
 
-    // A mention. The display text is what the prose said, which is often not
-    // the target's title ("the Marshal", "her brother").
-    const label = meta.argument ?? target?.title ?? meta.slug.replace(/-/g, ' ');
+    // A mention. What the prose itself said, which is often not the target's
+    // title ("the Marshal", "her brother"). It is the operator's own words and
+    // is already on the page, so it is shown whatever the target turns out to
+    // be -- including when the target is withheld.
+    const written = meta.argument;
 
     if (target === undefined) {
-      // Points at nothing: the target was deleted or the slug is wrong. Show
-      // the words, flag it for the operator, and never emit a dead link.
+      // Points at nothing: the target was deleted or the slug is wrong. There
+      // is no record to protect, so the slug read as words is the operator's
+      // own typing and the most useful thing to show. Flagged for them, and
+      // never a dead link.
+      const label = written ?? meta.slug.replace(/-/g, ' ');
       return `<span class="reference-broken" title="Unresolved reference">${escape(label)}</span>`;
     }
 
     if (!target.visible) {
       // Exists, but not for this viewer. Plain text only: no href, no title,
       // no slug, no id.
-      return escape(label);
+      //
+      // `target.title` is deliberately NOT a fallback here. The prose named a
+      // slug; the catalogue title is a different string that the operator
+      // never wrote into the sentence, and it can say considerably more than
+      // they did -- "Maria Doe (informant, dosar 2231)" where the prose said
+      // only [[person:maria-doe]]. Falling back to the slug would be no better:
+      // invariant 2 rules out the title and the slug alike.
+      //
+      // So without the operator's own words there is nothing left that is safe
+      // to say, and the reader is told that plainly -- the same marker, and the
+      // same markup, a withheld citation has used all along.
+      if (written === undefined) {
+        return `<span class="reference-withheld">[${escape(WITHHELD_LABEL)}]</span>`;
+      }
+      return escape(written);
     }
 
+    const label = written ?? target.title;
     return (
       `<a class="reference reference-${escape(target.kind)}" ` +
       `href="${escape(referenceHref(target.kind, target.slug))}">${escape(label)}</a>`
