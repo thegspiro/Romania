@@ -1,0 +1,40 @@
+# Unraid overrides: array paths instead of Docker-managed volumes.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.unraid.yml up -d
+#
+# Committed so that running on Unraid is a choice made on the command line
+# rather than an edit to a tracked file. The README used to say "replace the
+# volumes in docker-compose.yml", which conflicts on every `git pull` and
+# leaves the operator resolving a merge in the file that defines their
+# deployment.
+#
+# Compose merges a service's volumes by target path, so each entry below
+# replaces the named volume mounted at that same path rather than adding a
+# second mount beside it.
+#
+# The paths are the Unraid defaults. Change them to your own shares if they
+# differ -- what must not change is that `web` and `worker` keep pointing at
+# the SAME /data/files. Compilation hands work across that volume: the web app
+# writes the assembled Markdown and the worker reads it back.
+#
+# The containers run as uid/gid 1000, which is what Unraid shares are normally
+# owned by. If yours differ, `chown -R 1000:1000` these paths -- the entrypoint
+# now refuses to start on a directory it cannot write to, and names the uid.
+
+services:
+  web:
+    volumes:
+      - /mnt/user/appdata/dissertation/files:/data/files
+      - /mnt/user/backups/dissertation:/data/backups
+
+  worker:
+    volumes:
+      - /mnt/user/appdata/dissertation/files:/data/files
+      - /mnt/user/backups/dissertation:/data/backups
+
+  db:
+    volumes:
+      # Keep the database on fast storage. An array share works, but MySQL on
+      # spinning disks behind the parity calculation is noticeably slower than
+      # the same database on the cache pool.
+      - /mnt/user/appdata/dissertation/mysql:/var/lib/mysql
