@@ -215,7 +215,17 @@ RUN chmod +x scripts/*.sh
 
 # Data directories, created here so the container also works without a bind
 # mount (development, CI) rather than failing on first write.
-RUN mkdir -p /data/files /data/backups && chown -R node:node /data
+#
+# /home/node/.cache exists for a subtler reason: it is where Tectonic keeps the
+# TeX packages it fetches, and docker-compose.yml mounts a volume there so a
+# read-only root filesystem still leaves it somewhere to write. A named volume
+# inherits the ownership of whatever the image has at that path -- and where
+# the image has nothing, Docker creates the mount point as root, which a
+# container running as `node` then cannot write to. Creating it here, owned by
+# node, is what makes that volume usable. Removing this line does not break the
+# build; it breaks every PDF, at runtime, with a permission error.
+RUN mkdir -p /data/files /data/backups /home/node/.cache \
+    && chown -R node:node /data /home/node/.cache
 
 # Never run as root: a template injection or a path traversal is much cheaper
 # to contain as an unprivileged user. Named rather than numeric so the uid keeps
