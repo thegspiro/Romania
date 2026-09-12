@@ -27,3 +27,6 @@ venv/
 
 # Python packaging metadata from an editable install
 *.egg-info/
+
+# Local Compose overrides (bind mounts, published ports, host paths)
+docker-compose.override.yml

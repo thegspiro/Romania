@@ -431,134 +431,37 @@ recoverable one. Set `ALLOW_SEARCH_INDEXING=true` when you are ready.
 
 ## Installation
 
-### Requirements
+Full instructions live in [`docs/`](docs/):
 
-- Docker with Compose v2
-- A reverse proxy terminating TLS (SWAG, Nginx Proxy Manager, Traefik,
-  Caddy or a Cloudflare Tunnel)
-- A domain name
+| Page                                           | For                                                      |
+| ---------------------------------------------- | -------------------------------------------------------- |
+| [`docs/installation.md`](docs/installation.md) | Installing on any Docker host, and on a managed database |
+| [`docs/unraid.md`](docs/unraid.md)             | Unraid: paths, share ownership, Compose Manager          |
+| [`docs/updating.md`](docs/updating.md)         | Updating, rolling back, restoring from a backup          |
 
-**HTTPS is not optional.** WebAuthn refuses to run outside a secure context,
-so passkeys will not work over plain HTTP on any host but `localhost`.
-
-### 1. Configure
+The shape of it, so you know what you are in for:
 
 ```sh
-git clone https://github.com/thegspiro/romania.git
-cd romania
-cp .env.example .env
-```
-
-Edit `.env`. At minimum:
-
-```sh
-PUBLIC_BASE_URL=https://dissertation.example.org
-WEBAUTHN_RP_ID=dissertation.example.org      # bare domain: no scheme, no port
-WEBAUTHN_ORIGIN=https://dissertation.example.org
-TRUST_PROXY=true                             # you are behind a reverse proxy
-DB_PASSWORD=$(openssl rand -base64 24)
-DB_ROOT_PASSWORD=$(openssl rand -base64 24)
-```
-
-Those two must be real values. The application refuses to start in production
-while `DB_PASSWORD` is still the `change-me` placeholder, because that string
-is published in this repository.
-
-> **`WEBAUTHN_RP_ID` is effectively permanent.** Passkeys are bound to that
-> domain. Changing it after registration invalidates every passkey, and you
-> would need your password plus a recovery code to get back in. Decide on the
-> final hostname before you register anything.
-
-The application refuses to start on an invalid configuration rather than
-running with an unsafe default, so a mistake here is loud, not silent.
-
-### 2. Start
-
-```sh
-docker compose up -d --build
-```
-
-Migrations run automatically on start. Check the install before going further:
-
-```sh
-docker compose exec web /app/scripts/entrypoint.sh preflight
-```
-
-It reports the configuration it loaded, the database, pending migrations, the
-data directories and whether an administrator exists — and exits non-zero if
-anything is actually broken. Reading the public URL and relying party back is
-the point: a value can be valid and still not be the one you meant.
-
-Then create your account:
-
-```sh
+git clone https://github.com/thegspiro/romania.git && cd romania
+cp .env.example .env                      # then edit it
+docker compose up -d --build              # migrations apply on start
+docker compose run --rm web preflight     # check the install
 docker compose exec web /app/scripts/entrypoint.sh admin create-admin
 ```
 
-It prompts for a username and password and prints ten recovery codes. **Save
-them now — they are shown once.**
+You also need a **reverse proxy terminating TLS** and a domain name. HTTPS is
+not optional: WebAuthn refuses to run outside a secure context, so passkeys
+will not work over plain HTTP on any host but `localhost`.
 
-### 3. Point the proxy at it
+> **There is no published container image.** CI builds for `linux/amd64` and
+> `linux/arm64` but does not push to a registry, so every install and every
+> update builds from a clone. On Unraid this means Community Applications and
+> the Docker tab cannot install it — use Compose Manager or SSH, as
+> [`docs/unraid.md`](docs/unraid.md) describes.
 
-The web container publishes on `127.0.0.1:8080`, so it is not reachable from
-the network except through your proxy. Forward your domain to that port and
-make sure the proxy sets `X-Forwarded-Proto` and `X-Forwarded-For`.
-
-### 4. First sign-in
-
-Visit `https://your-domain/login`, sign in with your password, and register a
-passkey when prompted — Bitwarden will offer to store it. Then register a
-second one on a different device from `/admin/security`.
-
----
-
-### On Unraid
-
-Use the Compose Manager plugin, or run the commands above over SSH. Replace
-the named volumes with array paths so backups and files live on the array
-rather than inside Docker:
-
-```yaml
-services:
-  web:
-    volumes:
-      - /mnt/user/appdata/dissertation/files:/data/files
-      - /mnt/user/backups/dissertation:/data/backups
-  worker:
-    volumes:
-      - /mnt/user/appdata/dissertation/files:/data/files
-      - /mnt/user/backups/dissertation:/data/backups
-  db:
-    volumes:
-      - /mnt/user/appdata/dissertation/mysql:/var/lib/mysql
-```
-
-The containers run as uid 1000, which matches the default ownership of Unraid
-shares. If yours differ, `chown -R 1000:1000` those paths.
-
-**`web` and `worker` must share `/data/files`.** Compilation hands work across
-that volume: the web app writes the assembled Markdown there and the worker
-reads it back. The Compose files already mount the same volume into both; keep
-that true if you split the roles across hosts.
-
-### On AWS or another cloud host
-
-Set `DB_HOST` in `.env` to your RDS endpoint. The compose file reads that value
-rather than pinning the bundled service name, so nothing else in it needs
-editing for the application to connect.
-
-Then remove the bundled database, which is two edits in `docker-compose.yml`:
-
-1. Delete the `db` service.
-2. Delete the `depends_on: db` block from **both** `web` and `worker`. Compose
-   refuses to start a composition that depends on a service which no longer
-   exists, so leaving these behind fails immediately.
-
-`DB_ROOT_PASSWORD` becomes unused — it only ever fed the bundled container.
-
-The schema uses no MySQL features RDS lacks. Storage stays on a mounted volume
-(EBS or EFS); an S3 backend is a contained change behind the storage interface,
-not yet built.
+> **`WEBAUTHN_RP_ID` is effectively permanent.** Passkeys are bound to that
+> domain. Changing it after registration invalidates every one of them. Decide
+> on the final hostname before you register anything.
 
 ---
 
@@ -815,6 +718,7 @@ public/js/           Vanilla enhancement: passkey, editor, graph
 worker/              Python job runner and handlers
 db/migrations/       Numbered SQL, each with a tested rollback
 tests/               Vitest unit and integration suites
+docs/                Installation, Unraid, updating
 ```
 
 `CLAUDE.md` and `AGENTS.md` document the conventions and invariants for
