@@ -77,10 +77,25 @@ interface NeighbourRow extends RowDataPacket {
   relation: 'asserted' | 'mentioned';
   from_id: number;
   to_id: number;
+  /** The `relationship` row this came from; null for a mention. */
+  edge_id: number | null;
 }
 
 /**
  * Fetches every visible neighbour of a set of nodes in one query per layer.
+ *
+ * Each relation is asked twice, once from either end, because a neighbour may
+ * lie on either side of the edge. Both branches label the edge with the
+ * *forward* reading: the drawing orients every edge from `from_item_id` to
+ * `to_item_id` and puts an arrowhead on it, so the label that reads correctly
+ * along that arrow is the predicate's own -- never its inverse, which would
+ * print "Has member" on an arrow pointing from the person to the institution.
+ * The inverse belongs to `listRelationshipsFor`, which reads an edge from one
+ * item's point of view rather than drawing it.
+ *
+ * That also makes the two branches agree, so an edge whose *both* endpoints
+ * are in the same layer is one row twice over rather than two contradictory
+ * edges. `buildGraph` then collapses it on the edge's own identity.
  *
  * Placeholders are generated from the batch size; every id is bound.
  */
@@ -117,7 +132,7 @@ async function neighboursOf(
             p.label AS label, r.role_title AS role_title,
             r.start_date AS start_date, r.end_date AS end_date,
             r.date_precision AS date_precision, 'asserted' AS relation,
-            r.from_item_id AS from_id, r.to_item_id AS to_id
+            r.from_item_id AS from_id, r.to_item_id AS to_id, r.id AS edge_id
        FROM relationship r
        JOIN relationship_predicate p ON p.id = r.predicate_id
        JOIN content_item ci ON ci.id = r.from_item_id
@@ -128,9 +143,9 @@ async function neighboursOf(
       UNION ALL
 
      SELECT other.id, other.kind, other.title,
-            p.inverse_label, r.role_title, r.start_date, r.end_date,
+            p.label, r.role_title, r.start_date, r.end_date,
             r.date_precision, 'asserted',
-            r.from_item_id, r.to_item_id
+            r.from_item_id, r.to_item_id, r.id
        FROM relationship r
        JOIN relationship_predicate p ON p.id = r.predicate_id
        JOIN content_item ci ON ci.id = r.to_item_id
@@ -142,7 +157,7 @@ async function neighboursOf(
 
      SELECT other.id, other.kind, other.title,
             'mentions', NULL, NULL, NULL, 'unknown', 'mentioned',
-            m.from_item_id, m.to_item_id
+            m.from_item_id, m.to_item_id, NULL
        FROM mention m
        JOIN content_item ci ON ci.id = m.from_item_id
        JOIN content_item other ON other.id = m.to_item_id
@@ -152,8 +167,8 @@ async function neighboursOf(
       UNION ALL
 
      SELECT other.id, other.kind, other.title,
-            'mentioned in', NULL, NULL, NULL, 'unknown', 'mentioned',
-            m.from_item_id, m.to_item_id
+            'mentions', NULL, NULL, NULL, 'unknown', 'mentioned',
+            m.from_item_id, m.to_item_id, NULL
        FROM mention m
        JOIN content_item ci ON ci.id = m.to_item_id
        JOIN content_item other ON other.id = m.from_item_id
@@ -260,10 +275,18 @@ export async function buildGraph(
       });
       const display = edgeLabel(row.label, row.role_title, period);
 
-      // The office and the period are part of the identity of an edge: two
-      // posts held at the same organization are two edges, not one drawn
-      // twice.
-      const key = `${source}-${target}-${row.relation}-${display}`;
+      // One row, however many ways the walk arrived at it. Keyed on the
+      // edge's own id rather than on what it renders as, so two posts held at
+      // the same organization stay two edges -- and so would two predicates
+      // that happened to share a label.
+      //
+      // A mention has no single row to key on: several occurrences in one
+      // piece of prose are several `mention` rows but one statement that this
+      // text names that subject, which is what the drawing shows.
+      const key =
+        row.relation === 'asserted'
+          ? `asserted:${String(row.edge_id)}`
+          : `mentioned:${source}:${target}`;
       if (!edges.has(key)) {
         edges.set(key, {
           source,
