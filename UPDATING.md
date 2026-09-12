@@ -55,13 +55,23 @@ those. Two further properties make the schema safe to move forward:
 Run everything from the directory holding `docker-compose.yml` and your
 `.env` — over SSH on Unraid, or from the Compose Manager plugin's terminal.
 
+**On Unraid, every command below needs the override file as well.**
+`docker-compose.unraid.yml` is what points the three mounts at your array
+paths. A `docker compose up -d --build` without it brings the containers up on
+empty Docker-managed volumes instead — which looks exactly like losing the
+database, and leaves the real one sitting untouched on the array. Set it once
+for the session rather than trusting yourself to repeat a flag:
+
+```sh
+export COMPOSE_FILE=docker-compose.yml:docker-compose.unraid.yml
+```
+
 ### 1. Back up, and confirm the backup exists
 
 Enqueue the job:
 
 ```sh
-docker compose exec db mysql -u root -p"$DB_ROOT_PASSWORD" dissertation \
-  -e "INSERT INTO job (kind, payload) VALUES ('backup.run', '{\"keep\": 14}')"
+docker compose exec web /app/scripts/entrypoint.sh admin enqueue-backup
 ```
 
 The worker picks it up on its next poll and writes `database-<stamp>.sql.gz`
@@ -69,26 +79,37 @@ and `files-<stamp>.tar.gz` to `BACKUP_ROOT`. It is asynchronous, so do not
 move on until it has finished:
 
 ```sh
-docker compose exec db mysql -u root -p"$DB_ROOT_PASSWORD" dissertation \
-  -e "SELECT id, state, attempts FROM job WHERE kind='backup.run' ORDER BY id DESC LIMIT 1"
-
+docker compose logs --tail 20 worker
 ls -lh /mnt/user/backups/dissertation/
 ```
 
-Wait for `succeeded`. If the worker is not running — which is exactly when you
-are most likely to be updating — dump directly instead:
+Wait for `wrote database backup` in the log — and `wrote file backup` unless
+you passed `--no-files` — and for files of a plausible size to appear.
+
+If the worker is not running, which is exactly when you are most likely to be
+updating, dump directly instead:
 
 ```sh
-docker compose exec db sh -c \
-  'mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --single-transaction --quick \
-   --routines --triggers --events --no-create-db dissertation' \
-  | gzip > /mnt/user/backups/dissertation/pre-update-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
+docker compose exec -T db sh -c '
+  MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -u root \
+    --single-transaction --quick --routines --triggers --events \
+    --default-character-set=utf8mb4 --hex-blob --no-create-db "$MYSQL_DATABASE"
+' | gzip > /mnt/user/backups/dissertation/pre-update-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
 ```
 
+Those variables are expanded **inside the container**, where Compose set them;
+a `$DB_ROOT_PASSWORD` written unquoted in your own shell expands to nothing,
+because `.env` is read by Compose and not by your shell. The single quotes are
+what keep the expansion on the right side of that line, and `MYSQL_PWD` keeps
+the password out of the container's process list the same way
+`scripts/wait-for-db.sh` does.
+
 `--single-transaction` gives a consistent snapshot without locking the site
-out; every table is InnoDB. The backup belongs on a share the host itself
-backs up: a copy sitting in the same appdata directory as the database it
-protects is not a backup.
+out; every table is InnoDB. `--default-character-set=utf8mb4` and `--hex-blob`
+are not optional decoration: a charset mismatch anywhere along dump → restore
+mangles Romanian diacritics silently. The backup belongs on a share the host
+itself backs up: a copy sitting in the same appdata directory as the database
+it protects is not a backup.
 
 ### 2. Record where you are
 
@@ -160,7 +181,8 @@ database:
 
 ```sh
 gunzip -c /mnt/user/backups/dissertation/database-<stamp>.sql.gz \
-  | docker compose exec -T db mysql -u root -p"$DB_ROOT_PASSWORD" dissertation
+  | docker compose exec -T db sh -c \
+      'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -u root "$MYSQL_DATABASE"'
 ```
 
 Then check out the revision that dump was taken on and rebuild. The file
