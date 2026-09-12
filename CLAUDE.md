@@ -234,6 +234,37 @@ terms shorter than three characters, and `utf8mb4_0900_ai_ci` already makes
 Snippets are returned as `{ text, match }` segments rather than markup, so
 highlighting never needs `| safe`.
 
+**A map is a second view of rows the place pages already show.**
+`src/content/places.ts` reads through `visibilityFilter` like anything else, so
+a private place is _absent_ from the overview rather than withheld with a gap,
+and `/map/places.json` is filtered identically -- it is the same read, not a
+way around it. A place with no coordinates is simply not a point; an unmapped
+place and a place that does not exist look the same, which is the intended
+behaviour.
+
+`geocode_precision` travels with every point and the marker says which it is. A
+town geocoded to its modern centre is not evidence about where a building stood
+in 1941, and a map is the one surface where being approximately right reads as
+being precisely right.
+
+**The tile host is the only third party this application can ever contact, and
+it is off by default.** `MAP_TILE_URL` unset means markers on a plain canvas and
+no request leaving this origin -- which is the same rule that vendors browser
+libraries instead of loading them from a CDN. Tiles are worse than a library
+CDN, and that is why the default is off rather than a helpful OpenStreetMap
+URL: tile requests encode the coordinates and zoom being viewed, so the host
+learns which places are being read, including the private ones an administrator
+is reviewing. Set, exactly one origin is added to `img-src` and nowhere else;
+`tileOrigin` parses it from the template, and a `{s}` subdomain placeholder is
+rejected at startup because a pattern cannot become one CSP source.
+
+**Geocoding is queued, never called from the web.** The button enqueues
+`place.geocode` and `worker/jobs/geocode.py` does the lookup, for the same
+reason the Zotero key lives only in the worker. The payload key is
+`contentItemId` -- the worker's name for it, not the web's. The handler refuses
+to overwrite coordinates entered by hand, so a stray click cannot replace the
+operator's own judgement about where something was.
+
 **Zotero sync pulls; it never pushes.** `worker/jobs/zotero_sync.py` is the
 only thing that talks to the API, and the web service never holds the key --
 it enqueues `zotero.sync` and reads the state back for the listing. That was
@@ -497,6 +528,7 @@ the properties being asserted actually live.
 | Projections and backlinks               | `src/content/mentions.ts`           |
 | Corpus export, portable formats         | `src/content/export.ts`             |
 | Corpus-wide search, snippets            | `src/content/search.ts`             |
+| Mappable places, geocode queueing       | `src/content/places.ts`             |
 | Essay revisions, restore rules          | `src/content/essays.ts`             |
 | Line diff for the comparison view       | `src/content/diff.ts`               |
 | Outline, navigation, assembly           | `src/content/manuscripts.ts`        |
@@ -548,8 +580,7 @@ both stay green — which two hand-kept copies could not actually guarantee.
 
 ## What is deliberately not built yet
 
-Maps (Leaflet is vendored and `place_detail` carries coordinates); public
-downloads of compiled documents (`manuscript_build.audience` is what makes
+Public downloads of compiled documents (`manuscript_build.audience` is what makes
 that a config change rather than a rewrite); an S3 storage backend.
 
 A search service such as Meilisearch remains the one **side-cart** candidate,

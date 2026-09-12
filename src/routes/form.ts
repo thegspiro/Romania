@@ -169,6 +169,14 @@ export const FLASH_MESSAGES: Readonly<Record<string, Flash>> = Object.freeze({
     kind: 'success',
     text: 'Compilation queued. Refresh in a moment for the result.',
   },
+
+  geocode_queued: {
+    kind: 'success',
+    text:
+      'Lookup queued. Coordinates you entered by hand are never overwritten, ' +
+      'so clear them first if you want the result to win.',
+  },
+  geocode_already_queued: { kind: 'success', text: 'A lookup for this place is already queued.' },
 });
 
 export function flashFor(request: FastifyRequest): Flash | null {
