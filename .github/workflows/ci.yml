@@ -5,8 +5,9 @@
 # are where the visibility rules are proved -- a private item is 404 not 403,
 # a public page leaks no private reference, file bytes re-check visibility --
 # and without a database they skip rather than fail. REQUIRE_TEST_DB in the
-# `node` job is what closes that hole; the pandoc probe in `python` closes the
-# smaller one beside it.
+# `node` job is what closes that hole; REQUIRE_TEST_S3 closes the same hole for
+# the storage-backend suites, which skip without an S3 endpoint; and the pandoc
+# probe in `python` closes the smaller one beside them.
 name: CI
 
 # pull_request covers every proposed change. push is narrowed to main so a
