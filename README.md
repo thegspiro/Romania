@@ -422,6 +422,23 @@ That rule reaches everything derived from content, not just pages:
 - A citation to a source the viewer may not see is withheld rather than
   rendered, in the browser and in a compiled document alike.
 
+**Rate limiting.** Anonymous traffic is capped per address —
+`RATE_LIMIT_MAX` requests per `RATE_LIMIT_WINDOW_SECONDS`, 300 a minute by
+default. It is registered globally rather than on the routes that need it
+most, so a route added later is covered without anyone remembering to. A
+signed-in administrator is exempt (an attacker cannot hold an admin session,
+and sign-in has its own throttle), and so is the container healthcheck —
+throttling that would restart the service and turn a busy afternoon into an
+outage.
+
+> The limit keys on the client address, and **which address that is depends on
+> `TRUST_PROXY`**. With it false, the address is the socket's — so behind a
+> reverse proxy every visitor counts into the same bucket. Set
+> `TRUST_PROXY=true` whenever something terminates TLS in front of this, and
+> leave it false when the application is exposed directly, or clients can
+> spoof their own address and defeat the login throttle. The startup log says
+> which of the two is in use.
+
 **Everything else.** Strict CSP with per-response nonces and no
 `unsafe-inline`; CSRF tokens on every state-changing request; HttpOnly,
 Secure, SameSite=Lax cookies with the `__Host-` prefix; login rate limiting

@@ -503,7 +503,18 @@ jobs:
   publish:
     name: publish the image
     if: github.event_name == 'push'
-    needs: [node, python, migrations, rehearsal, compose, docker]
+    # Every job that can run on a push, and deliberately NOT `migrations`.
+    #
+    # That job is `if: github.event_name == 'pull_request'` -- its guard diffs
+    # against the merge base, which does not exist on main -- so on a push it is
+    # SKIPPED, and Actions skips any job whose `needs` names a skipped one.
+    # Listing it here meant `publish` could never run on the only event it is
+    # gated to: the first merge after this job was added went green with
+    # nothing published, because a skipped job reports neither red nor absent.
+    #
+    # A commit reaching main has already passed the migration guard as a pull
+    # request, so nothing is lost by leaving it out. Do not add it back.
+    needs: [node, python, rehearsal, compose, docker]
     runs-on: ubuntu-latest
     timeout-minutes: 60
 

@@ -168,6 +168,14 @@ const schema = z
     LOGIN_WINDOW_MINUTES: IntegerString(1, 1440),
     LOGIN_LOCKOUT_MINUTES: IntegerString(1, 1440),
 
+    // Requests per window per address, for anonymous traffic. Deliberately
+    // generous: the limit exists to stop one address doing unbounded work --
+    // every file route reads from disk on every request -- not to ration
+    // reading. See the note in http/server.ts about what the address means
+    // when TRUST_PROXY is off.
+    RATE_LIMIT_MAX: IntegerString(1, 1_000_000),
+    RATE_LIMIT_WINDOW_SECONDS: IntegerString(1, 3600),
+
     STORAGE_ROOT: z.string().min(1),
     UPLOAD_MAX_BYTES: IntegerString(1, 10_737_418_240),
 
@@ -253,6 +261,9 @@ export function loadConfig(env: EnvSource = process.env): Config {
     LOGIN_MAX_ATTEMPTS: read(env, 'LOGIN_MAX_ATTEMPTS', '10'),
     LOGIN_WINDOW_MINUTES: read(env, 'LOGIN_WINDOW_MINUTES', '15'),
     LOGIN_LOCKOUT_MINUTES: read(env, 'LOGIN_LOCKOUT_MINUTES', '15'),
+
+    RATE_LIMIT_MAX: read(env, 'RATE_LIMIT_MAX', '300'),
+    RATE_LIMIT_WINDOW_SECONDS: read(env, 'RATE_LIMIT_WINDOW_SECONDS', '60'),
 
     STORAGE_ROOT: read(env, 'STORAGE_ROOT', '/data/files'),
     UPLOAD_MAX_BYTES: read(env, 'UPLOAD_MAX_BYTES', '209715200'),

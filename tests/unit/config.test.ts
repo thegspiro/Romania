@@ -33,6 +33,21 @@ describe('loadConfig', () => {
     expect(() => loadConfig(env({ DB_PASSWORD: undefined }))).toThrow(ConfigError);
   });
 
+  it('defaults the rate limit to something a page load cannot trip', () => {
+    // A page pulls its vendored CSS, JS and any images, so a limit near that
+    // number would refuse ordinary reading rather than bound the file routes.
+    const config = loadConfig(env());
+    expect(config.RATE_LIMIT_MAX).toBe(300);
+    expect(config.RATE_LIMIT_WINDOW_SECONDS).toBe(60);
+  });
+
+  it('rejects a rate limit of zero rather than reading it as "off"', () => {
+    // Zero would be indistinguishable from a typo, and a limiter that refuses
+    // every request is worse than none at all. Turning it off is raising it.
+    expect(() => loadConfig(env({ RATE_LIMIT_MAX: '0' }))).toThrow(ConfigError);
+    expect(() => loadConfig(env({ RATE_LIMIT_WINDOW_SECONDS: '0' }))).toThrow(ConfigError);
+  });
+
   it('refuses both DB_PASSWORD and DB_PASSWORD_FILE', () => {
     expect(() => loadConfig(env({ DB_PASSWORD_FILE: '/run/secrets/db' }))).toThrow(/not both/);
   });
