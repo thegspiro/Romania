@@ -11,10 +11,8 @@
  * visibility chokepoint: one place to audit, and no second copy in a route to
  * fall out of step.
  */
-import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
 import type { FastifyInstance } from 'fastify';
-import type { AppContext } from '../http/server.js';
+import type { ResolvedContext } from '../http/server.js';
 import { renderPage } from '../http/context.js';
 import { badRequest, notFound } from '../http/errors.js';
 import { isVisibility } from '../content/visibility.js';
@@ -46,7 +44,7 @@ import {
   withdrawBuild,
 } from '../content/builds.js';
 import { findFileObject } from '../files/repository.js';
-import { resolveStoragePath } from '../files/storage.js';
+import { StorageObjectNotFoundError } from '../files/backend.js';
 import { listEssays } from '../content/essays.js';
 import { recordAudit } from '../content/audit.js';
 import { actorId, flashFor, parseId, readCheckbox, readInteger, readString } from './form.js';
@@ -78,8 +76,11 @@ function readManuscriptForm(body: unknown): { input: ManuscriptInput; errors: st
   };
 }
 
-export function registerAdminManuscriptRoutes(admin: FastifyInstance, context: AppContext): void {
-  const { config, pool } = context;
+export function registerAdminManuscriptRoutes(
+  admin: FastifyInstance,
+  context: ResolvedContext,
+): void {
+  const { config, pool, storage } = context;
 
   admin.get('/admin/manuscripts', async (request, reply) => {
     return renderPage(
@@ -288,7 +289,7 @@ export function registerAdminManuscriptRoutes(admin: FastifyInstance, context: A
     if (!isBuildFormat(format)) throw badRequest('Unknown output format.');
     if (!isBuildAudience(audience)) throw badRequest('Unknown audience.');
 
-    const result = await requestBuild(pool, config, manuscript, {
+    const result = await requestBuild(pool, config, storage, manuscript, {
       format,
       audience,
       requestedBy: request.viewer.kind === 'admin' ? request.viewer.userId : null,
@@ -410,11 +411,14 @@ export function registerAdminManuscriptRoutes(admin: FastifyInstance, context: A
     const file = await findFileObject(pool, build.fileObjectId);
     if (file === null) throw notFound(`build ${buildId} output is missing`);
 
-    const path = resolveStoragePath(config.STORAGE_ROOT, file.storageKey);
+    let bytes;
     try {
-      await stat(path);
-    } catch {
-      throw notFound(`build ${buildId} output is missing from storage`);
+      bytes = await storage.openRead(file.storageKey);
+    } catch (error) {
+      if (error instanceof StorageObjectNotFoundError) {
+        throw notFound(`build ${buildId} output is missing from storage`);
+      }
+      throw error;
     }
 
     const media = BUILD_MEDIA[build.format];
@@ -428,7 +432,7 @@ export function registerAdminManuscriptRoutes(admin: FastifyInstance, context: A
         .header('Content-Disposition', `attachment; filename="${filename}"`)
         .header('Cache-Control', 'private, no-store')
         .header('X-Content-Type-Options', 'nosniff')
-        .send(createReadStream(path))
+        .send(bytes)
     );
   });
 }

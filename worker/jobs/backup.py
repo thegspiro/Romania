@@ -5,6 +5,14 @@ replaceable; the data is not. So the backup job writes a compressed dump and a
 file archive to a directory that is expected to be a mounted share on the
 host, outside the container's own storage.
 
+The file archive covers the **local** storage backend only. Under `s3` the
+bytes are not in a directory this job can tar, and streaming a whole bucket
+through the worker on a schedule is not a backup strategy -- it is an egress
+bill. The job logs, loudly, that files were not archived rather than writing an
+archive that silently holds less than the operator thinks; bucket versioning
+and replication are the right tools there and belong to whoever owns the
+bucket.
+
 The database password is passed to mysqldump through a defaults file with
 0600 permissions, never on the command line: arguments are visible to every
 process on the host through /proc.
@@ -50,7 +58,20 @@ def run(
     dump_path = _dump_database(config, stamp)
     LOGGER.info("wrote database backup %s (%s bytes)", dump_path.name, dump_path.stat().st_size)
 
-    if include_files and config.storage_root.is_dir():
+    if include_files and config.storage_backend != "local":
+        # The file archive tars a directory, and under an object store there
+        # is no directory to tar. Pulling the whole bucket through this worker
+        # on every run would cost egress and hours for a corpus of archival
+        # scans, so it is not done -- and saying so is the point. A backup
+        # that quietly covers less than the operator believes is worse than no
+        # backup, because it is discovered during a restore.
+        LOGGER.warning(
+            "STORAGE_BACKEND is %s, so FILES WERE NOT ARCHIVED. This backup contains the "
+            "database only. Protect the bucket with versioning and a lifecycle rule, or a "
+            "replication rule to a second bucket; see docs/installation.md.",
+            config.storage_backend,
+        )
+    elif include_files and config.storage_root.is_dir():
         archive_path = _archive_files(config, stamp)
         LOGGER.info(
             "wrote file backup %s (%s bytes)", archive_path.name, archive_path.stat().st_size

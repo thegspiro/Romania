@@ -5,10 +5,8 @@
  * administrator browsing the public side sees their private material too --
  * marked as such -- while everyone else sees only what has been published.
  */
-import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
 import type { FastifyInstance } from 'fastify';
-import type { AppContext } from '../http/server.js';
+import type { ResolvedContext } from '../http/server.js';
 import { renderPage } from '../http/context.js';
 import { notFound } from '../http/errors.js';
 import {
@@ -41,12 +39,12 @@ import {
 } from '../content/timeline.js';
 import { BUILD_MEDIA, findPublicDownload } from '../content/builds.js';
 import { findFileObject, findServableFile } from '../files/repository.js';
-import { resolveStoragePath } from '../files/storage.js';
+import { StorageObjectNotFoundError } from '../files/backend.js';
 import { findMappablePlace } from '../content/places.js';
 import { parseSlug } from './form.js';
 
-export function registerPublicContentRoutes(app: FastifyInstance, context: AppContext): void {
-  const { config, pool } = context;
+export function registerPublicContentRoutes(app: FastifyInstance, context: ResolvedContext): void {
+  const { config, pool, storage } = context;
 
   // --- Entities ------------------------------------------------------------
 
@@ -363,11 +361,14 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
     const file = await findFileObject(pool, build.fileObjectId);
     if (file === null) throw notFound(`download for ${slug} is missing`);
 
-    const path = resolveStoragePath(config.STORAGE_ROOT, file.storageKey);
+    let bytes;
     try {
-      await stat(path);
-    } catch {
-      throw notFound(`download for ${slug} is missing from storage`);
+      bytes = await storage.openRead(file.storageKey);
+    } catch (error) {
+      if (error instanceof StorageObjectNotFoundError) {
+        throw notFound(`download for ${slug} is missing from storage`);
+      }
+      throw error;
     }
 
     const media = BUILD_MEDIA[build.format];
@@ -383,7 +384,7 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
         // serving a document after a section was withdrawn.
         .header('Cache-Control', 'private, no-store')
         .header('X-Content-Type-Options', 'nosniff')
-        .send(createReadStream(path))
+        .send(bytes)
     );
   });
 
@@ -408,11 +409,19 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
     const file = await findServableFile(pool, id, variant, request.viewer);
     if (file === null) throw notFound(`file ${id}/${variant}`);
 
-    const path = resolveStoragePath(config.STORAGE_ROOT, file.storageKey);
+    // The visibility decision is already made, by findServableFile, above.
+    // This only turns "the row says bytes are here" into the bytes, and a
+    // storage key that names nothing is a 404 like every other failure on
+    // this route -- the response must not distinguish a missing object from
+    // an item the viewer may not see.
+    let bytes;
     try {
-      await stat(path);
-    } catch {
-      throw notFound(`file ${id} is missing from storage`);
+      bytes = await storage.openRead(file.storageKey);
+    } catch (error) {
+      if (error instanceof StorageObjectNotFoundError) {
+        throw notFound(`file ${id} is missing from storage`);
+      }
+      throw error;
     }
 
     return (
@@ -426,7 +435,7 @@ export function registerPublicContentRoutes(app: FastifyInstance, context: AppCo
         .header('X-Content-Type-Options', 'nosniff')
         // An uploaded SVG or HTML would otherwise execute in this origin.
         .header('Content-Security-Policy', "default-src 'none'; sandbox")
-        .send(createReadStream(path))
+        .send(bytes)
     );
   });
 

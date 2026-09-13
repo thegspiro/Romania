@@ -15,8 +15,6 @@
  * everything at once. The column records which viewer the document was
  * assembled for, and the download route refuses anything it does not match.
  */
-import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
 import type { RowDataPacket } from 'mysql2/promise';
 import {
   execute,
@@ -30,7 +28,7 @@ import {
 import type { Config } from '../config.js';
 import { ANONYMOUS, adminViewer, visibilityFilter, type Viewer } from './visibility.js';
 import { assembleDocument, type ManuscriptRecord } from './manuscripts.js';
-import { resolveStoragePath } from '../files/storage.js';
+import type { StorageBackend } from '../files/backend.js';
 
 export const BUILD_FORMATS = ['pdf', 'docx', 'html', 'latex', 'markdown'] as const;
 export type BuildFormat = (typeof BUILD_FORMATS)[number];
@@ -127,6 +125,7 @@ export interface RequestBuildResult {
 export async function requestBuild(
   pool: Pool,
   config: Config,
+  storage: StorageBackend,
   manuscript: ManuscriptRecord,
   options: { format: BuildFormat; audience: BuildAudience; requestedBy: number | null },
 ): Promise<RequestBuildResult> {
@@ -166,20 +165,20 @@ export async function requestBuild(
       );
     }
 
-    const documentPath = resolveStoragePath(
-      config.STORAGE_ROOT,
-      stagingKey(buildId, 'document.md'),
-    );
-    await mkdir(dirname(documentPath), { recursive: true });
-
+    // Staged through the storage backend like everything else, so the worker
+    // reads the same two keys whether they are files on a shared volume or
+    // objects in a bucket. Pandoc never learns which.
+    //
     // Pandoc reads the title-page fields from a YAML metadata block.
     const frontMatter = buildMetadataBlock(manuscript);
-    await writeFile(documentPath, `${frontMatter}\n\n${document.markdown}\n`, 'utf8');
+    await storage.put(
+      stagingKey(buildId, 'document.md'),
+      Buffer.from(`${frontMatter}\n\n${document.markdown}\n`, 'utf8'),
+    );
 
-    await writeFile(
-      resolveStoragePath(config.STORAGE_ROOT, stagingKey(buildId, 'references.json')),
-      JSON.stringify(document.bibliography, null, 2),
-      'utf8',
+    await storage.put(
+      stagingKey(buildId, 'references.json'),
+      Buffer.from(JSON.stringify(document.bibliography, null, 2), 'utf8'),
     );
 
     await execute(

@@ -174,6 +174,43 @@ and no other.
 describes the text, the other the catalogue record, and a German order in a
 Romanian archive needs both.
 
+**Storage has two backends, and the interface is the chokepoint.**
+`src/files/backend.ts` and `worker/storage.py` each implement `local` and
+`s3`; `STORAGE_BACKEND` picks one. Storage keys are identical either way, so
+the database, every URL and the reference syntax are backend-independent --
+switching is a config change plus `admin storage migrate`, never a migration.
+Four rules ride on it:
+
+- **There is no presigned-URL method, and there must not be.** A presigned URL
+  is a bearer token that outlives the visibility check that minted it and
+  carries the storage key in plain sight. Adding one moves the access decision
+  out of `findServableFile` and into a URL nobody can revoke, which is
+  invariant 3 undone. Bytes stream through the application.
+- **Key validation is identical on both backends.** Traversal cannot escape a
+  bucket, but a key nothing else can address is still a bug, and a rule
+  enforced on one backend and not the other is the kind that rots.
+  `assertSafeKey` runs in both, in both languages.
+- **An upload is hashed into a local scratch file before it is stored.** The
+  key is the SHA-256 of the contents, so it is not known until the last byte
+  arrives; buffering to disk rather than memory is what keeps a 200 MB scan
+  from being held in RAM to be stored. `STORAGE_ROOT` is therefore required
+  under **both** backends -- it stops being where things are kept, not where
+  they are handled.
+- **The worker never hands an object store to Pandoc or Pillow.** Both want a
+  real file, so a job fetches to a temporary directory, works there, and puts
+  the result back. With the local backend nothing is copied.
+
+`admin storage migrate` is driven by `file_object` and `file_derivative`, not
+by a directory walk: a file on disk that no row points at is not part of the
+corpus, and copying it would import somebody's stray backup into the bucket.
+It copies, never moves, so switching back is possible.
+
+**The backup job's file archive covers `local` only.** Under `s3` there is no
+directory to tar, and streaming a bucket through the worker on a schedule is
+an egress bill rather than a backup. It logs, loudly, that files were not
+archived -- a backup that quietly holds less than the operator believes is
+worse than none, because it is discovered during a restore.
+
 **A file can be owned by an artifact or a source.** `FILE_OWNERS` in
 `src/files/repository.ts` is the one place that names them, so adding a third
 owner is editing that constant and nothing else. Two rules ride on it:
@@ -571,6 +608,9 @@ comments explaining which is which.
   re-checked every item in it. Never assemble a `public` build with anything
   but `ANONYMOUS`, and never publish a build whose `audience` is `admin`.
 - Put a visibility decision, or reference parsing, into `worker/`.
+- Hand out a presigned URL for stored bytes, or add a method to
+  `StorageBackend` that returns one. It is a bearer token that outlives the
+  check that minted it, and it prints the storage key.
 - Leave a gap or a "withheld" placeholder where a private section was filtered
   out of a listing. The absence must be indistinguishable from never having
   existed.
@@ -672,6 +712,8 @@ the properties being asserted actually live.
 | Graph traversal with per-hop filtering      | `src/content/graph.ts`              |
 | Dates, chronological reads, the band        | `src/content/timeline.ts`           |
 | Path safety, magic bytes, hashing           | `src/files/storage.ts`              |
+| Storage backends, local and S3              | `src/files/backend.ts`              |
+| Moving a corpus between backends            | `src/files/migrate.ts`              |
 | Access-checked file lookup, file owners     | `src/files/repository.ts`           |
 | Zotero sync, link and merge rules           | `worker/jobs/zotero_sync.py`        |
 | Sync queueing and state for the admin       | `src/content/zotero.ts`             |
@@ -760,11 +802,18 @@ Both suites read their cases from `tests/fixtures/slug-cases.json`. Editing
 that file changes both at once, so the two implementations cannot drift while
 both stay green — which two hand-kept copies could not actually guarantee.
 
+**Storage keys are the second pair**, for the same structural reason: the
+worker writes the derivatives the web service serves and the compiled
+documents it hands to a reader. `originalKey` and `derivativeKey` exist in
+`src/files/storage.ts` and `worker/storage.py`, and a shape that drifted would
+orphan every existing file behind a 404 while every row in the database still
+looked correct. `tests/fixtures/storage-keys.json` is read by
+`tests/unit/files.test.ts` and `worker/tests/test_storage_backend.py`, and
+carries the keys both must build **and** the keys both must refuse.
+
 ---
 
 ## What is deliberately not built yet
-
-An S3 storage backend.
 
 Public downloads of compiled documents used to be listed here, with a note that
 `manuscript_build.audience` made it a config change rather than a rewrite. That

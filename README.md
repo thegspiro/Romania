@@ -47,6 +47,7 @@ What is built and working:
 | **Corpus-wide search** — every kind at once, with snippets                | Complete (admin-only; a query, not an index)                                                                        |
 | **Maps** — places, with queued geocoding                                  | Complete (no basemap unless a tile host is configured)                                                              |
 | **Public downloads of compiled documents**                                | Complete (published one build at a time; re-checked on every request)                                               |
+| **S3 storage backend** — a local directory or an object store             | Complete (local by default; `admin storage migrate` moves an existing corpus)                                       |
 
 Each of those is a separate change set on top of this one. The architecture
 below is what makes them additive rather than rewrites.
@@ -421,6 +422,14 @@ That rule reaches everything derived from content, not just pages:
   the drawing cannot betray one sitting between two public ones.
 - A citation to a source the viewer may not see is withheld rather than
   rendered, in the browser and in a compiled document alike.
+
+**Storage backends.** File bytes live either under a directory (`local`, the
+default) or in an S3-compatible object store (`s3`). Storage keys are identical
+either way, so the database, every URL and the reference syntax do not change —
+switching is `STORAGE_BACKEND` plus `admin storage migrate`, never a schema
+change. There are deliberately **no presigned URLs**: bytes stream through the
+application so the visibility check happens on every request, which a URL handed
+to a browser cannot promise.
 
 **Rate limiting.** Anonymous traffic is capped per address —
 `RATE_LIMIT_MAX` requests per `RATE_LIMIT_WINDOW_SECONDS`, 300 a minute by

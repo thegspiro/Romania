@@ -5,7 +5,7 @@
  * nothing a user typed ever reaches a filesystem path.
  */
 import type { FastifyInstance } from 'fastify';
-import type { AppContext } from '../http/server.js';
+import type { ResolvedContext } from '../http/server.js';
 import { renderPage } from '../http/context.js';
 import { badRequest, notFound } from '../http/errors.js';
 import { isVisibility } from '../content/visibility.js';
@@ -56,7 +56,10 @@ function readArtifactForm(body: unknown): { input: ArtifactInput; errors: string
   };
 }
 
-export function registerAdminArtifactRoutes(admin: FastifyInstance, context: AppContext): void {
+export function registerAdminArtifactRoutes(
+  admin: FastifyInstance,
+  context: ResolvedContext,
+): void {
   const { config, pool } = context;
 
   admin.get('/admin/artifacts', async (request, reply) => {
@@ -214,7 +217,12 @@ export function registerAdminArtifactRoutes(admin: FastifyInstance, context: App
 
     let stored;
     try {
-      stored = await storeStream(config.STORAGE_ROOT, upload.file, config.UPLOAD_MAX_BYTES);
+      stored = await storeStream(
+        context.storage,
+        config.STORAGE_ROOT,
+        upload.file,
+        config.UPLOAD_MAX_BYTES,
+      );
     } catch (error) {
       if (error instanceof UploadTooLargeError || error instanceof UnsupportedFileTypeError) {
         return renderPage(

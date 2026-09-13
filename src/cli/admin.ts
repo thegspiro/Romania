@@ -17,6 +17,7 @@
  *   node dist/cli/admin.js export --out /data/backups/export
  *   node dist/cli/admin.js enqueue-backup [--keep 14] [--no-files]
  *   node dist/cli/admin.js reproject
+ *   node dist/cli/admin.js storage migrate [--dry-run] [--verify]
  */
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
@@ -48,6 +49,8 @@ import {
 } from '../content/backups.js';
 import { exportCorpus } from '../content/export.js';
 import { reprojectAll } from '../content/mentions.js';
+import { createStorageBackend } from '../files/backend.js';
+import { migrateStorage } from '../files/migrate.js';
 import { ANONYMOUS, adminViewer } from '../content/visibility.js';
 
 const USERNAME_PATTERN = /^[a-z0-9][a-z0-9._-]{2,63}$/i;
@@ -198,6 +201,9 @@ function usage(): string {
     '  export             Write the whole corpus as Markdown and CSL-JSON',
     '  enqueue-backup     Queue a database and file backup for the worker',
     '  reproject          Rebuild mention and citation rows from the prose',
+    '  storage migrate    Copy stored files into the configured backend',
+    '                       --dry-run  report what would move, copy nothing',
+    '                       --verify   re-read each copy and check its hash',
     '',
     'Options:',
     '  --username <name>  Account to act on',
@@ -393,6 +399,82 @@ async function run(argv: string[]): Promise<number> {
         console.log(`Reprojected ${summary.items} item${summary.items === 1 ? '' : 's'}:`);
         console.log(`  mentions    ${summary.mentions}`);
         console.log(`  citations   ${summary.citations}`);
+        return 0;
+      }
+
+      case 'storage': {
+        const rest = argv.slice(1);
+        if (rest[0] !== 'migrate') {
+          console.error('Usage: admin storage migrate [--dry-run] [--verify]');
+          return 2;
+        }
+
+        const dryRun = rest.includes('--dry-run');
+        const verify = rest.includes('--verify');
+
+        // The source is always the local directory and the target is whatever
+        // is configured. That is the only direction worth automating: local
+        // is where every install starts, and going back means the bytes are
+        // already there.
+        const target = createStorageBackend(config);
+        if (target.kind === 'local') {
+          console.error(
+            'STORAGE_BACKEND is local, so there is nothing to migrate to. ' +
+              'Set it to s3 (with S3_BUCKET) and run this again.',
+          );
+          return 2;
+        }
+
+        const source = createStorageBackend({ ...config, STORAGE_BACKEND: 'local' });
+
+        console.log(`Copying from ${source.describe()} to ${target.describe()}.`);
+        if (dryRun) console.log('Dry run: nothing will be written.');
+        console.log('Nothing is deleted from the source, whatever happens here.');
+        console.log('');
+
+        let lastReported = 0;
+        const summary = await migrateStorage(pool, source, target, {
+          dryRun,
+          verify,
+          onProgress: (done, total) => {
+            if (done - lastReported >= 50 || done === total) {
+              console.log(`  ${done}/${total}`);
+              lastReported = done;
+            }
+          },
+        });
+
+        console.log('');
+        console.log(`${dryRun ? 'Would copy' : 'Copied'}  ${summary.copied}`);
+        console.log(`Already there ${summary.skipped}`);
+        console.log(`Bytes         ${summary.bytes}`);
+
+        if (summary.missing.length > 0) {
+          // Pre-existing damage this command found rather than caused. Named
+          // in full: "some files were missing" is not something an operator
+          // can act on.
+          console.error('');
+          console.error(
+            `${summary.missing.length} key(s) are recorded but absent from the source:`,
+          );
+          for (const key of summary.missing) console.error(`  ${key}`);
+        }
+
+        if (summary.corrupted.length > 0) {
+          console.error('');
+          console.error(`${summary.corrupted.length} key(s) did not survive the copy:`);
+          for (const key of summary.corrupted) console.error(`  ${key}`);
+          return 1;
+        }
+
+        if (summary.missing.length > 0) return 1;
+
+        console.log('');
+        console.log(
+          dryRun
+            ? 'Dry run complete. Re-run without --dry-run to copy.'
+            : 'Done. Leave the local files in place until the new backend has been seen to work.',
+        );
         return 0;
       }
 

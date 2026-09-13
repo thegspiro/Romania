@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -26,7 +25,7 @@ import pymysql
 
 from worker.config import Config
 from worker.db import fetch_one, transaction
-from worker.storage import resolve
+from worker.storage import StorageObjectNotFound, create_backend
 
 LOGGER = logging.getLogger("worker.manuscript")
 
@@ -106,12 +105,27 @@ def run(
 def _compile(config: Config, build_id: int, fmt: str) -> dict[str, Any]:
     writer, extension, mime_type = FORMATS[fmt]
 
-    document = resolve(config.storage_root, f"builds/{build_id}/document.md")
-    references = resolve(config.storage_root, f"builds/{build_id}/references.json")
-    if not document.is_file():
-        raise CompileError(f"assembled document missing at {document}")
+    backend = create_backend(config)
 
     with tempfile.TemporaryDirectory(prefix=f"dsp-build-{build_id}-") as workspace:
+        # Pandoc takes paths, and --resource-path has to name a real directory,
+        # so the staged input is made local whichever backend holds it. With
+        # the local backend nothing is copied; with S3 this is the download.
+        try:
+            document = backend.fetch_to_file(
+                f"builds/{build_id}/document.md", Path(workspace) / "document.md"
+            )
+        except StorageObjectNotFound as error:
+            raise CompileError(f"assembled document missing for build {build_id}") from error
+
+        try:
+            references = backend.fetch_to_file(
+                f"builds/{build_id}/references.json", Path(workspace) / "references.json"
+            )
+        except StorageObjectNotFound:
+            # A manuscript citing nothing stages no bibliography. Not an error.
+            references = Path(workspace) / "references.json"
+
         output = Path(workspace) / f"manuscript.{extension}"
 
         command = [
@@ -156,15 +170,9 @@ def _compile(config: Config, build_id: int, fmt: str) -> dict[str, Any]:
         contents = output.read_bytes()
         sha256 = hashlib.sha256(contents).hexdigest()
         storage_key = f"files/{sha256[0:2]}/{sha256[2:4]}/{sha256}"
-        destination = resolve(config.storage_root, storage_key)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-
-        # Copy to a temporary name in the destination directory and rename, so
-        # a crash mid-copy cannot leave a truncated file at the address its
-        # hash promises.
-        partial = destination.with_suffix(destination.suffix + ".partial")
-        shutil.copyfile(output, partial)
-        partial.replace(destination)
+        # The backend stores a file that is already complete, so nothing
+        # truncated is ever addressable at the address its hash promises.
+        backend.put_file(storage_key, output)
 
         return {
             "sha256": sha256,

@@ -374,16 +374,28 @@ describe.skipIf(!available)('manuscripts', () => {
       const { manuscriptId } = await mixedManuscript();
       const manuscript = (await findManuscriptById(harness.pool, manuscriptId, admin))!;
 
-      const asAdmin = await requestBuild(harness.pool, harness.config, manuscript, {
-        format: 'html',
-        audience: 'admin',
-        requestedBy: harness.userId,
-      });
-      const asPublic = await requestBuild(harness.pool, harness.config, manuscript, {
-        format: 'html',
-        audience: 'public',
-        requestedBy: harness.userId,
-      });
+      const asAdmin = await requestBuild(
+        harness.pool,
+        harness.config,
+        harness.storage,
+        manuscript,
+        {
+          format: 'html',
+          audience: 'admin',
+          requestedBy: harness.userId,
+        },
+      );
+      const asPublic = await requestBuild(
+        harness.pool,
+        harness.config,
+        harness.storage,
+        manuscript,
+        {
+          format: 'html',
+          audience: 'public',
+          requestedBy: harness.userId,
+        },
+      );
 
       expect(asAdmin.sectionCount).toBe(3);
       expect(asPublic.sectionCount).toBe(2);
@@ -414,7 +426,7 @@ describe.skipIf(!available)('manuscripts', () => {
     it('enqueues the compile job only alongside staged input', async () => {
       const { manuscriptId } = await mixedManuscript();
       const manuscript = (await findManuscriptById(harness.pool, manuscriptId, admin))!;
-      const build = await requestBuild(harness.pool, harness.config, manuscript, {
+      const build = await requestBuild(harness.pool, harness.config, harness.storage, manuscript, {
         format: 'docx',
         audience: 'admin',
         requestedBy: harness.userId,
@@ -445,14 +457,17 @@ describe.skipIf(!available)('manuscripts', () => {
     it('is not downloadable without an authenticated admin session', async () => {
       const { manuscriptId } = await mixedManuscript();
       const manuscript = (await findManuscriptById(harness.pool, manuscriptId, admin))!;
-      const build = await requestBuild(harness.pool, harness.config, manuscript, {
+      const build = await requestBuild(harness.pool, harness.config, harness.storage, manuscript, {
         format: 'html',
         audience: 'admin',
         requestedBy: harness.userId,
       });
 
       // Pretend the worker finished: store an output and mark it succeeded.
-      const stored = await storeBuffer(STORAGE_ROOT, Buffer.from('<h1>Unpublished Chapter</h1>'));
+      const stored = await storeBuffer(
+        harness.storage,
+        Buffer.from('<h1>Unpublished Chapter</h1>'),
+      );
       const fileObjectId = await insertFileObject(harness.pool, {
         sha256: stored.sha256,
         byteSize: stored.byteSize,
@@ -500,7 +515,7 @@ describe.skipIf(!available)('manuscripts', () => {
       const { manuscriptId } = await mixedManuscript();
       const other = await makeManuscript(harness.pool, 'Unrelated', 'private');
       const manuscript = (await findManuscriptById(harness.pool, manuscriptId, admin))!;
-      const build = await requestBuild(harness.pool, harness.config, manuscript, {
+      const build = await requestBuild(harness.pool, harness.config, harness.storage, manuscript, {
         format: 'html',
         audience: 'admin',
         requestedBy: harness.userId,
@@ -537,7 +552,7 @@ describe.skipIf(!available)('manuscripts', () => {
       });
 
       const stored = await storeBuffer(
-        STORAGE_ROOT,
+        harness.storage,
         Buffer.concat([
           Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
           Buffer.from(title),

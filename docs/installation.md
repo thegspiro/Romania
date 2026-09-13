@@ -296,9 +296,44 @@ Then remove the bundled database, which is two edits in `docker-compose.yml`:
 
 `DB_ROOT_PASSWORD` becomes unused — it only ever fed the bundled container.
 
-The schema uses no MySQL features RDS lacks. Storage stays on a mounted volume
-(EBS or EFS); an S3 backend is a contained change behind the storage interface,
-and is not built yet.
+The schema uses no MySQL features RDS lacks. Storage can stay on a mounted
+volume (EBS or EFS), or move to S3:
+
+```sh
+STORAGE_BACKEND=s3
+S3_BUCKET=my-dissertation-files
+S3_REGION=eu-west-2
+```
+
+Set it on **both** the web and worker services — the worker writes the
+derivatives the web service serves. Leave `S3_ACCESS_KEY_ID` and
+`S3_SECRET_ACCESS_KEY` unset to use an instance or container role, which is the
+better arrangement: no long-lived key for this application to hold. Set both or
+neither; half a pair is refused at startup. `STORAGE_ROOT` stays required — an
+upload is hashed into a local scratch file before it can be addressed by
+content, and the worker needs somewhere to put a file Pandoc can read.
+
+For anything that is not AWS — MinIO, Backblaze B2, Wasabi, Ceph — also set
+`S3_ENDPOINT`, and `S3_FORCE_PATH_STYLE=true` follows from it automatically.
+
+**Moving an existing corpus.** Changing the backend changes where bytes are
+looked for, not where they are, so migrate before you rely on it:
+
+```sh
+docker compose exec web node dist/cli/admin.js storage migrate --dry-run
+docker compose exec web node dist/cli/admin.js storage migrate --verify
+```
+
+It is driven by the database rather than a directory walk, is re-runnable, and
+**copies rather than moves** — the local files stay intact, so switching back
+is possible. Leave them in place until the new backend has been seen to work.
+
+> **Backups change shape under S3.** The backup job's file archive tars a
+> directory, and there is no directory to tar. It logs, loudly, that files were
+> not archived and backs up the database only. Protect the bucket with
+> versioning and a lifecycle rule, or replication to a second bucket — that is
+> yours to arrange, and a backup that quietly holds less than you believe is
+> discovered during a restore.
 
 > Editing `docker-compose.yml` in the clone means `git pull` will conflict on
 > it at every update. Put these changes in a `docker-compose.override.yml`

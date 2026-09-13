@@ -11,10 +11,11 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { mkdir, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { dirname, join, resolve as resolvePath, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { Readable } from 'node:stream';
+import type { Readable } from 'node:stream';
+import type { StorageBackend } from './backend.js';
 
 export class UnsafeStorageKeyError extends Error {
   public constructor(key: string) {
@@ -33,10 +34,21 @@ export class UnsupportedFileTypeError extends Error {
 /** Deliberately narrow: keys are generated from hex digests. */
 const SAFE_KEY = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/;
 
-export function resolveStoragePath(root: string, key: string): string {
+/**
+ * The one rule for what a storage key may look like.
+ *
+ * Exported because the S3 backend applies it too. Traversal cannot escape a
+ * bucket, but a key nothing else can address is still a bug, and a rule
+ * enforced on one backend and not the other is the kind that rots quietly.
+ */
+export function assertSafeKey(key: string): void {
   if (!SAFE_KEY.test(key) || key.includes('..') || key.startsWith('/')) {
     throw new UnsafeStorageKeyError(key);
   }
+}
+
+export function resolveStoragePath(root: string, key: string): string {
+  assertSafeKey(key);
 
   const rootResolved = resolvePath(root);
   const candidate = resolvePath(join(rootResolved, key));
@@ -164,17 +176,23 @@ export class UploadTooLargeError extends Error {
 /**
  * Streams an upload to storage, hashing and type-sniffing as it goes.
  *
- * Written to a temporary name and renamed into place only once complete, so a
- * connection dropped mid-upload cannot leave a truncated file sitting at the
- * address its hash promises.
+ * The bytes land in a scratch file first, for a reason that is not merely
+ * convenience: the storage key is the SHA-256 of the contents, so it is not
+ * known until the last byte has been read. Buffering to disk rather than to
+ * memory keeps an archival scan from being held in RAM to be stored, and the
+ * backend then moves or uploads a file whose length is already known.
+ *
+ * The scratch file is always local, whichever backend is configured. Nothing
+ * is visible at the address its hash promises until the whole upload has
+ * arrived, so a dropped connection leaves no truncated object.
  */
 export async function storeStream(
-  root: string,
+  backend: StorageBackend,
+  scratchRoot: string,
   stream: Readable,
   maxBytes: number,
 ): Promise<StoredFile> {
-  const temporaryKey = `tmp/${randomUUID()}`;
-  const temporaryPath = resolveStoragePath(root, temporaryKey);
+  const temporaryPath = join(scratchRoot, `upload-${randomUUID()}`);
   await mkdir(dirname(temporaryPath), { recursive: true });
 
   const hash = createHash('sha256');
@@ -217,18 +235,12 @@ export async function storeStream(
 
     const sha256 = hash.digest('hex');
     const storageKey = originalKey(sha256);
-    const finalPath = resolveStoragePath(root, storageKey);
 
-    // Identical bytes are already stored: keep the existing file, which is
-    // byte-for-byte the same, and discard the upload.
-    let isNew = true;
-    try {
-      await stat(finalPath);
-      isNew = false;
-    } catch {
-      await mkdir(dirname(finalPath), { recursive: true });
-      await rename(temporaryPath, finalPath);
-    }
+    // Identical bytes are already stored: keep what is there, which is
+    // byte-for-byte the same, and discard the upload. Content addressing is
+    // what makes that safe to assume rather than merely likely.
+    const isNew = !(await backend.exists(storageKey));
+    if (isNew) await backend.putFile(storageKey, temporaryPath, byteSize);
 
     return {
       sha256,
@@ -252,17 +264,11 @@ export async function storeStream(
  * row that points here.
  */
 export async function storeBuffer(
-  root: string,
+  backend: StorageBackend,
   contents: Buffer,
 ): Promise<{ sha256: string; byteSize: number; storageKey: string }> {
   const sha256 = createHash('sha256').update(contents).digest('hex');
   const storageKey = originalKey(sha256);
-  const path = resolveStoragePath(root, storageKey);
-
-  await mkdir(dirname(path), { recursive: true });
-  const temporaryPath = `${path}.${randomUUID()}.partial`;
-  await pipeline(Readable.from(contents), createWriteStream(temporaryPath));
-  await rename(temporaryPath, path);
-
+  await backend.put(storageKey, contents);
   return { sha256, byteSize: contents.length, storageKey };
 }

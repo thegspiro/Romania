@@ -26,6 +26,7 @@ import { loadConfig, type Config } from '../../src/config.js';
 import { createPool, execute, type Pool } from '../../src/db/pool.js';
 import { migrateDown, migrateUp } from '../../src/db/migrate.js';
 import { buildServer } from '../../src/http/server.js';
+import { createStorageBackend, type StorageBackend } from '../../src/files/backend.js';
 import { createUser } from '../../src/auth/repository.js';
 import { hashPassword } from '../../src/auth/password.js';
 
@@ -112,6 +113,8 @@ export async function databaseAvailable(): Promise<boolean> {
 export interface Harness {
   config: Config;
   pool: Pool;
+  /** The storage backend the harness built the server with. */
+  storage: StorageBackend;
   app: FastifyInstance;
   userId: number;
   close: () => Promise<void>;
@@ -126,7 +129,8 @@ export async function createHarness(overrides: Record<string, string> = {}): Pro
   await migrateUp({ config, directory: MIGRATIONS_DIR });
 
   const pool = createPool(config);
-  const app = await buildServer({ config, pool });
+  const storage = createStorageBackend(config);
+  const app = await buildServer({ config, pool, storage });
   await app.ready();
 
   const userId = await createUser(pool, {
@@ -142,6 +146,7 @@ export async function createHarness(overrides: Record<string, string> = {}): Pro
   return {
     config,
     pool,
+    storage,
     app,
     userId,
     close: async () => {
