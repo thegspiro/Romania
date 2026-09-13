@@ -156,8 +156,9 @@ docker compose run --rm web preflight
 ```
 
 It reports the configuration it loaded, the database connection, pending
-migrations, whether the data directories are writable and whether an
-administrator exists — then exits non-zero if anything is actually broken.
+migrations, whether the storage backend is reachable, whether the data
+directories are writable and whether an administrator exists — then exits
+non-zero if anything is actually broken.
 
 ```
 [ ok ] configuration    valid, NODE_ENV=production
@@ -165,13 +166,22 @@ administrator exists — then exits non-zero if anything is actually broken.
 [ ok ] passkeys         relying party "dissertation.example.org", origins: https://dissertation.example.org
 [ ok ] indexing         disabled, so nothing public is crawled
 [ ok ] database         connected to dissertation at db:3306
-[ ok ] migrations       all 13 applied
+[ ok ] migrations       all 15 applied
 [warn] administrator    none yet -- run: docker compose exec web /app/scripts/entrypoint.sh admin create-admin
-[ ok ] storage          /data/files is writable
+[ ok ] storage          local directory /data/files is reachable
+[ ok ] scratch          /data/files is writable
 [ ok ] backups          /data/backups is writable
 
 preflight: ready, with 1 thing(s) to look at above.
 ```
+
+`storage` and `scratch` are two different questions, which is why both are
+asked. `storage` is the configured backend — under `s3` that line reads
+`s3 bucket my-dissertation-files is reachable` and the check behind it is a
+HeadBucket, so a wrong region or a role without access fails here rather than
+on the first upload. `scratch` is `STORAGE_ROOT`, which stays required under
+either backend because an upload is hashed into a local file before it can be
+addressed by content.
 
 A failed database connection reports `migrations` and `administrator` as
 `skip` rather than `FAIL`, so the report has exactly as many failures as there
