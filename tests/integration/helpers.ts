@@ -52,6 +52,11 @@ export function testConfig(overrides: Record<string, string> = {}): Config {
     SESSION_SECURE_COOKIES: 'false',
     ALLOW_SEARCH_INDEXING: 'false',
     STORAGE_ROOT: '/tmp/dissertation-test-files',
+    // Effectively off. The limiter is global, so the default of 300 would
+    // start answering 429 partway through any suite that drives more requests
+    // than that -- a failure with nothing to do with what the suite asserts.
+    // `rate-limit.test.ts` overrides it back down to a number it can reach.
+    RATE_LIMIT_MAX: '1000000',
     ...TEST_ARGON2,
     ...overrides,
   });
