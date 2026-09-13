@@ -5,8 +5,9 @@
 # are where the visibility rules are proved -- a private item is 404 not 403,
 # a public page leaks no private reference, file bytes re-check visibility --
 # and without a database they skip rather than fail. REQUIRE_TEST_DB in the
-# `node` job is what closes that hole; the pandoc probe in `python` closes the
-# smaller one beside it.
+# `node` job is what closes that hole; REQUIRE_TEST_S3 closes the same hole for
+# the storage-backend suites, which skip without an S3 endpoint; and the pandoc
+# probe in `python` closes the smaller one beside them.
 name: CI
 
 # pull_request covers every proposed change. push is narrowed to main so a
@@ -82,6 +83,10 @@ jobs:
       TEST_DB_PASSWORD: testpass
       # Without this the job passes green having run zero visibility tests.
       REQUIRE_TEST_DB: '1'
+      # Same argument for storage: without it a run that never reached an S3
+      # endpoint skips the backend suites and still reports success.
+      REQUIRE_TEST_S3: '1'
+      TEST_S3_ENDPOINT: http://127.0.0.1:5000
 
     steps:
       - uses: actions/checkout@v4
@@ -97,6 +102,32 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # A real S3 endpoint over HTTP rather than a fake of our own: the S3
+      # suites assert key encoding, content length, streaming and how the SDK
+      # reports a missing object, none of which a stub would prove.
+      #
+      # moto rather than MinIO, whose open-source server is archived upstream
+      # and no longer receives security updates -- pinning that image would put
+      # an unmaintained dependency into CI, which is the thing every other pin
+      # here exists to prevent. It is a pip install rather than a service
+      # container, so there is no image digest to keep in step either.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Start an S3 endpoint
+        run: |
+          python -m pip install --quiet 'moto[server]'
+          python -m moto.server -p 5000 &
+          for _ in $(seq 1 30); do
+            if curl --silent --output /dev/null http://127.0.0.1:5000/; then
+              echo "s3 endpoint is up"; exit 0
+            fi
+            sleep 1
+          done
+          echo "the S3 endpoint never came up" >&2
+          exit 1
 
       # Cheapest and most commonly forgotten, so it goes first.
       - name: Format

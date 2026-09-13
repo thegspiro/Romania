@@ -184,6 +184,27 @@ const schema = z
     STORAGE_ROOT: z.string().min(1),
     UPLOAD_MAX_BYTES: IntegerString(1, 10_737_418_240),
 
+    // Where file bytes live. `local` is the default and changes nothing for an
+    // existing install; `s3` puts them in an object store. Storage keys are
+    // identical either way -- the database, the URLs and the reference syntax
+    // are backend-independent -- so switching is this value plus
+    // `admin storage migrate`, never a schema change.
+    //
+    // STORAGE_ROOT stays required under `s3`: uploads are hashed into a local
+    // scratch file before they can be addressed, and the worker needs
+    // somewhere to put a file Pandoc can read.
+    STORAGE_BACKEND: z.enum(['local', 's3']),
+    S3_BUCKET: z.string().max(255),
+    S3_REGION: z.string().max(64),
+    // Set for anything that is not AWS -- MinIO, Backblaze B2, Wasabi, Ceph.
+    S3_ENDPOINT: z.union([z.literal(''), OriginString]),
+    S3_FORCE_PATH_STYLE: BooleanString,
+    S3_PREFIX: z.string().max(190),
+    // Left empty on AWS so the SDK's own chain finds an instance role, which
+    // is better than a long-lived key this application would have to hold.
+    S3_ACCESS_KEY_ID: z.string().max(255),
+    S3_SECRET_ACCESS_KEY: z.string().max(255),
+
     ALLOW_SEARCH_INDEXING: BooleanString,
 
     // The web service enqueues a Zotero sync but never calls the API itself, so
@@ -210,6 +231,33 @@ const schema = z
         code: z.ZodIssueCode.custom,
         path: ['MAP_TILE_ATTRIBUTION'],
         message: 'is required when MAP_TILE_URL is set, to credit the tile provider',
+      });
+    }
+
+    // A bucket is the one thing the S3 backend cannot be given a default for.
+    // Refusing at startup is the point of validating here at all: the
+    // alternative is a service that starts, accepts an upload, and fails on
+    // the first byte it tries to store.
+    if (value.STORAGE_BACKEND === 's3' && value.S3_BUCKET.trim() === '') {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['S3_BUCKET'],
+        message: 'is required when STORAGE_BACKEND is s3',
+      });
+    }
+
+    // Half a key pair is a misconfiguration that presents as a permission
+    // error much later. Neither is fine -- the SDK then looks for an instance
+    // role, which is the better arrangement on AWS.
+    const hasId = value.S3_ACCESS_KEY_ID.trim() !== '';
+    const hasSecret = value.S3_SECRET_ACCESS_KEY.trim() !== '';
+    if (hasId !== hasSecret) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['S3_SECRET_ACCESS_KEY'],
+        message:
+          'set both S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY, or neither ' +
+          '(neither lets the AWS SDK use an instance or container role)',
       });
     }
   });
@@ -301,6 +349,21 @@ export function loadConfig(env: EnvSource = process.env): Config {
 
     STORAGE_ROOT: read(env, 'STORAGE_ROOT', '/data/files'),
     UPLOAD_MAX_BYTES: read(env, 'UPLOAD_MAX_BYTES', '209715200'),
+
+    STORAGE_BACKEND: read(env, 'STORAGE_BACKEND', 'local'),
+    S3_BUCKET: read(env, 'S3_BUCKET', ''),
+    S3_REGION: read(env, 'S3_REGION', 'us-east-1'),
+    S3_ENDPOINT: read(env, 'S3_ENDPOINT', ''),
+    // Path style is wrong on AWS and right almost everywhere else, so it
+    // follows whether an endpoint was given rather than being guessed here.
+    S3_FORCE_PATH_STYLE: read(
+      env,
+      'S3_FORCE_PATH_STYLE',
+      read(env, 'S3_ENDPOINT', '') === '' ? 'false' : 'true',
+    ),
+    S3_PREFIX: read(env, 'S3_PREFIX', ''),
+    S3_ACCESS_KEY_ID: read(env, 'S3_ACCESS_KEY_ID', ''),
+    S3_SECRET_ACCESS_KEY: readSecret(env, 'S3_SECRET_ACCESS_KEY') ?? '',
 
     ALLOW_SEARCH_INDEXING: read(env, 'ALLOW_SEARCH_INDEXING', 'false'),
 

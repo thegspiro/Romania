@@ -1,0 +1,46 @@
+{
+  "$comment": "Shared by tests/unit/files.test.ts and worker/tests/test_storage_backend.py. Storage keys are built in BOTH TypeScript (src/files/storage.ts) and Python (worker/storage.py), because the worker writes the derivatives the web service serves and the compiled documents it hands to a reader. The two must agree exactly: a key shape that drifts orphans every existing file behind a 404, and the row in the database would still look correct. This file is the single source for the fixtures so neither implementation can change alone while both suites stay green.",
+  "originals": [
+    [
+      "0000000000000000000000000000000000000000000000000000000000000000",
+      "files/00/00/0000000000000000000000000000000000000000000000000000000000000000"
+    ],
+    [
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "files/01/23/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    ],
+    [
+      "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "files/ff/ff/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    ]
+  ],
+  "derivatives": [
+    [
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "thumb",
+      "jpg",
+      "derivatives/thumb/01/23/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.jpg"
+    ],
+    [
+      "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "web",
+      "jpg",
+      "derivatives/web/ab/cd/abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789.jpg"
+    ],
+    [
+      "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "page-1",
+      "png",
+      "derivatives/page-1/ff/ff/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.png"
+    ]
+  ],
+  "$rejected": "Keys both implementations must refuse. A traversal cannot escape an S3 bucket, but it would still address an object nothing else can name, so the rule holds on both backends in both languages.",
+  "rejected": ["../escape", "/absolute", "files/../../etc/passwd", "files/..", ""],
+  "$rejectedDerivatives": "Arguments derivative_key must refuse, as [sha256, variant, extension].",
+  "rejectedDerivatives": [
+    ["not-a-hash", "thumb", "jpg"],
+    ["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "Thumb", "jpg"],
+    ["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "thumb", "JPG"],
+    ["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "../x", "jpg"]
+  ]
+}

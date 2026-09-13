@@ -7,7 +7,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import type { RowDataPacket } from 'mysql2/promise';
-import type { AppContext } from '../http/server.js';
+import type { ResolvedContext } from '../http/server.js';
 import { renderPage } from '../http/context.js';
 import { badRequest, notFound } from '../http/errors.js';
 import { queryOne } from '../db/pool.js';
@@ -145,7 +145,7 @@ function formValuesFrom(source: SourceRecord): Record<string, unknown> {
 
 export async function registerAdminRoutes(
   app: FastifyInstance,
-  context: AppContext,
+  context: ResolvedContext,
 ): Promise<void> {
   const { config, pool } = context;
 
@@ -428,7 +428,12 @@ export async function registerAdminRoutes(
 
         let stored;
         try {
-          stored = await storeStream(config.STORAGE_ROOT, upload.file, config.UPLOAD_MAX_BYTES);
+          stored = await storeStream(
+            context.storage,
+            config.STORAGE_ROOT,
+            upload.file,
+            config.UPLOAD_MAX_BYTES,
+          );
         } catch (error) {
           if (error instanceof UploadTooLargeError || error instanceof UnsupportedFileTypeError) {
             return reply.redirect(`/admin/sources/${id}/edit?msg=source_file_rejected`);

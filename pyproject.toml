@@ -10,6 +10,11 @@ dependencies = [
   "bibtexparser>=1.4.1,<2",
   "rispy>=0.9.0,<1",
   "requests>=2.32.3,<3",
+  # Imported lazily, and only when STORAGE_BACKEND is s3 -- a local install
+  # never loads it. Declared as a plain dependency rather than an extra
+  # because one image serves both backends, and an extra would be a second
+  # way to build the image that nothing in CI would exercise.
+  "boto3>=1.35.0,<2",
 ]
 
 [project.optional-dependencies]
@@ -17,6 +22,9 @@ dev = [
   "pytest>=8.3.0,<9",
   "ruff>=0.8.0,<1",
   "pip-audit>=2.7.0,<3",
+  # A real S3 implementation to test the backend against. moto rather than
+  # MinIO, whose open-source server is archived upstream.
+  "moto>=5.0.0,<6",
 ]
 
 [tool.setuptools]

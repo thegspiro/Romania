@@ -19,6 +19,7 @@ Two things matter beyond resizing:
 from __future__ import annotations
 
 import logging
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +28,7 @@ from PIL import Image, ImageOps
 
 from worker.config import Config
 from worker.db import fetch_one, transaction
-from worker.storage import derivative_key, resolve
+from worker.storage import Backend, StorageObjectNotFound, create_backend, derivative_key
 
 LOGGER = logging.getLogger("worker.derivatives")
 
@@ -66,25 +67,40 @@ def run(
         LOGGER.info("file_object %s no longer exists, skipping", file_object_id)
         return
 
-    source_path = resolve(config.storage_root, str(record["storage_key"]))
-    if not source_path.is_file():
-        raise FileNotFoundError(f"stored file missing at {source_path}")
-
+    backend = create_backend(config)
     mime = str(record["mime_type"])
     sha256 = str(record["sha256"])
 
-    if mime.startswith(IMAGE_MIME_PREFIX):
-        with Image.open(source_path) as image:
-            _write_variants(connection, config, file_object_id, sha256, image)
-    elif mime == PDF_MIME:
-        _render_pdf_first_page(connection, config, file_object_id, sha256, source_path)
-    else:
-        LOGGER.info("no derivative rule for mime type %s (file %s)", mime, file_object_id)
+    # Pillow seeks within the file it opens and pypdfium2 wants a path, so the
+    # original is made local first. With the local backend that is the stored
+    # file itself and nothing is copied; with S3 it is a download into a
+    # directory that goes away when this job does.
+    with tempfile.TemporaryDirectory(prefix=f"dsp-derivative-{file_object_id}-") as workspace:
+        scratch = Path(workspace)
+        try:
+            source_path = backend.fetch_to_file(
+                str(record["storage_key"]), scratch / "original"
+            )
+        except StorageObjectNotFound as error:
+            raise FileNotFoundError(
+                f"stored file missing at {record['storage_key']}"
+            ) from error
+
+        if mime.startswith(IMAGE_MIME_PREFIX):
+            with Image.open(source_path) as image:
+                _write_variants(connection, backend, scratch, file_object_id, sha256, image)
+        elif mime == PDF_MIME:
+            _render_pdf_first_page(
+                connection, backend, scratch, file_object_id, sha256, source_path
+            )
+        else:
+            LOGGER.info("no derivative rule for mime type %s (file %s)", mime, file_object_id)
 
 
 def _write_variants(
     connection: pymysql.connections.Connection,
-    config: Config,
+    backend: Backend,
+    scratch: Path,
     file_object_id: int,
     sha256: str,
     image: Image.Image,
@@ -100,14 +116,13 @@ def _write_variants(
         rendition.thumbnail((longest_edge, longest_edge), Image.Resampling.LANCZOS)
 
         key = derivative_key(sha256, variant, "jpg")
-        target = resolve(config.storage_root, key)
-        target.parent.mkdir(parents=True, exist_ok=True)
 
-        # Write to a temporary file and rename, so a crash mid-write cannot
-        # leave a truncated image that later looks valid.
-        temporary = target.with_suffix(".tmp")
-        rendition.save(temporary, format="JPEG", quality=82, optimize=True, progressive=True)
-        temporary.replace(target)
+        # Rendered into the scratch directory first. Pillow needs somewhere
+        # seekable to write, and the backend then stores a file whose bytes
+        # are already complete -- so nothing partial is ever addressable.
+        rendered = scratch / f"{variant}.jpg"
+        rendition.save(rendered, format="JPEG", quality=82, optimize=True, progressive=True)
+        backend.put_file(key, rendered)
 
         _record_derivative(
             connection,
@@ -116,7 +131,7 @@ def _write_variants(
             mime_type="image/jpeg",
             width=rendition.width,
             height=rendition.height,
-            byte_size=target.stat().st_size,
+            byte_size=rendered.stat().st_size,
             storage_key=key,
         )
         LOGGER.info("wrote %s derivative for file %s", variant, file_object_id)
@@ -124,7 +139,8 @@ def _write_variants(
 
 def _render_pdf_first_page(
     connection: pymysql.connections.Connection,
-    config: Config,
+    backend: Backend,
+    scratch: Path,
     file_object_id: int,
     sha256: str,
     source_path: Path,
@@ -143,7 +159,7 @@ def _render_pdf_first_page(
         bitmap = page.render(scale=2)
         image = bitmap.to_pil()
         try:
-            _write_variants(connection, config, file_object_id, sha256, image)
+            _write_variants(connection, backend, scratch, file_object_id, sha256, image)
         finally:
             image.close()
     finally:

@@ -46,6 +46,19 @@ def _read_secret(name: str) -> str | None:
     return value
 
 
+def _read_bool(name: str, *, default: bool) -> bool:
+    """Reads a boolean the same way the TypeScript side does."""
+    raw = _read(name)
+    if raw is None or raw == "":
+        return default
+    lowered = raw.strip().lower()
+    if lowered in ("1", "true", "yes", "on"):
+        return True
+    if lowered in ("0", "false", "no", "off"):
+        return False
+    raise ConfigError(f"{name} must be a boolean, got {raw!r}.")
+
+
 def _read_int(name: str, default: int, minimum: int, maximum: int) -> int:
     raw = _read(name)
     if raw is None:
@@ -90,6 +103,23 @@ class Config:
     zotero_library_id: str | None = None
     zotero_api_key: str | None = None
 
+    # Where file bytes live. Mirrors STORAGE_BACKEND on the web side, and the
+    # two must agree: the worker writes the derivatives the web service serves,
+    # so a worker still on `local` while the web app reads `s3` produces
+    # thumbnails nothing can find.
+    #
+    # Defaulted, and here rather than beside storage_root, for the reason the
+    # Zotero fields are: adding them must not change the constructor every
+    # existing caller and test already uses.
+    storage_backend: str = "local"
+    s3_bucket: str = ""
+    s3_region: str = "us-east-1"
+    s3_endpoint: str = ""
+    s3_force_path_style: bool = False
+    s3_prefix: str = ""
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+
     @property
     def zotero_configured(self) -> bool:
         return self.zotero_library_id is not None and self.zotero_api_key is not None
@@ -105,6 +135,18 @@ def load_config() -> Config:
         raise ConfigError(
             f"ZOTERO_LIBRARY_TYPE must be 'user' or 'group', got {library_type!r}."
         )
+
+    storage_backend = (_read("STORAGE_BACKEND", "local") or "local").lower()
+    if storage_backend not in ("local", "s3"):
+        raise ConfigError(
+            f"STORAGE_BACKEND must be 'local' or 's3', got {storage_backend!r}."
+        )
+    s3_endpoint = _read("S3_ENDPOINT", "") or ""
+    if storage_backend == "s3" and not (_read("S3_BUCKET", "") or "").strip():
+        # Same refusal the web service makes, for the same reason: a worker
+        # that starts without a bucket fails on the first derivative it tries
+        # to write, long after the misconfiguration.
+        raise ConfigError("S3_BUCKET is required when STORAGE_BACKEND is s3.")
 
     library_id = _read("ZOTERO_LIBRARY_ID")
     if library_id is not None and not library_id.isdigit():
@@ -124,6 +166,16 @@ def load_config() -> Config:
         stale_lock_minutes=_read_int("WORKER_STALE_LOCK_MINUTES", 30, 1, 1440),
         storage_root=Path(_read("STORAGE_ROOT", "/data/files") or "/data/files"),
         backup_root=Path(_read("BACKUP_ROOT", "/data/backups") or "/data/backups"),
+        storage_backend=storage_backend,
+        s3_bucket=_read("S3_BUCKET", "") or "",
+        s3_region=_read("S3_REGION", "us-east-1") or "us-east-1",
+        s3_endpoint=s3_endpoint,
+        s3_force_path_style=_read_bool(
+            "S3_FORCE_PATH_STYLE", default=s3_endpoint != ""
+        ),
+        s3_prefix=_read("S3_PREFIX", "") or "",
+        s3_access_key_id=_read("S3_ACCESS_KEY_ID", "") or "",
+        s3_secret_access_key=_read_secret("S3_SECRET_ACCESS_KEY") or "",
         geocoder_base_url=(
             _read("GEOCODER_BASE_URL", "https://nominatim.openstreetmap.org")
             or "https://nominatim.openstreetmap.org"

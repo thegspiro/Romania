@@ -14,6 +14,7 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ConfigError, loadConfig, type Config } from '../config.js';
+import { createStorageBackend } from '../files/backend.js';
 import { createPool, type Pool } from '../db/pool.js';
 import { migrationStatus } from '../db/migrate.js';
 import { countUsers } from '../auth/repository.js';
@@ -44,6 +45,28 @@ async function checkWritable(label: string, path: string): Promise<Check> {
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return { status: 'fail', label, detail: `${path} is not writable: ${reason}` };
+  }
+}
+
+/**
+ * That the configured storage backend actually answers.
+ *
+ * For `s3` this is a HeadBucket, which fails distinctly for a wrong region, a
+ * missing bucket and a credential that cannot see it -- all three of which
+ * otherwise present as a working service that loses the first upload.
+ */
+async function checkStorage(config: Config): Promise<Check> {
+  const backend = createStorageBackend(config);
+  try {
+    await backend.check();
+    return { status: 'ok', label: 'storage', detail: `${backend.describe()} is reachable` };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      status: 'fail',
+      label: 'storage',
+      detail: `${backend.describe()} is not usable: ${reason}`,
+    };
   }
 }
 
@@ -163,7 +186,11 @@ async function run(): Promise<number> {
     await pool.end();
   }
 
-  checks.push(await checkWritable('storage', config.STORAGE_ROOT));
+  checks.push(await checkStorage(config));
+  // STORAGE_ROOT stays required under either backend: uploads are hashed into
+  // a local scratch file before they can be addressed by content, and the
+  // worker needs somewhere to put a file Pandoc can read.
+  checks.push(await checkWritable('scratch', config.STORAGE_ROOT));
   checks.push(await checkWritable('backups', process.env['BACKUP_ROOT'] ?? '/data/backups'));
 
   for (const check of checks) render(check);

@@ -22,6 +22,7 @@ import fastifyView from '@fastify/view';
 import nunjucks from 'nunjucks';
 import type { Config } from '../config.js';
 import type { Pool } from '../db/pool.js';
+import { createStorageBackend, type StorageBackend } from '../files/backend.js';
 import { loadSession } from '../auth/session.js';
 import { ANONYMOUS, adminViewer } from '../content/visibility.js';
 import { assertCsrf, cookieOptions, establishCsrfToken } from './csrf.js';
@@ -39,6 +40,16 @@ import { registerReviewRoutes } from '../routes/review.js';
 export interface AppContext {
   config: Config;
   pool: Pool;
+  /**
+   * Where file bytes live. Resolved from configuration when omitted, which is
+   * what lets a test hand in a backend of its own.
+   */
+  storage?: StorageBackend;
+}
+
+/** An `AppContext` after `buildServer` has filled in every default. */
+export interface ResolvedContext extends AppContext {
+  storage: StorageBackend;
 }
 
 const VIEWS_ROOT = fileURLToPath(new URL('../views/', import.meta.url));
@@ -52,6 +63,8 @@ export function sessionCookieOptions(config: Config): ReturnType<typeof cookieOp
 
 export async function buildServer(context: AppContext): Promise<FastifyInstance> {
   const { config, pool } = context;
+  const storage = context.storage ?? createStorageBackend(config);
+  const resolved: ResolvedContext = { ...context, storage };
 
   const app = Fastify({
     logger: {
@@ -199,6 +212,8 @@ export async function buildServer(context: AppContext): Promise<FastifyInstance>
       ),
   });
 
+  app.log.info({ backend: storage.kind }, `file storage: ${storage.describe()}`);
+
   app.log.info(
     { trustProxy: config.TRUST_PROXY, max: config.RATE_LIMIT_MAX },
     config.TRUST_PROXY
@@ -219,13 +234,13 @@ export async function buildServer(context: AppContext): Promise<FastifyInstance>
       .send(robotsTxt(config));
   });
 
-  registerAuthRoutes(app, context);
-  await registerAdminRoutes(app, context);
-  registerPublicRoutes(app, context);
-  registerPublicContentRoutes(app, context);
-  registerTimelineRoutes(app, context);
-  registerMapRoutes(app, context);
-  registerReviewRoutes(app, context);
+  registerAuthRoutes(app, resolved);
+  await registerAdminRoutes(app, resolved);
+  registerPublicRoutes(app, resolved);
+  registerPublicContentRoutes(app, resolved);
+  registerTimelineRoutes(app, resolved);
+  registerMapRoutes(app, resolved);
+  registerReviewRoutes(app, resolved);
 
   app.setNotFoundHandler(async (request, reply) => {
     return renderPage(config, request, reply, 'errors/404', {}, { status: 404, noindex: true });

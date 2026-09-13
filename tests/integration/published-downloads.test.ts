@@ -110,7 +110,7 @@ describe.skipIf(!available)('published downloads', () => {
     options: { audience?: BuildAudience; format?: BuildFormat; finish?: boolean } = {},
   ): Promise<number> {
     const record = await findManuscriptById(harness.pool, manuscriptId, admin);
-    const build = await requestBuild(harness.pool, harness.config, record!, {
+    const build = await requestBuild(harness.pool, harness.config, harness.storage, record!, {
       format: options.format ?? 'html',
       audience: options.audience ?? 'public',
       requestedBy: harness.userId,
@@ -118,7 +118,10 @@ describe.skipIf(!available)('published downloads', () => {
 
     if (options.finish === false) return build.buildId;
 
-    const stored = await storeBuffer(STORAGE_ROOT, Buffer.from('<h1>Opening</h1><h1>Closing</h1>'));
+    const stored = await storeBuffer(
+      harness.storage,
+      Buffer.from('<h1>Opening</h1><h1>Closing</h1>'),
+    );
     const fileObjectId = await insertFileObject(harness.pool, {
       sha256: stored.sha256,
       byteSize: stored.byteSize,
