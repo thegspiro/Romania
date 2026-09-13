@@ -41,7 +41,11 @@ export type AuditAction =
   | 'zotero.sync'
   | 'zotero.sync.full'
   | 'backup.requested'
-  | 'place.geocode';
+  | 'place.geocode'
+  // Publishing a compiled document is a decision about one file holding every
+  // section at once, so it is traced separately from publishing a page.
+  | 'build.publish'
+  | 'build.withdraw';
 
 export interface AuditEntry {
   actor: string;

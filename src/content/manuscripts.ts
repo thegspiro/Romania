@@ -541,6 +541,14 @@ export interface AssembledDocument {
   wordCount: number;
   /** Cited sources the audience cannot see; a warning, not an error. */
   withheldCitations: string[];
+  /**
+   * Every content item whose prose reached the document, in outline order.
+   *
+   * Recorded so a published download can re-check, on every request, that all
+   * of them are still published. The bytes are written once; this is what lets
+   * the decision about them be made now rather than at compile time.
+   */
+  itemIds: number[];
 }
 
 /**
@@ -836,5 +844,6 @@ export async function assembleDocument(
     sectionCount: ordered.length,
     wordCount,
     withheldCitations,
+    itemIds: ordered.map((section) => section.itemId),
   };
 }

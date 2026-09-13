@@ -52,6 +52,26 @@
       {% endif %}
     </section>
 
+    {#
+      Absent unless there really is a published download, for everyone
+      including an administrator: the link is the same question the download
+      route asks, so a link that is shown is a link that works.
+    #}
+    {% if download %}
+      <section>
+        <h2>Download</h2>
+        <p>
+          <a href="{{ manuscript.href }}/download" rel="nofollow">
+            Download the whole manuscript ({{ download.format }})
+          </a>
+        </p>
+        <p class="muted small">
+          Compiled {{ download.createdAt.toISOString().slice(0, 10) }} from
+          {{ download.sectionCount }} published section{{ 's' if download.sectionCount != 1 }}.
+        </p>
+      </section>
+    {% endif %}
+
     {% if isAdmin %}
       <p class="admin-actions">
         <a href="/admin/manuscripts/{{ manuscript.id }}/outline">Edit the outline or compile</a>

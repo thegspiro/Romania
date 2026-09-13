@@ -1,10 +1,15 @@
 /**
- * Admin routes for manuscripts: the outline, and compiling it to a document.
+ * Admin routes for manuscripts: the outline, compiling it to a document, and
+ * choosing which compiled document the public may download.
  *
- * The download route is where the safety property lives. A compiled file is a
- * single object containing many sections, so it is the one place a mistake
- * would disclose everything at once. Downloads require an authenticated
- * administrator, and the build's `audience` is checked against that.
+ * A compiled file is a single object containing many sections, so it is the
+ * one place a mistake would disclose everything at once. Two things follow.
+ * The download route here requires an authenticated administrator and serves
+ * any build regardless of `audience`. And publishing a build for public
+ * download is a separate act with its own conditions, all of which live in
+ * `publishBuild` rather than in the handler below -- the same argument as the
+ * visibility chokepoint: one place to audit, and no second copy in a route to
+ * fall out of step.
  */
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
@@ -36,7 +41,9 @@ import {
   isBuildAudience,
   isBuildFormat,
   listBuilds,
+  publishBuild,
   requestBuild,
+  withdrawBuild,
 } from '../content/builds.js';
 import { findFileObject } from '../files/repository.js';
 import { resolveStoragePath } from '../files/storage.js';
@@ -309,13 +316,86 @@ export function registerAdminManuscriptRoutes(admin: FastifyInstance, context: A
     return reply.redirect(`/admin/manuscripts/${id}/outline?msg=build_queued`);
   });
 
+  // --- Publishing a download -----------------------------------------------
+
   /**
-   * Downloads a compiled document.
+   * Offers one build as the manuscript's public download.
    *
-   * Reachable only inside the authenticated admin scope, and the build's
-   * `audience` is checked as well: a build assembled for the public is served
-   * as such, and an 'admin' build -- which contains private sections -- is
-   * never reachable by any other route in the application.
+   * Compiling never makes anything downloadable; this is the separate,
+   * deliberate act that does, and `publishBuild` is where every condition for
+   * it lives. The handler's only job is to turn a refusal into a message the
+   * operator can act on -- there is no check here that is not also there,
+   * because a rule in a route is a rule with a second copy.
+   */
+  admin.post('/admin/manuscripts/:id/builds/:buildId/publish', async (request, reply) => {
+    const id = parseId(request);
+    const buildId = parseId(request, 'buildId');
+
+    const build = await findBuild(pool, buildId);
+    if (build === null || build.manuscriptItemId !== id) throw notFound(`build ${buildId}`);
+
+    const outcome = await publishBuild(
+      pool,
+      buildId,
+      request.viewer.kind === 'admin' ? request.viewer.userId : null,
+    );
+
+    if (!outcome.ok) {
+      return reply.redirect(`/admin/manuscripts/${id}/outline?msg=build_${outcome.reason}`);
+    }
+
+    await recordAudit(
+      pool,
+      {
+        actor: actorId(request),
+        action: 'build.publish',
+        itemId: id,
+        detail: {
+          buildId,
+          format: build.format,
+          audience: build.audience,
+          items: build.itemCount,
+        },
+        ip: request.ip,
+      },
+      request.log,
+    );
+
+    return reply.redirect(`/admin/manuscripts/${id}/outline?msg=build_published`);
+  });
+
+  /** Withdraws the public download. Takes effect on the next request. */
+  admin.post('/admin/manuscripts/:id/builds/:buildId/withdraw', async (request, reply) => {
+    const id = parseId(request);
+    const buildId = parseId(request, 'buildId');
+
+    const build = await findBuild(pool, buildId);
+    if (build === null || build.manuscriptItemId !== id) throw notFound(`build ${buildId}`);
+
+    if (await withdrawBuild(pool, buildId)) {
+      await recordAudit(
+        pool,
+        {
+          actor: actorId(request),
+          action: 'build.withdraw',
+          itemId: id,
+          detail: { buildId },
+          ip: request.ip,
+        },
+        request.log,
+      );
+    }
+
+    return reply.redirect(`/admin/manuscripts/${id}/outline?msg=build_withdrawn`);
+  });
+
+  /**
+   * Downloads a compiled document as its administrator.
+   *
+   * This is the route for every build, published or not, and it is inside the
+   * authenticated admin scope. The public download is a separate route with a
+   * separate set of conditions; nothing an administrator can reach here is
+   * reachable there by virtue of having been reached here.
    */
   admin.get('/admin/manuscripts/:id/builds/:buildId/download', async (request, reply) => {
     const id = parseId(request);
