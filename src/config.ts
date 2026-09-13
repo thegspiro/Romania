@@ -158,7 +158,12 @@ const schema = z
         'must be a bare domain such as example.org or "localhost" (no scheme, port or path)',
       ),
     WEBAUTHN_RP_NAME: z.string().min(1).max(190),
-    WEBAUTHN_ORIGINS: z.array(OriginString).min(1),
+    // The message describes what the operator types -- one variable holding a
+    // comma-separated list -- rather than the array it parses into. "Expected
+    // array" is true of the schema and useless to the person reading it.
+    WEBAUTHN_ORIGINS: z
+      .array(OriginString, { error: 'is required: one or more origins, comma-separated' })
+      .min(1, 'must list at least one origin'),
 
     ARGON2_MEMORY_KIB: IntegerString(8192, 1_048_576),
     ARGON2_TIME_COST: IntegerString(1, 20),
@@ -222,6 +227,35 @@ export type Config = Readonly<
   }
 >;
 
+/**
+ * Schema fields whose environment variable is spelled differently.
+ *
+ * The schema names the parsed value; the operator sets the variable. They are
+ * the same everywhere but here: one `WEBAUTHN_ORIGIN` holding a
+ * comma-separated list becomes the `WEBAUTHN_ORIGINS` array. Reporting the
+ * field name sent the operator looking for a variable that does not exist,
+ * which is the worst moment to be given a wrong name -- the service is
+ * refusing to start, and a first deployment has nothing else to go on.
+ */
+const ENV_NAMES: Readonly<Record<string, string>> = Object.freeze({
+  WEBAUTHN_ORIGINS: 'WEBAUTHN_ORIGIN',
+});
+
+/**
+ * How one validation failure is addressed to the person who can fix it.
+ *
+ * Substitution is on the head of the path only, so a failure *inside* a parsed
+ * array still names the variable and keeps the index: an unusable entry in
+ * WEBAUTHN_ORIGIN reads as `WEBAUTHN_ORIGIN.1`, which points at the second
+ * item of the list they actually wrote.
+ */
+function issueLabel(path: readonly PropertyKey[]): string {
+  const segments = path.map(String);
+  const [head, ...rest] = segments;
+  if (head === undefined) return '(root)';
+  return [ENV_NAMES[head] ?? head, ...rest].join('.');
+}
+
 export function loadConfig(env: EnvSource = process.env): Config {
   const originsRaw = read(env, 'WEBAUTHN_ORIGIN');
 
@@ -280,7 +314,7 @@ export function loadConfig(env: EnvSource = process.env): Config {
   const result = schema.safeParse(candidate);
   if (!result.success) {
     const details = result.error.issues
-      .map((issue) => `  ${issue.path.join('.') || '(root)'}: ${issue.message}`)
+      .map((issue) => `  ${issueLabel(issue.path)}: ${issue.message}`)
       .join('\n');
     throw new ConfigError(`Invalid configuration:\n${details}`);
   }

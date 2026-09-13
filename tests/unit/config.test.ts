@@ -29,6 +29,43 @@ describe('loadConfig', () => {
     expect(config.sessionTtlMs).toBe(720 * 60 * 60 * 1000);
   });
 
+  /**
+   * A refusal names the variable the operator sets.
+   *
+   * The schema names the parsed value, and for one field the two differ: a
+   * single WEBAUTHN_ORIGIN holding a comma-separated list becomes the
+   * WEBAUTHN_ORIGINS array. Reporting the field sent the reader looking for a
+   * variable that does not exist -- at the one moment they have nothing else
+   * to go on, because the service is refusing to start.
+   */
+  describe('naming the variable in a refusal', () => {
+    it('names WEBAUTHN_ORIGIN when it is missing, not the parsed field', () => {
+      expect(() => loadConfig(env({ WEBAUTHN_ORIGIN: undefined }))).toThrow(/WEBAUTHN_ORIGIN:/);
+      expect(() => loadConfig(env({ WEBAUTHN_ORIGIN: undefined }))).not.toThrow(/WEBAUTHN_ORIGINS/);
+    });
+
+    it('keeps the index when one entry of the list is unusable', () => {
+      // Substitution is on the head of the path only, so the index still
+      // points at the item they wrote -- here the second of two.
+      expect(() =>
+        loadConfig(env({ WEBAUTHN_ORIGIN: 'http://localhost:8080,not-an-origin' })),
+      ).toThrow(/WEBAUTHN_ORIGIN\.1:/);
+    });
+
+    it('describes the comma-separated list, not the array it parses into', () => {
+      // "Expected array" is true of the schema and useless to the person
+      // reading it, who typed one variable.
+      expect(() => loadConfig(env({ WEBAUTHN_ORIGIN: undefined }))).toThrow(/comma-separated/);
+      expect(() => loadConfig(env({ WEBAUTHN_ORIGIN: undefined }))).not.toThrow(/expected array/);
+      expect(() => loadConfig(env({ WEBAUTHN_ORIGIN: ',' }))).toThrow(/at least one origin/);
+    });
+
+    it('leaves every other field alone, because the names already agree', () => {
+      expect(() => loadConfig(env({ DB_PASSWORD: undefined }))).toThrow(/DB_PASSWORD:/);
+      expect(() => loadConfig(env({ HTTP_PORT: '70000' }))).toThrow(/HTTP_PORT:/);
+    });
+  });
+
   it('requires a database password', () => {
     expect(() => loadConfig(env({ DB_PASSWORD: undefined }))).toThrow(ConfigError);
   });
