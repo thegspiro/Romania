@@ -18,16 +18,20 @@ and `linux/arm64` — so there is something to pull. That removes the hard
 blocker, but it does not turn this into a template install:
 
 - **Community Applications** lists applications from curated templates, not
-  from registries. Publishing an image does not put an entry there; that needs
-  a template submitted to the CA repository, which does not exist yet.
-- **The Docker tab's "Add Container"** can pull the image, but this is three
-  services — `web`, `worker` and a database — that share a volume and a
-  network, and the web app hands compiled work to the worker across
-  `/data/files`. Wiring that up by hand in three separate container forms is
-  possible and is a bad idea; the compose files already express it.
+  from registries. Publishing an image does not put an entry there. Templates
+  now exist — [`unraid/`](../unraid/) holds one for `web` and one for
+  `worker` — but getting them _listed_ in CA is a submission its maintainers
+  have to accept, which has not happened.
+- **The Docker tab's "Add Container"** can use those templates directly from
+  their raw URLs, without waiting for a CA listing. What it cannot do is wire
+  the three services together: the database is yours to install, and the
+  `/data/files` path has to be set identically in two separate container forms
+  because that volume is how the web app hands compiled work to the worker.
 
-So the supported path is still **Docker Compose against a clone of this
-repository on the host**:
+So the **container-at-a-time path works**, and [`unraid/README.md`](../unraid/README.md)
+sets out what it makes you keep in step by hand. The path this page
+recommends is still **Docker Compose against a clone of this repository**,
+because it expresses all of that in one command:
 
 - The **Compose Manager** plugin (from Community Applications), or
 - `docker compose` over SSH.
@@ -304,11 +308,14 @@ say so rather than overwrite them.
 These are shortcomings in the application and its tooling, not in this page.
 They are recorded here so an operator is not the one to discover them.
 
-1. ~~**No published image.**~~ Fixed: `ghcr.io/thegspiro/romania` is published
-   for both architectures by the pipeline that runs the tests. What is still
-   missing is a **Community Applications template**, which is what would make
-   this appear in the place an Unraid user actually looks. That is a separate
-   submission to the CA repository, not a change here.
+1. ~~**No published image.**~~ ~~**No CA template.**~~ Both addressed: the
+   image is published for both architectures by the pipeline that runs the
+   tests, and [`unraid/`](../unraid/) holds a template for each role. What
+   remains is the **CA listing** — a submission its maintainers accept, which
+   nothing in this repository can do on its own. The templates are usable
+   before then by adding a container from their raw URL. Note that neither
+   template has been installed on a real Unraid box yet; they are validated
+   against the schema CA actually publishes, which is not the same thing.
 2. **The container uid is fixed at build time, and now that matters more.**
    `APP_UID`/`APP_GID` are build arguments — see
    [step 4](#4-decide-which-uid-the-containers-run-as). That was a clean

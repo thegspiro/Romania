@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>dissertation-worker</Name>
+  <Repository>ghcr.io/thegspiro/romania:latest</Repository>
+  <Registry>https://github.com/thegspiro/Romania/pkgs/container/romania</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/thegspiro/Romania/issues</Support>
+  <Project>https://github.com/thegspiro/Romania</Project>
+  <GitHub>https://github.com/thegspiro/Romania</GitHub>
+  <ReadMe>https://github.com/thegspiro/Romania/blob/main/docs/unraid.md</ReadMe>
+  <TemplateURL>https://raw.githubusercontent.com/thegspiro/Romania/main/unraid/dissertation-worker.xml</TemplateURL>
+  <Category>Productivity:</Category>
+  <!-- Same image as dissertation-web; the entrypoint's first argument picks the
+       role. No port and no WebUI: this container serves nothing, it polls a job
+       table and does the work the web request could not wait for. -->
+  <PostArgs>worker</PostArgs>
+  <Requires>The **dissertation-web** container, the same MySQL 8 database it uses, and the same host path mounted at /data/files. Install dissertation-web first.</Requires>
+  <Overview>
+The background worker for the dissertation research platform. Install **dissertation-web** first; this container is the second half of it and is not useful alone.
+
+It polls a job table in the same MySQL database the web container uses and does the work a web request cannot wait for: compiling a manuscript with Pandoc and Tectonic, writing database and file backups, generating image derivatives, geocoding places, and syncing a Zotero library. Without it the site still serves, but uploads never get thumbnails, backups never run and no manuscript ever compiles.
+
+THREE SETTINGS MUST MATCH dissertation-web EXACTLY:
+
+1. The database host, name, user and password. They talk through that database; if they disagree, this container simply never sees a job.
+2. The host path mounted at /data/files. The web app stages an assembled manuscript there and the worker reads it back. Different paths means compilation produces nothing and reports no error you would notice.
+3. The uid on those directories. This image runs as uid 1000 and does not support PUID/PGID - chown the shares to 1000:1000 as described on dissertation-web.
+
+Migrations are deliberately left off here. The web container applies them on start, and RUN_MIGRATIONS is fixed to false below so the two can never race. Do not change it.
+
+This container has no web interface and publishes no port. To see what it is doing, read its log - it names each job it claims and what it did with it.
+
+The Zotero API key, if you use one, belongs here and nowhere else. The web service never holds it: it enqueues a sync job and reads the result back, so the credential stays in the container that actually talks to the API.
+  </Overview>
+  <Config Name="Files" Target="/data/files" Default="/mnt/user/appdata/dissertation/files" Mode="rw" Description="MUST be the identical host path dissertation-web uses. This is how compiled work is handed between them." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/dissertation/files</Config>
+  <Config Name="Backups" Target="/data/backups" Default="/mnt/user/backups/dissertation" Mode="rw" Description="Where the backup job writes dumps and file archives. Point this at a share the host itself backs up." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/backups/dissertation</Config>
+  <Config Name="Database host" Target="DB_HOST" Default="" Description="Same MySQL server as dissertation-web." Type="Variable" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="Database port" Target="DB_PORT" Default="3306" Description="MySQL port." Type="Variable" Display="advanced" Required="false" Mask="false">3306</Config>
+  <Config Name="Database name" Target="DB_NAME" Default="dissertation" Description="Same database as dissertation-web." Type="Variable" Display="always" Required="true" Mask="false">dissertation</Config>
+  <Config Name="Database user" Target="DB_USER" Default="dissertation" Description="Same user as dissertation-web." Type="Variable" Display="always" Required="true" Mask="false">dissertation</Config>
+  <Config Name="Database password" Target="DB_PASSWORD" Default="" Description="Must match dissertation-web exactly." Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="Run migrations" Target="RUN_MIGRATIONS" Default="false" Description="Leave false. The web container owns migrations; two roles applying them would race." Type="Variable" Display="advanced" Required="true" Mask="false">false</Config>
+  <Config Name="Geocoder contact address" Target="GEOCODER_USER_AGENT" Default="dissertation-platform/0.1 (you@example.org)" Description="Nominatim asks every client to identify itself with a real contact address. Geocoding jobs fail rather than send anonymous traffic." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Zotero library type" Target="ZOTERO_LIBRARY_TYPE" Default="user" Description="Optional. user or group." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Zotero library ID" Target="ZOTERO_LIBRARY_ID" Default="" Description="Optional. The numeric id from zotero.org/settings/keys, not your username." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Zotero API key" Target="ZOTERO_API_KEY" Default="" Description="Optional, read-only. Belongs here and not on the web container - nothing ever writes back to Zotero." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+</Container>

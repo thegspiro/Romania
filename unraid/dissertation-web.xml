@@ -1,0 +1,63 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>dissertation-web</Name>
+  <Repository>ghcr.io/thegspiro/romania:latest</Repository>
+  <Registry>https://github.com/thegspiro/Romania/pkgs/container/romania</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/thegspiro/Romania/issues</Support>
+  <Project>https://github.com/thegspiro/Romania</Project>
+  <GitHub>https://github.com/thegspiro/Romania</GitHub>
+  <ReadMe>https://github.com/thegspiro/Romania/blob/main/docs/unraid.md</ReadMe>
+  <TemplateURL>https://raw.githubusercontent.com/thegspiro/Romania/main/unraid/dissertation-web.xml</TemplateURL>
+  <Category>Productivity:</Category>
+  <WebUI>http://[IP]:[PORT:8080]</WebUI>
+  <!-- The entrypoint selects the role from its first argument. One image, two
+       containers: this one serves, dissertation-worker does background work. -->
+  <PostArgs>web</PostArgs>
+  <Requires>A MySQL 8 database (install one from Community Applications and create an empty database for this), and the companion **dissertation-worker** container pointed at the same database and the same /data/files share. HTTPS via a reverse proxy is required for sign-in to work at all.</Requires>
+  <Overview>
+Self-hosted research and publication platform for a doctoral dissertation. It holds bibliographic sources, archival artifacts, essays, and the people, places, organizations and events they concern, with every item individually public or private, Chicago citations rendered by citeproc, and a compile step that turns the pieces into one PDF, DOCX, HTML or LaTeX document.
+
+THIS IS THREE PARTS, NOT ONE CONTAINER.
+
+1. dissertation-web - this container, which serves the site and applies database migrations on start.
+2. dissertation-worker - a second container from the same image. Compilation, backups, derivatives, geocoding and Zotero sync all happen there. Without it, uploads never get thumbnails and no manuscript ever compiles.
+3. A MySQL 8 database, which you install separately. Create an empty database and a user for it, then point both containers at it.
+
+Both containers MUST have the same host path mounted at /data/files. The web app writes an assembled manuscript there and the worker reads it back; if the two paths differ, compilation silently produces nothing.
+
+HTTPS IS NOT OPTIONAL. Passkeys are the primary way in, and browsers refuse WebAuthn outside a secure context. Put this behind SWAG, Nginx Proxy Manager or a Cloudflare Tunnel and reach it by hostname. The port below exists so you can confirm the container starts; signing in over plain http://IP:8080 will not work. Set TRUST_PROXY to true once a proxy is in front, and leave it false until then - without a proxy, trusting the forwarded headers lets a client spoof its own address and defeat login throttling.
+
+FILE OWNERSHIP. The image runs as uid 1000 and does not support PUID/PGID - the uid is fixed when the image is built. Unraid shares are owned by nobody:users (99:100), so before first start:
+
+  mkdir -p /mnt/user/appdata/dissertation/files /mnt/user/backups/dissertation
+  chown -R 1000:1000 /mnt/user/appdata/dissertation/files /mnt/user/backups/dissertation
+
+The container refuses to start on a directory it cannot write to and names the path in its log. Note that Unraid's "Docker Safe New Permissions" tool resets share ownership and will undo this; re-apply the chown after running it. If you would rather the containers ran as 99:100, build the image yourself with APP_UID=99 - see docs/unraid.md.
+
+AFTER FIRST START, create your administrator account from the Unraid console:
+
+  docker exec -it dissertation-web /app/scripts/entrypoint.sh admin create-admin
+
+It prints ten recovery codes once. Save them somewhere that is not this server.
+
+DOCKER COMPOSE IS THE ALTERNATIVE, AND OFTEN THE SIMPLER ONE. The repository ships docker-compose.yml plus docker-compose.unraid.yml, which wire all three services, the shared volume and the array paths together in one command. These templates exist so the application can be installed the way Unraid users expect; the compose files exist so the pieces cannot be wired up wrongly. Either is supported - see docs/unraid.md.
+
+Search engines are blocked by default, because research that has been crawled and archived cannot be un-crawled. Turn ALLOW_SEARCH_INDEXING on only when the public pages are ready to be indexed.
+  </Overview>
+  <Config Name="WebUI Port" Target="8080" Default="8080" Mode="tcp" Description="HTTP port. Put a reverse proxy in front of this; passkeys need HTTPS." Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Files" Target="/data/files" Default="/mnt/user/appdata/dissertation/files" Mode="rw" Description="Uploads and derivatives, addressed by content hash. MUST be the same host path the worker uses. chown to 1000:1000." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/dissertation/files</Config>
+  <Config Name="Backups" Target="/data/backups" Default="/mnt/user/backups/dissertation" Mode="rw" Description="Database dumps and file archives. Point this at a share the host itself backs up." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/backups/dissertation</Config>
+  <Config Name="Public base URL" Target="PUBLIC_BASE_URL" Default="https://dissertation.example.org" Description="The address visitors actually type, including https://. Used to build absolute URLs and validate redirects." Type="Variable" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="Passkey relying party ID" Target="WEBAUTHN_RP_ID" Default="dissertation.example.org" Description="The bare domain - no scheme, no port. EFFECTIVELY PERMANENT: changing it after passkeys are registered invalidates every one of them." Type="Variable" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="Passkey origin" Target="WEBAUTHN_ORIGIN" Default="https://dissertation.example.org" Description="Full origin including https://. Comma-separate to allow more than one during a domain move." Type="Variable" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="Behind a reverse proxy" Target="TRUST_PROXY" Default="true" Description="true reads the client IP and scheme from X-Forwarded-*. Get this wrong in either direction and it hurts: false behind a proxy makes every visitor share one rate-limit bucket, so a busy afternoon can lock the site for everyone; true with nothing in front lets a client spoof its own address and defeat login throttling. Set it to match your actual deployment." Type="Variable" Display="always" Required="true" Mask="false">true</Config>
+  <Config Name="Database host" Target="DB_HOST" Default="" Description="Hostname or IP of your MySQL 8 server." Type="Variable" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="Database port" Target="DB_PORT" Default="3306" Description="MySQL port." Type="Variable" Display="advanced" Required="false" Mask="false">3306</Config>
+  <Config Name="Database name" Target="DB_NAME" Default="dissertation" Description="An empty database you created for this application." Type="Variable" Display="always" Required="true" Mask="false">dissertation</Config>
+  <Config Name="Database user" Target="DB_USER" Default="dissertation" Description="A user with rights on that database. It never needs root." Type="Variable" Display="always" Required="true" Mask="false">dissertation</Config>
+  <Config Name="Database password" Target="DB_PASSWORD" Default="" Description="Must match the worker container exactly. The application refuses to start on the placeholder value published in the repository." Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="Secure session cookies" Target="SESSION_SECURE_COOKIES" Default="true" Description="Leave true. The session cookie is issued with the __Host- prefix and Secure, which needs HTTPS." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="Allow search indexing" Target="ALLOW_SEARCH_INDEXING" Default="false" Description="false blocks crawlers entirely. Crawled research cannot be un-crawled, so turn this on deliberately." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+</Container>
