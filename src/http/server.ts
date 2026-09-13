@@ -16,6 +16,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import fastifyFormbody from '@fastify/formbody';
 import fastifyMultipart from '@fastify/multipart';
+import fastifyRateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import fastifyView from '@fastify/view';
 import nunjucks from 'nunjucks';
@@ -24,7 +25,7 @@ import type { Pool } from '../db/pool.js';
 import { loadSession } from '../auth/session.js';
 import { ANONYMOUS, adminViewer } from '../content/visibility.js';
 import { assertCsrf, cookieOptions, establishCsrfToken } from './csrf.js';
-import { HttpError } from './errors.js';
+import { HttpError, tooManyRequests } from './errors.js';
 import { renderPage } from './context.js';
 import { applySecurityHeaders, robotsTxt } from './security.js';
 import { registerAuthRoutes } from '../routes/auth.js';
@@ -141,6 +142,69 @@ export async function buildServer(context: AppContext): Promise<FastifyInstance>
     assertCsrf(request);
     done();
   });
+
+  /*
+   * Rate limiting, registered globally and on purpose.
+   *
+   * Every route that serves a file -- `/manuscripts/:slug/download`,
+   * `/files/:id/:variant`, the admin build download -- reads from disk on
+   * every request, and the published download is deliberately `no-store`, so
+   * nothing in front of the application absorbs a repeat. One registration
+   * covers all of them and every route added later; a per-route limiter is a
+   * rule the fourth such route would have to remember.
+   *
+   * Registered *after* the onRequest hook above, which is what makes
+   * `request.viewer` readable in `allowList`. Fastify appends hooks in the
+   * order they are added during boot, so moving this call earlier would run
+   * the limiter before the viewer exists and break the exemption --
+   * `tests/integration/rate-limit.test.ts` pins the exemption, so that
+   * mistake fails rather than silently throttling the operator.
+   *
+   * What the key means depends on `TRUST_PROXY`, and this is the trap worth
+   * knowing about: with it off, `request.ip` is the socket address, so behind
+   * a reverse proxy every visitor shares the proxy's bucket. That is why the
+   * default is generous rather than tight -- a limit that takes the site down
+   * for everyone is not protection -- and why the address in use is logged at
+   * startup.
+   */
+  await app.register(fastifyRateLimit, {
+    global: true,
+    max: config.RATE_LIMIT_MAX,
+    timeWindow: config.RATE_LIMIT_WINDOW_SECONDS * 1000,
+    // In-memory, which is per process and resets on restart. That is the
+    // right store for this: the limit sheds load, it does not lock an account
+    // out, so there is nothing worth persisting and nothing worth a database
+    // write in front of every request.
+    allowList: (request) => {
+      // A signed-in administrator is exempt. An attacker cannot hold an admin
+      // session, sign-in is throttled separately by `login_attempt`, and the
+      // operator loading a page full of vendored assets and artifact images
+      // should not throttle themselves out of their own editor.
+      if (request.viewer.kind === 'admin') return true;
+      // The container healthcheck. Throttling it would mark the service
+      // unhealthy and restart it, turning a burst of reader traffic into an
+      // outage -- the opposite of what a limiter is for.
+      return request.routeOptions.url === '/healthz';
+    },
+    // The plugin *throws* whatever this returns, so returning the
+    // application's own error type routes the refusal through the same error
+    // handler as everything else: a rendered page rather than the plugin's
+    // JSON, and `noindex` like every other error. Without it a 429 rendered
+    // as "Bad request", which is both wrong and useless to the reader -- the
+    // one thing they need to know is that waiting fixes it.
+    errorResponseBuilder: (_request, context) =>
+      tooManyRequests(
+        `Too many requests. Try again in ${context.after}.`,
+        `rate limit of ${context.max} exceeded`,
+      ),
+  });
+
+  app.log.info(
+    { trustProxy: config.TRUST_PROXY, max: config.RATE_LIMIT_MAX },
+    config.TRUST_PROXY
+      ? 'rate limiting by forwarded client address'
+      : 'rate limiting by socket address; set TRUST_PROXY=true if a reverse proxy is in front',
+  );
 
   app.get('/healthz', async (_request, reply) => {
     // Touches the database so an unhealthy pool is reported as unhealthy.

@@ -432,6 +432,36 @@ tested.
 - Escape user input in `LIKE` patterns — see `escapeLike` in
   `src/content/sources.ts`. Unescaped, a search for `%` matches everything.
 
+### Rate limiting, and why registration order matters
+
+`@fastify/rate-limit` is registered **globally** in `buildServer`, so every
+route is covered including ones added later — the alternative, a limiter
+attached to the three handlers that serve files, is a rule the fourth would
+have to remember.
+
+Three things about it are load-bearing:
+
+- **It is registered after the `onRequest` hook that sets `request.viewer`.**
+  Fastify appends hooks in the order they are added during boot, so moving the
+  call earlier runs the limiter before the viewer exists and the admin
+  exemption throws. `tests/integration/rate-limit.test.ts` pins the exemption
+  so that mistake fails loudly.
+- **`errorResponseBuilder`'s return value is thrown**, not serialised, so it
+  returns `tooManyRequests()` and the refusal renders through the ordinary
+  error handler — a page, and `noindex`, like every other error. Returning a
+  plain object instead gets the plugin's JSON and a 429 labelled "Bad request".
+- **The key depends on `TRUST_PROXY`.** With it off, `request.ip` is the socket
+  address, so behind a reverse proxy every visitor shares one bucket. That is
+  why the default is generous rather than tight: a limit that takes the site
+  down for everyone is not protection. Do not tighten it without deciding what
+  happens in that deployment.
+
+The store is in-memory, which is per process and resets on restart. That is
+correct here — the limit sheds load, it does not lock an account out, so
+there is nothing worth persisting and nothing worth a database write in front
+of every request. The `login_attempt` table is durable for the opposite
+reason: a lockout that a restart cleared would be no lockout.
+
 ### Fastify hooks — a real trap
 
 Fastify decides how to drive a hook **from its arity**:
