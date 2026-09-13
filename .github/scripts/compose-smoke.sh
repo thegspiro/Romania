@@ -164,4 +164,44 @@ curl -fsS --max-time 10 http://127.0.0.1:8080/robots.txt | grep -q 'Disallow: /'
   || die "robots.txt does not disallow crawling with ALLOW_SEARCH_INDEXING=false"
 ok "robots.txt disallows everything by default"
 
+# --- and answers on loopback ONLY -------------------------------------------
+#
+# The test above proves the port answers. It cannot tell 127.0.0.1 from
+# 0.0.0.0, and that difference is the whole value of the binding: the proxy in
+# front is what terminates TLS, so a port published on every interface serves
+# the site over plain HTTP as well, with the session cookie readable in
+# transit. A lost `127.0.0.1:` prefix is two characters in a diff nobody
+# re-reads, and every other check here would stay green.
+#
+# Two assertions, because each covers the other's blind spot.
+
+# 1. What the daemon actually bound. A readback -- but one that cannot pass
+#    vacuously, which is what the connect test below cannot promise.
+bindings="$(docker inspect \
+  -f '{{range $port, $binds := .NetworkSettings.Ports}}{{range $binds}}{{$port}}={{.HostIp}} {{end}}{{end}}' \
+  dissertation-web-1)"
+[ -n "$bindings" ] || die "web publishes no port at all, so the site is unreachable"
+for binding in $bindings; do
+  case "${binding#*=}" in
+  127.0.0.1 | ::1) ;;
+  *) die "web publishes ${binding%%=*} on ${binding#*=}, which is not loopback" ;;
+  esac
+done
+ok "web publishes its port on loopback only"
+
+# 2. That the binding actually refuses a non-loopback client, asserted by
+#    connecting rather than by reading a flag -- the same reason the read-only
+#    root is probed with a write. The docker bridge gateway is a real address
+#    of this host and exists whenever docker does, so it is what a client
+#    arriving over the network would reach; a port on 0.0.0.0 answers there.
+host_ip="$(docker network inspect bridge \
+  -f '{{with index .IPAM.Config 0}}{{.Gateway}}{{end}}' 2>/dev/null || true)"
+[ -n "$host_ip" ] \
+  || die "could not find a non-loopback address of this host to test the binding from"
+
+if curl -s -o /dev/null --max-time 5 "http://${host_ip}:8080/"; then
+  die "the site answered on ${host_ip}:8080 -- the port reaches beyond loopback"
+fi
+ok "the published port refuses a non-loopback client"
+
 printf '\ncompose smoke test passed (%s assertions)\n' "$PASS"

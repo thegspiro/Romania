@@ -465,10 +465,12 @@ holds for as long as the application is the only thing running:
   application except through your reverse proxy. On `0.0.0.0` it would also be
   reachable over plain HTTP, where the session cookie is readable in transit.
 
-The first two are not checked by reading the compose file. CI brings the real
-stack up and asserts them on the running containers, so a capability trimmed too
-far, or a writable path that quietly closed, fails a pull request rather than a
-deployment.
+None of the three is checked by reading the compose file. CI brings the real
+stack up and asserts them on the running containers — the capability sets, a
+write to each path that has to stay writable and one to a path that must not
+be, and a request to the published port from an address that is not loopback.
+So a capability trimmed too far, a writable path that quietly closed, or a
+lost `127.0.0.1:` prefix fails a pull request rather than a deployment.
 
 **Search engines are blocked by default.** `robots.txt` disallows everything
 and every response carries `X-Robots-Tag: noindex`. Research that has been
