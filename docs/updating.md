@@ -28,15 +28,25 @@ Everything below is about doing that safely and knowing how to reverse it.
 
 ## Why the data survives a rebuild
 
-Nothing durable lives in the image or in a container's own filesystem. Three
-volumes hold everything, and `docker compose up -d` reattaches all three to the
+Nothing durable lives in the image or in a container's own filesystem. Volumes
+hold it, and `docker compose up -d` reattaches every one of them to the
 containers it recreates — whether the new image was pulled or built:
 
-| Volume     | Mounted at       | Holds                                  |
-| ---------- | ---------------- | -------------------------------------- |
-| `database` | `/var/lib/mysql` | Every content item, source and account |
-| `files`    | `/data/files`    | Uploads, derivatives, build staging    |
-| `backups`  | `/data/backups`  | Dumps and file archives                |
+| Volume           | Mounted at          | Holds                                  |
+| ---------------- | ------------------- | -------------------------------------- |
+| `database`       | `/var/lib/mysql`    | Every content item, source and account |
+| `files`          | `/data/files`       | Uploads, derivatives, build staging    |
+| `backups`        | `/data/backups`     | Dumps and file archives                |
+| `tectonic-cache` | `/home/node/.cache` | TeX packages fetched for a PDF         |
+
+The first three are yours. `tectonic-cache` is a cache — losing it costs a
+re-download on the next compile, nothing more — and it is listed here only so
+the inventory is complete.
+
+> **With `STORAGE_BACKEND=s3` the `files` row is not where your files are.**
+> They are in the bucket, and no part of this runbook puts them back. That
+> changes the backup step below and the restore, so read the notes marked
+> **Under S3** rather than the shorter path around them.
 
 Destroying and recreating containers is the normal update path, not a risk to
 those. Two further properties make the schema safe to move forward:
@@ -98,6 +108,24 @@ you passed `--no-files` — and for files of a plausible size to appear. A file
 still named `.partial` means the dump is mid-write; the job renames only after
 a complete, successful one, so a partial file is never mistaken for a good
 backup.
+
+> **Under S3 there is no `wrote file backup`, and waiting for one will hang
+> this step forever.** The job tars a directory, and an object store is not
+> one; pulling a whole bucket of archival scans through the worker on every run
+> would cost hours and egress. So it archives the database and says so in as
+> many words:
+>
+> ```
+> STORAGE_BACKEND is s3, so FILES WERE NOT ARCHIVED. This backup contains the
+> database only. Protect the bucket with versioning and a lifecycle rule, ...
+> ```
+>
+> That line is the success case, not a failure — `database-<stamp>.sql.gz` is
+> still written to `BACKUP_ROOT`, which stays local either way. What it means
+> is that **your files are protected by the bucket or not at all**: versioning,
+> a lifecycle rule, or replication to a second bucket, arranged by you. Confirm
+> that protection is in place before an update the same way you confirm the
+> dump, because the restore below cannot put the bytes back for you.
 
 If the worker is not running — which is exactly when you are most likely to be
 updating — dump directly instead:
@@ -350,6 +378,23 @@ Storage keys are content hashes, so files and rows can be restored
 independently without going out of step — a database restored from one stamp
 and files from another still agree about which bytes a record names.
 
+> **Under S3, skip step 3 — there is no archive to extract.** The bytes were
+> never in `files-<stamp>.tar.gz`, so recovering them is a bucket operation and
+> not one this runbook can perform for you: restore the object versions, or
+> promote the replica, with whichever protection you arranged when you turned
+> the backend on.
+>
+> Restore the database anyway. The property above is what makes that safe to do
+> on its own — a key is a content hash, so rows recovered to one point in time
+> and objects recovered to another still name the same bytes. What you get if
+> the bucket is further behind than the dump is a record whose file is missing,
+> which reads as a 404 on that one item rather than a corpus that disagrees
+> with itself.
+>
+> `admin storage migrate` is not a restore. It copies what the database already
+> knows about into the configured backend; it cannot recover an object the
+> bucket no longer holds.
+
 > **Rehearse this before you need it.** `scripts/restore-rehearsal.sh` runs the
 > whole drill against a scratch database — see the README's
 > [Rehearsing a restore](../README.md#rehearsing-a-restore). CI runs it on every
@@ -413,7 +458,7 @@ A pre-update backup you took by hand should never be your only one.
 
 ## On Unraid
 
-Nothing above changes, with two notes:
+Nothing above changes, with three notes:
 
 - Run it from the clone (`/mnt/user/appdata/dissertation/repo` in
   [`unraid.md`](unraid.md)), not from a Compose Manager project directory on

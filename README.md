@@ -682,6 +682,14 @@ prunes to the newest of each. Point that at a share the host itself backs up —
 a backup inside the container it protects is not a backup. To run it nightly,
 put the command above in the host's crontab.
 
+**With `STORAGE_BACKEND=s3` the file archive is not written**, and the job says
+so rather than leaving you to find out during a restore: an object store is not
+a directory to tar, and pulling a whole bucket through the worker on every run
+would cost hours and egress. The dump still lands in `BACKUP_ROOT`. Protecting
+the files is then the bucket's job — versioning, a lifecycle rule, or
+replication — and [`docs/updating.md`](docs/updating.md#restoring-from-a-backup)
+covers what that means when you come to restore.
+
 > Earlier versions documented a raw `INSERT` run as the database's root user.
 > That works, but it puts the root password in shell history and in the host's
 > process list, every night. Use the command above instead.
