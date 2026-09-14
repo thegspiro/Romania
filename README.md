@@ -44,7 +44,7 @@ What is built and working:
 | **Zotero sync** — pull a library in and keep it in step                   | Complete (incremental; deletions are flagged, never obeyed)                                                         |
 | Deployment — Docker, Compose, migrations, CLI                             | Complete                                                                                                            |
 | **Corpus export** — Markdown, CSL-JSON, and a rehearsed restore           | Complete                                                                                                            |
-| **Corpus-wide search** — every kind at once, with snippets                | Complete (admin-only; a query, not an index)                                                                        |
+| **Corpus-wide search** — every kind at once, with snippets                | Complete (admin-only; a query, not an index; quoted phrases and near-miss fallback)                                 |
 | **Maps** — places, with queued geocoding                                  | Complete (no basemap unless a tile host is configured)                                                              |
 | **Public downloads of compiled documents**                                | Complete (published one build at a time; re-checked on every request)                                               |
 | **S3 storage backend** — a local directory or an object store             | Complete (local by default; `admin storage migrate` moves an existing corpus)                                       |

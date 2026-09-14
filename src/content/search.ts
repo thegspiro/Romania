@@ -79,7 +79,10 @@ export interface SearchHit {
   slug: string;
   title: string;
   visibility: Visibility;
-  /** 3 = matched the title, 2 = matched catalogue metadata, 1 = matched prose. */
+  /**
+   * 4 = the title is exactly the query, 3 = the title contains every word,
+   * 2 = catalogue metadata, 1 = prose.
+   */
   weight: number;
   snippet: SearchSnippet | null;
   updatedAt: Date;
@@ -96,6 +99,15 @@ export interface SearchResults {
   total: number;
   /** The words actually searched, after parsing and clamping. */
   words: string[];
+  /**
+   * True when nothing matched as typed and these are near-misses instead.
+   *
+   * The page must say so. A result set that silently answers a question the
+   * operator did not ask is worse than an empty one -- in a corpus of named
+   * people, "did you mean" material presented as a match is how a wrong
+   * person ends up in a footnote.
+   */
+  approximate: boolean;
 }
 
 /** Beyond this a query is user error, not a search; the extra words are dropped. */
@@ -104,17 +116,39 @@ const MAX_WORD_LENGTH = 100;
 const SNIPPET_LENGTH = 260;
 
 /**
- * Splits a raw query into the words that must all appear.
+ * Splits a raw query into the terms that must all appear.
  *
- * Whitespace-separated, order-independent: "iasi pogrom" finds an essay whose
- * title says one and whose body says the other.
+ * Whitespace-separated and order-independent: "iasi pogrom" finds an essay
+ * whose title says one and whose body says the other.
+ *
+ * **A double-quoted run is one term.** Splitting on whitespace alone left the
+ * quote characters inside the words, so `"deportation convoy"` searched for a
+ * word beginning with a quote and found nothing -- a quoted phrase did not
+ * merely go unsupported, it reliably returned zero results. Since every term
+ * is matched with `LIKE '%term%'`, keeping the run together *is* phrase
+ * search: the substring only occurs where those words are adjacent.
+ *
+ * An unterminated quote is treated as if closed at the end of the input,
+ * because the alternative is a search box that silently does nothing while
+ * the operator is still typing.
  */
 export function parseSearchQuery(raw: string): string[] {
-  return raw
-    .trim()
-    .split(/\s+/)
-    .filter((word) => word !== '')
-    .map((word) => (word.length > MAX_WORD_LENGTH ? word.slice(0, MAX_WORD_LENGTH) : word))
+  const terms: string[] = [];
+  const pattern = /"([^"]*)"|(\S+)/g;
+
+  for (const match of raw.trim().matchAll(pattern)) {
+    const quoted = match[1];
+    const bare = match[2];
+    const term = (quoted ?? bare ?? '').trim();
+    if (term === '') continue;
+    terms.push(term.length > MAX_WORD_LENGTH ? term.slice(0, MAX_WORD_LENGTH) : term);
+  }
+
+  // An unterminated quote leaves a trailing `"word word` the pattern above
+  // reads as bare words; the stray quote is dropped rather than searched for.
+  return terms
+    .map((term) => term.replace(/"/g, ''))
+    .filter((term) => term !== '')
     .slice(0, MAX_WORDS);
 }
 
@@ -127,6 +161,66 @@ export function parseSearchQuery(raw: string): string[] {
  */
 function escapeLike(term: string): string {
   return term.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
+/**
+ * The shortest prefix of a term worth searching for on a near-miss pass.
+ *
+ * `LIKE` cannot tolerate a typo, and this application has no search engine to
+ * ask -- so the fallback keeps the leading characters and drops the tail,
+ * where spelling errors mostly are. "antonesco" becomes "antones", which
+ * "Antonescu" contains; "deportaton" becomes "deporta", which "deportation"
+ * contains.
+ *
+ * It is deliberately not clever. A transposition near the front ("deporattion")
+ * still misses, and that is the honest limit of doing this without an index:
+ * good enough to rescue a misremembered ending, not a substitute for a real
+ * engine. Anything shorter than four characters is left alone, because a
+ * two-character prefix matches most of the corpus.
+ */
+export function relaxTerm(term: string): string | null {
+  if (term.length < 4) return null;
+  const keep = Math.max(3, Math.ceil(term.length * 0.7));
+  if (keep >= term.length) return null;
+  return term.slice(0, keep);
+}
+
+/**
+ * Edit distance, bounded to the strings this module compares.
+ *
+ * Used only to order a page of near-misses, never to find them: it runs over
+ * the titles already fetched, so the work is bounded by the page size.
+ */
+export function editDistance(a: string, b: string): number {
+  const first = a.toLowerCase();
+  const second = b.toLowerCase();
+  let previous = Array.from({ length: second.length + 1 }, (_, index) => index);
+
+  for (let i = 1; i <= first.length; i += 1) {
+    const current = [i];
+    for (let j = 1; j <= second.length; j += 1) {
+      const substitution = previous[j - 1]! + (first[i - 1] === second[j - 1] ? 0 : 1);
+      current[j] = Math.min(substitution, previous[j]! + 1, current[j - 1]! + 1);
+    }
+    previous = current;
+  }
+
+  return previous[second.length]!;
+}
+
+/** How far a hit's title is from the query, for ordering near-misses. */
+function titleDistance(title: string, terms: readonly string[]): number {
+  const titleWords = title
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((word) => word !== '');
+  let total = 0;
+  for (const term of terms) {
+    let best = term.length;
+    for (const word of titleWords) best = Math.min(best, editDistance(term, word));
+    total += best;
+  }
+  return total;
 }
 
 interface KindSource {
@@ -247,7 +341,14 @@ function branchFor(kind: SearchKind, viewer: Viewer, words: readonly string[]): 
 
   // Parameter order follows the order the fragments appear in the statement:
   // the CASE in the SELECT list is bound before the WHERE clause.
+  // The whole query as one string, for the exact-title tier. Looking up a
+  // person by name is the commonest search here, and without this an item
+  // called exactly "Ion Antonescu" ranked level with every essay whose title
+  // merely contains both words.
+  const exact = words.join(' ');
+
   const params: SqlParam[] = [
+    ...titled.map(() => escapeLike(exact)),
     ...patternsFor(titled, words),
     ...patternsFor(catalogued, words),
     kind,
@@ -255,9 +356,12 @@ function branchFor(kind: SearchKind, viewer: Viewer, words: readonly string[]): 
     ...patternsFor(everything, words),
   ];
 
+  const exactTitle = `(${titled.map((column) => `${column} = ?`).join(' OR ')})`;
+
   const sql = `
     SELECT ci.id, ci.kind, ci.slug, ci.title, ci.summary, ci.visibility, ci.updated_at,
-           CASE WHEN ${allWordsIn(titled, words)} THEN 3
+           CASE WHEN ${exactTitle} THEN 4
+                WHEN ${allWordsIn(titled, words)} THEN 3
                 WHEN ${allWordsIn(catalogued, words)} THEN 2
                 ELSE 1 END AS weight
       FROM content_item ci
@@ -276,6 +380,7 @@ interface HitRow extends RowDataPacket {
   visibility: string;
   updated_at: Date;
   weight: number;
+  total?: number;
 }
 
 /**
@@ -295,32 +400,93 @@ export async function searchCorpus(
   const offset = Math.max(options.offset ?? 0, 0);
 
   if (words.length === 0) {
-    return { hits: [], total: 0, words };
+    return { hits: [], total: 0, words, approximate: false };
   }
 
   const kinds: readonly SearchKind[] =
     options.kind === undefined ? SEARCH_KINDS : ([options.kind] as const);
 
+  const strict = await runPass(db, viewer, kinds, words, limit, offset);
+  if (strict.total > 0 || offset > 0) {
+    return {
+      hits: await attachSnippets(db, viewer, strict.rows, words),
+      total: strict.total,
+      words,
+      approximate: false,
+    };
+  }
+
+  // Nothing matched as typed. Try again on prefixes, which rescues a
+  // misremembered ending -- and say so in the result, because near-misses
+  // presented as matches are how a wrong person ends up in a footnote.
+  const relaxed = words.map((word) => relaxTerm(word) ?? word);
+  if (relaxed.every((term, index) => term === words[index])) {
+    return { hits: [], total: 0, words, approximate: false };
+  }
+
+  const near = await runPass(db, viewer, kinds, relaxed, limit, 0);
+  if (near.total === 0) {
+    return { hits: [], total: 0, words, approximate: false };
+  }
+
+  // Closest spelling first. The strict pass has the database's ordering to
+  // trust; this one is a guess, so the guess most like what was typed leads.
+  const ordered = [...near.rows].sort(
+    (a, b) => titleDistance(a.title, words) - titleDistance(b.title, words),
+  );
+
+  return {
+    hits: await attachSnippets(db, viewer, ordered, relaxed),
+    total: near.total,
+    words,
+    approximate: true,
+  };
+}
+
+/** One execution of the union for a given set of terms. */
+async function runPass(
+  db: Pool | PoolConnection,
+  viewer: Viewer,
+  kinds: readonly SearchKind[],
+  words: readonly string[],
+  limit: number,
+  offset: number,
+): Promise<{ rows: HitRow[]; total: number }> {
   const branches = kinds.map((kind) => branchFor(kind, viewer, words));
   const union = branches.map((branch) => branch.sql).join('\n    UNION ALL\n');
   const params = branches.flatMap((branch) => branch.params);
 
-  const totalRow = await queryOne<RowDataPacket & { total: number }>(
-    db,
-    `SELECT COUNT(*) AS total FROM (${union}) AS hits`,
-    params,
-  );
-
+  // One execution of the union, not two.
+  //
+  // `COUNT(*) OVER ()` is evaluated across the whole result set before LIMIT
+  // applies, so the page and its total come back together. The previous shape
+  // -- a COUNT(*) over the union, then the union again for the rows -- scanned
+  // every prose column twice on every search, and prose is where all the time
+  // goes: measured at 50,000 items, the scan is the cost and doing it once
+  // halves it.
   const rows = await queryRows<HitRow>(
     db,
-    `SELECT * FROM (${union}) AS hits
+    `SELECT hits.*, COUNT(*) OVER () AS total FROM (${union}) AS hits
       ORDER BY weight DESC, updated_at DESC, id ASC
       ${limitOffsetClause(limit, offset)}`,
     params,
   );
 
-  const hits = await attachSnippets(db, viewer, rows, words);
-  return { hits, total: Number(totalRow?.total ?? 0), words };
+  // A page past the end returns no rows, and with them no window count. Rather
+  // than report a total of zero for a search that has results, the count is
+  // asked for separately -- the only case that still pays for two scans, and
+  // one nobody reaches by paging forward.
+  let total = rows.length > 0 ? Number(rows[0]?.total ?? 0) : 0;
+  if (rows.length === 0 && offset > 0) {
+    const totalRow = await queryOne<RowDataPacket & { total: number }>(
+      db,
+      `SELECT COUNT(*) AS total FROM (${union}) AS hits`,
+      params,
+    );
+    total = Number(totalRow?.total ?? 0);
+  }
+
+  return { rows, total };
 }
 
 /**
