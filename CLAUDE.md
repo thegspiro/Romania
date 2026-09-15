@@ -293,6 +293,16 @@ terms shorter than three characters, and `utf8mb4_0900_ai_ci` already makes
   may not follow contributes nothing at all -- not the marker the page shows,
   because a result set is a list of fragments and a row of markers reads as
   noise rather than as prose.
+- **The union is executed once.** `COUNT(*) OVER ()` returns the page and its
+  total together; the old shape ran the whole union twice, and scanning prose
+  is where the entire cost is. The one exception is a page past the end, which
+  returns no rows and so no window count -- that asks for the count separately
+  rather than reporting zero for a search that has results.
+- **A near-miss pass runs only when nothing matched**, widening each term to a
+  leading prefix so `antonesco` finds `Antonescu`. It sets `approximate` on the
+  result and the page says so. Near-misses presented as matches are how the
+  wrong person ends up in a footnote, so that flag is not decoration -- do not
+  drop it, and do not let the fallback run when the strict pass had hits.
 
 Snippets are returned as `{ text, match }` segments rather than markup, so
 highlighting never needs `| safe`.
@@ -826,6 +836,31 @@ and nothing needs it today. Corpus-wide search shipped as `src/content/search.ts
 -- a union of per-kind reads, no index and no new service -- which is the
 precedent holding: reach for a separate service only when something truly
 cannot live in the application, not to avoid writing a query.
+
+That was measured rather than assumed, against a synthetic corpus of 50,000
+items including 1,518 chapter-length essays (72 MB):
+
+| items  | p50         |
+| ------ | ----------- |
+| 500    | 14--36 ms   |
+| 2,000  | 30--47 ms   |
+| 10,000 | 104--197 ms |
+| 50,000 | 450--930 ms |
+
+A single researcher's corpus is one to five thousand items, where search is
+tens of milliseconds. Speed is not the reason to add a service, and 50,000
+items is already far past one dissertation.
+
+What an engine would genuinely add is typo tolerance: `LIKE` cannot find
+`Antonescu` from `antonesco`, and no amount of SQL makes it. The prefix
+fallback above covers a misremembered ending and honestly not much more. If
+that limit ever becomes the thing that hurts, the design to build is an
+**ID-only index** -- Meilisearch returns candidate ids, and the application
+loads them through `visibilityFilter` like any other read, so there is still
+one answer to "may this viewer see this?". Two costs come with it regardless,
+and neither is avoidable by indexing ids only: unpublished prose would live in
+a second datastore with its own key and its own dump format, and the index
+cannot join the save transaction, so it is a projection that will drift.
 
 Zotero sync used to be listed here as the other candidate. It shipped as a
 worker job instead -- one handler, one migration, no new service -- which is

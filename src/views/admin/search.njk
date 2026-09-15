@@ -35,11 +35,24 @@
       Every word has to appear somewhere in an item, in any order. Titles,
       catalogue metadata, essay bodies, transcriptions and biographies are all
       searched, and accents are ignored — <em>Iasi</em> finds <em>Iași</em>.
+      Put a phrase in <em>"double quotes"</em> to find those words together.
     </p>
   {% elif results.length == 0 %}
     <p class="empty">Nothing matches {{ words | join(' ') }}.</p>
   {% else %}
-    <p class="muted">{{ total }} result{{ 's' if total != 1 }}</p>
+    {#
+      Near-misses are labelled, never passed off as matches. In a corpus of
+      named people, an approximate result read as an exact one is how the
+      wrong person ends up in a footnote.
+    #}
+    {% if approximate %}
+      <p class="badge badge-private">
+        Nothing matches {{ words | join(' ') }} exactly.
+        Showing {{ total }} approximate result{{ 's' if total != 1 }}, closest spelling first.
+      </p>
+    {% else %}
+      <p class="muted">{{ total }} result{{ 's' if total != 1 }}</p>
+    {% endif %}
 
     <ol class="search-results">
       {% for result in results %}

@@ -38,7 +38,7 @@ export function registerAdminSearchRoutes(app: FastifyInstance, context: AppCont
     const requested = Number.parseInt(query.page ?? '1', 10);
     const page = Number.isSafeInteger(requested) && requested > 0 ? requested : 1;
 
-    const { hits, total, words } = await searchCorpus(pool, request.viewer, raw, {
+    const { hits, total, words, approximate } = await searchCorpus(pool, request.viewer, raw, {
       kind,
       limit: PER_PAGE,
       offset: (page - 1) * PER_PAGE,
@@ -53,6 +53,8 @@ export function registerAdminSearchRoutes(app: FastifyInstance, context: AppCont
         search: raw,
         words,
         searched: words.length > 0,
+        // The page must say so when these are near-misses rather than matches.
+        approximate,
         kind: kind ?? '',
         kinds: SEARCH_KINDS.map((value) => ({ value, label: KIND_LABELS[value] })),
         results: hits.map((hit) => ({

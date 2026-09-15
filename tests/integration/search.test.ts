@@ -417,4 +417,95 @@ describe.skipIf(!available)('corpus search', () => {
       expect(response.body).not.toContain('AT&T ');
     });
   });
+
+  describe('phrases', () => {
+    it('finds words together when the query quotes them', async () => {
+      // A quoted run used to be split on whitespace with the quote characters
+      // left inside the words, so any quoted query matched nothing at all.
+      await essay('Convoy Records', 'The deportation convoy left before dawn.');
+      await essay('Separate Mentions', 'A deportation was ordered. A convoy was found.');
+
+      const quoted = await searchCorpus(harness.pool, viewer, '"deportation convoy"');
+      expect(titles(quoted.hits)).toEqual(['Convoy Records']);
+      expect(quoted.words).toEqual(['deportation convoy']);
+    });
+
+    it('still finds the words apart when the query does not quote them', async () => {
+      await essay('Convoy Records', 'The deportation convoy left before dawn.');
+      await essay('Separate Mentions', 'A deportation was ordered. A convoy was found.');
+
+      const bare = await searchCorpus(harness.pool, viewer, 'deportation convoy');
+      expect(titles(bare.hits).sort()).toEqual(['Convoy Records', 'Separate Mentions']);
+    });
+
+    it('treats an unterminated quote as ordinary words', async () => {
+      // The operator is still typing. Returning nothing until they close the
+      // quote makes the box feel broken.
+      await essay('Convoy Records', 'The deportation convoy left before dawn.');
+      const partial = await searchCorpus(harness.pool, viewer, '"deportation');
+      expect(partial.words).toEqual(['deportation']);
+      expect(titles(partial.hits)).toEqual(['Convoy Records']);
+    });
+  });
+
+  describe('near misses', () => {
+    it('finds a misremembered spelling and says the results are approximate', async () => {
+      await person('Ion Antonescu', 'public');
+
+      const result = await searchCorpus(harness.pool, viewer, 'antonesco');
+      expect(result.approximate).toBe(true);
+      expect(titles(result.hits)).toContain('Ion Antonescu');
+      // The words reported back are what was typed, so the page can say what
+      // was asked for and what was answered.
+      expect(result.words).toEqual(['antonesco']);
+    });
+
+    it('does not widen a search that already matched', async () => {
+      await person('Ion Antonescu', 'public');
+      await person('Anton Petrescu', 'public');
+
+      const result = await searchCorpus(harness.pool, viewer, 'antonescu');
+      expect(result.approximate).toBe(false);
+      expect(titles(result.hits)).toEqual(['Ion Antonescu']);
+    });
+
+    it('orders near misses by closest spelling', async () => {
+      await person('Antonescu', 'public');
+      await person('Antonovici', 'public');
+
+      const result = await searchCorpus(harness.pool, viewer, 'antonesco');
+      expect(result.approximate).toBe(true);
+      expect(titles(result.hits)[0]).toBe('Antonescu');
+    });
+
+    it('leaves a short word alone rather than matching most of the corpus', async () => {
+      // Relaxing "ion" to "io" would match half the people in the corpus and
+      // present the lot as near-misses.
+      await person('Ion Antonescu', 'public');
+      const result = await searchCorpus(harness.pool, viewer, 'ixn');
+      expect(result.hits).toEqual([]);
+      expect(result.approximate).toBe(false);
+    });
+
+    it('returns nothing, not near-misses, when the strict search has results on a later page', async () => {
+      // Paging past the end of a real result set must not silently become an
+      // approximate search for something else.
+      await essay('Deportation One', 'deportation');
+      const result = await searchCorpus(harness.pool, viewer, 'deportation', { offset: 50 });
+      expect(result.hits).toEqual([]);
+      expect(result.approximate).toBe(false);
+      expect(result.total).toBe(1);
+    });
+  });
+
+  describe('exact titles rank first', () => {
+    it('puts an item whose title is the query above one that merely contains it', async () => {
+      await essay('Deportation', 'A study.');
+      await essay('The Deportation of 1941 and its Aftermath', 'A longer study.');
+
+      const result = await searchCorpus(harness.pool, viewer, 'deportation');
+      expect(titles(result.hits)[0]).toBe('Deportation');
+      expect(result.hits[0]?.weight).toBe(4);
+    });
+  });
 });
