@@ -9,6 +9,11 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { queryRows, type Pool, type PoolConnection } from '../db/pool.js';
 import { parseStoredCslItem } from '../citations/csl.js';
+import {
+  citableCsl,
+  governmentRecordFromRow,
+  governmentSelectColumns,
+} from './government-records.js';
 import { parseTimelineDirectives, type ReferenceTarget } from './markdown.js';
 import { parseReferences } from './references.js';
 import { resolveTargets } from './mentions.js';
@@ -51,11 +56,17 @@ export async function resolveForRender(
     const placeholders = sourceIds.map(() => '?').join(', ');
     const cslRows = await queryRows<RowDataPacket & { content_item_id: number; csl_json: unknown }>(
       db,
-      `SELECT content_item_id, csl_json FROM source_detail WHERE content_item_id IN (${placeholders})`,
+      `SELECT sd.content_item_id, sd.csl_json, ${governmentSelectColumns('gr')}
+         FROM source_detail sd
+         LEFT JOIN source_government_record gr ON gr.content_item_id = sd.content_item_id
+        WHERE sd.content_item_id IN (${placeholders})`,
       sourceIds,
     );
     for (const row of cslRows) {
-      csl.set(Number(row.content_item_id), parseStoredCslItem(row.csl_json));
+      csl.set(
+        Number(row.content_item_id),
+        citableCsl(parseStoredCslItem(row.csl_json), governmentRecordFromRow(row)),
+      );
     }
   }
 

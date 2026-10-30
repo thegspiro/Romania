@@ -194,6 +194,33 @@ describe.skipIf(!available)('corpus export', () => {
     expect(entry.id).toBe('the-hooligan-year');
   });
 
+  it('exports a government record and fills its citation the way the site does', async () => {
+    await createSource({
+      title: 'Situation in Romania',
+      cslType: 'manuscript',
+      authors: 'American Legation, Bucharest',
+      issued: '1947-03-12',
+      visibility: 'public',
+      documentType: 'Telegram',
+      cableNumber: '312',
+      crestNumber: 'CIA-RDP82-00457R000400330004-2',
+      declassifiedOn: '1998-04-02',
+    });
+    await exportCorpus(harness.pool, adminViewer(harness.userId), directory);
+
+    const references = (await readJson('sources', 'references.json')) as Record<string, unknown>[];
+    expect(references[0]).toMatchObject({ genre: 'Telegram', number: '312' });
+
+    const provenance = (await readJson('sources', 'provenance.json')) as Record<string, unknown>[];
+    expect(provenance[0]?.government_record).toMatchObject({
+      document_type: 'Telegram',
+      cable_number: '312',
+      crest_number: 'CIA-RDP82-00457R000400330004-2',
+      declassified_on: '1998-04-02',
+      foia_case_number: null,
+    });
+  });
+
   it('keeps archival provenance that CSL cannot carry', async () => {
     await seed();
     await exportCorpus(harness.pool, adminViewer(harness.userId), directory);

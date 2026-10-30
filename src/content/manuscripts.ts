@@ -25,6 +25,11 @@ import {
 import { slugify, uniqueSlug } from './slug.js';
 import { canView, visibilityFilter, type Viewer, type Visibility } from './visibility.js';
 import { parseStoredCslItem, type CslItem } from '../citations/csl.js';
+import {
+  citableCsl,
+  governmentRecordFromRow,
+  governmentSelectColumns,
+} from './government-records.js';
 import { parseReferences, referenceHref, targetKind } from './references.js';
 import { resolveTargets } from './mentions.js';
 import {
@@ -797,16 +802,17 @@ export async function assembleDocument(
     const visible = visibilityFilter(viewer, 'ci');
     const rows = await queryRows<RowDataPacket & { slug: string; csl_json: unknown }>(
       db,
-      `SELECT ci.slug, sd.csl_json
+      `SELECT ci.slug, sd.csl_json, ${governmentSelectColumns('gr')}
          FROM content_item ci
          JOIN source_detail sd ON sd.content_item_id = ci.id
+         LEFT JOIN source_government_record gr ON gr.content_item_id = ci.id
         WHERE ci.kind = 'source' AND ci.slug IN (${placeholders}) AND ${visible.sql}`,
       [...slugs, ...visible.params],
     );
 
     for (const row of rows) {
       citableSlugs.add(String(row.slug));
-      bibliography.push(parseStoredCslItem(row.csl_json));
+      bibliography.push(citableCsl(parseStoredCslItem(row.csl_json), governmentRecordFromRow(row)));
     }
     for (const slug of slugs) if (!citableSlugs.has(slug)) withheldCitations.push(slug);
   }

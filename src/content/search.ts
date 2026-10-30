@@ -37,6 +37,7 @@ import {
 import type { SqlParam } from '../db/pool.js';
 import { isReferenceKind, parseReferences, REFERENCE_PATTERN, targetKind } from './references.js';
 import { resolveTargets } from './mentions.js';
+import { GOVERNMENT_SEARCH_COLUMNS } from './government-records.js';
 import { isAdmin, visibilityFilter, type Viewer, type Visibility } from './visibility.js';
 
 export const SEARCH_KINDS = [
@@ -247,7 +248,10 @@ const SOURCES: Readonly<Record<SearchKind, KindSource>> = Object.freeze({
     prose: { table: 'essay_detail', column: 'body_markdown' },
   },
   source: {
-    join: 'LEFT JOIN source_detail d ON d.content_item_id = ci.id',
+    // The government record is catalogue metadata like the call number: a
+    // pasted CREST or FOIA number should find the document it identifies.
+    join: `LEFT JOIN source_detail d ON d.content_item_id = ci.id
+      LEFT JOIN source_government_record g ON g.content_item_id = ci.id`,
     titleColumns: TITLE_COLUMNS,
     metaColumns: [
       'ci.summary',
@@ -256,6 +260,7 @@ const SOURCES: Readonly<Record<SearchKind, KindSource>> = Object.freeze({
       'd.archive_location',
       'd.call_number',
       'd.notes',
+      ...GOVERNMENT_SEARCH_COLUMNS.map((column) => `g.${column}`),
     ],
     proseColumn: null,
     prose: null,

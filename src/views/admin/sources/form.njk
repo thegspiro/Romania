@@ -103,6 +103,34 @@
       {{ field('callNumber', 'Call number', values) }}
     </fieldset>
 
+    {% set gov = values.government or {} %}
+    <fieldset>
+      <legend>Released government record</legend>
+      <p class="hint">
+        For declassified State Department, CIA and other government documents.
+        Leave every field blank for an ordinary source. Document type, cable or
+        CREST number, NARA location and release collection fill the citation
+        only where the fields above are blank — anything typed above wins.
+      </p>
+      {{ field('originatingAgency', 'Originating agency', gov, 'text', 'For example Department of State, Central Intelligence Agency.') }}
+      {{ field('documentType', 'Document type', gov, 'text', 'Telegram, memorandum, intelligence report…') }}
+      {{ field('fromParty', 'From', gov) }}
+      {{ field('toParty', 'To', gov) }}
+      {{ field('originalClassification', 'Original classification', gov, 'text', 'As marked, with caveats: SECRET NOFORN.') }}
+      {{ field('cableNumber', 'Cable number', gov) }}
+      {{ field('crestNumber', 'CREST document number', gov, 'text', 'For example CIA-RDP82-00457R000400330004-2.') }}
+      {{ field('foiaCaseNumber', 'FOIA case number', gov) }}
+      {{ field('frusVolume', 'FRUS volume', gov, 'text', 'For example 1947, Volume IV, Eastern Europe; the Soviet Union.') }}
+      {{ field('frusDocumentNumber', 'FRUS document number', gov) }}
+      {{ field('naraRecordGroup', 'NARA record group', gov, 'text', 'The number only: 59, 263.') }}
+      {{ field('naraEntry', 'NARA entry', gov) }}
+      {{ field('naraBox', 'NARA box', gov) }}
+      {{ field('naraFolder', 'NARA folder', gov) }}
+      {{ field('declassifiedOn', 'Declassification date', gov, 'text', 'YYYY-MM-DD.') }}
+      {{ field('releasedOn', 'Release date', gov, 'text', 'YYYY-MM-DD.') }}
+      {{ field('releaseCollection', 'Release collection', gov, 'text', 'Where the released copy came from: CIA Electronic Reading Room, State Department FOIA Virtual Reading Room…') }}
+    </fieldset>
+
     <fieldset>
       <legend>Online and identifiers</legend>
       {{ field('url', 'URL', values, 'url') }}

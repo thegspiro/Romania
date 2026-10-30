@@ -175,6 +175,7 @@ export async function truncateContent(pool: Pool): Promise<void> {
     'relationship',
     'content_tag',
     'tag',
+    'source_government_record',
     'source_detail',
     'artifact_detail',
     'essay_detail',

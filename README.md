@@ -25,7 +25,7 @@ What is built and working:
 | Area                                                                      | State                                                                                                               |
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | Schema for all entity types                                               | Complete (sources, artifacts, essays, people, organizations, places, events, relationships, citations, tags, files) |
-| **Sources** — admin CRUD, publish/unpublish, public pages                 | Complete (a source can hold the scan or PDF of the work itself)                                                     |
+| **Sources** — admin CRUD, publish/unpublish, public pages                 | Complete (a source can hold the scan or PDF of the work itself, and a released government record's identifiers)     |
 | **Essays** — Markdown editor, reference picker, server-rendered preview   | Complete                                                                                                            |
 | **Share links** — one chapter to a supervisor, with anchored comments     | Complete (expiring, revocable, one essay each)                                                                      |
 | **Revision history** — every save recorded, compared and restorable       | Complete (append-only; restoring writes a new revision)                                                             |
@@ -277,6 +277,30 @@ while a source was public stops working the moment it is unpublished.
 > object; there is no coherent way for them to be public and private
 > simultaneously. Unlinking a file leaves the file itself alone, because
 > something else may still own it.
+
+### Released government records
+
+A declassified State Department cable or CIA report is a source like any
+other: one item, holding its PDF, cited with `[[cite:slug]]`. The source editor
+has a **Released government record** section for the identifiers it is found
+again by: originating agency, document type, from and to, original
+classification, cable number, CREST document number, FOIA case number, FRUS
+volume and document, NARA record group, entry, box and folder, declassification
+and release dates, and the collection the released copy came from.
+
+- Every one of those fields is searchable, from `/admin/sources` and from
+  corpus search, so a pasted `CIA-RDP…` or FOIA case number finds the document.
+  The admin listing filters by agency, classification and release collection.
+- The record lives in its own table, `source_government_record`, which the
+  Zotero sync never writes. A sync cannot erase a CREST number typed here.
+- The citation still comes from the CSL record and the vendored Chicago style.
+  Document type, cable number (or CREST number), NARA location and release
+  collection fill the CSL variables Chicago prints (`genre`, `number`,
+  `archive_location`, `archive`) **only where those are blank**, at render
+  time, so a footnote shaped by hand or by Zotero is unchanged. FRUS documents
+  are chapters of published volumes and are cited through the ordinary fields.
+- The export writes the record into `sources/provenance.json` and the filled
+  citation into `sources/references.json`.
 
 ### Zotero
 

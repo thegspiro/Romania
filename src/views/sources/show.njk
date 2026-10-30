@@ -66,6 +66,25 @@
         {% if source.callNumber %}
           <dt>Call number</dt><dd>{{ source.callNumber }}</dd>
         {% endif %}
+        {% if source.government %}
+          {% set gov = source.government %}
+          {% if gov.originatingAgency %}<dt>Originating agency</dt><dd>{{ gov.originatingAgency }}</dd>{% endif %}
+          {% if gov.documentType %}<dt>Document type</dt><dd>{{ gov.documentType }}</dd>{% endif %}
+          {% if gov.fromParty %}<dt>From</dt><dd>{{ gov.fromParty }}</dd>{% endif %}
+          {% if gov.toParty %}<dt>To</dt><dd>{{ gov.toParty }}</dd>{% endif %}
+          {% if gov.originalClassification %}<dt>Original classification</dt><dd>{{ gov.originalClassification }}</dd>{% endif %}
+          {% if gov.cableNumber %}<dt>Cable number</dt><dd>{{ gov.cableNumber }}</dd>{% endif %}
+          {% if gov.crestNumber %}<dt>CREST document number</dt><dd>{{ gov.crestNumber }}</dd>{% endif %}
+          {% if gov.foiaCaseNumber %}<dt>FOIA case number</dt><dd>{{ gov.foiaCaseNumber }}</dd>{% endif %}
+          {% if gov.frusVolume %}
+            <dt>FRUS</dt>
+            <dd>{{ gov.frusVolume }}{% if gov.frusDocumentNumber %}, document {{ gov.frusDocumentNumber }}{% endif %}</dd>
+          {% endif %}
+          {% if naraLocation %}<dt>NARA</dt><dd>{{ naraLocation }}</dd>{% endif %}
+          {% if gov.declassifiedOn %}<dt>Declassified</dt><dd>{{ gov.declassifiedOn }}</dd>{% endif %}
+          {% if gov.releasedOn %}<dt>Released</dt><dd>{{ gov.releasedOn }}</dd>{% endif %}
+          {% if gov.releaseCollection %}<dt>Release collection</dt><dd>{{ gov.releaseCollection }}</dd>{% endif %}
+        {% endif %}
         {% if source.url %}
           <dt>Online</dt>
           <dd><a href="{{ source.url }}" rel="noopener noreferrer nofollow">{{ source.url }}</a></dd>

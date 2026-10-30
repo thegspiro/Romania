@@ -28,6 +28,15 @@ import {
   type CslItem,
   type SourceFormInput,
 } from '../citations/csl.js';
+import {
+  citableCsl,
+  governmentRecordFromRow,
+  governmentSelectColumns,
+  saveGovernmentRecord,
+  GOVERNMENT_SEARCH_COLUMNS,
+  type GovernmentRecord,
+  type GovernmentRecordInput,
+} from './government-records.js';
 import { slugify, uniqueSlug } from './slug.js';
 import { visibilityFilter, type Viewer, type Visibility } from './visibility.js';
 
@@ -50,7 +59,15 @@ export interface SourceSummary {
 
 export interface SourceRecord extends SourceSummary {
   summary: string | null;
+  /** The stored CSL record, exactly as saved. The edit form reads this. */
   csl: CslItem;
+  /**
+   * What a citation renders from: `csl` with blank variables filled from the
+   * government record. Equal to `csl` for every other source.
+   */
+  citableCsl: CslItem;
+  /** Present only for a released government record. */
+  government: GovernmentRecord | null;
   archiveLocation: string | null;
   callNumber: string | null;
   url: string | null;
@@ -102,16 +119,20 @@ const SELECT_COLUMNS = `
   ci.visibility, ci.noindex, ci.published_at, ci.created_at, ci.updated_at,
   sd.csl_type, sd.csl_json, sd.container_title, sd.issued_year, sd.archive,
   sd.archive_location, sd.call_number, sd.url, sd.accessed_on, sd.notes,
-  sd.file_object_id, fo.mime_type, fo.byte_size, fo.original_filename
+  sd.file_object_id, fo.mime_type, fo.byte_size, fo.original_filename,
+  ${governmentSelectColumns('gr')}
 `;
 
 const FROM_CLAUSE = `
   FROM content_item ci
   JOIN source_detail sd ON sd.content_item_id = ci.id
   LEFT JOIN file_object fo ON fo.id = sd.file_object_id
+  LEFT JOIN source_government_record gr ON gr.content_item_id = ci.id
 `;
 
 function toRecord(row: SourceRow): SourceRecord {
+  const csl = parseStoredCslItem(row.csl_json);
+  const government = governmentRecordFromRow(row);
   return {
     id: row.id,
     slug: row.slug,
@@ -125,7 +146,9 @@ function toRecord(row: SourceRow): SourceRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     cslType: row.csl_type,
-    csl: parseStoredCslItem(row.csl_json),
+    csl,
+    citableCsl: citableCsl(csl, government),
+    government,
     containerTitle: row.container_title,
     issuedYear: row.issued_year,
     archive: row.archive,
@@ -154,6 +177,14 @@ function escapeLike(term: string): string {
 export interface ListSourcesOptions {
   search?: string | undefined;
   visibility?: Visibility | undefined;
+  /**
+   * Exact-match filters on the government record. Honoured only for an
+   * administrator, like `visibility`: they are catalogue facets for finding
+   * material again, not a public browsing feature.
+   */
+  agency?: string | undefined;
+  classification?: string | undefined;
+  collection?: string | undefined;
   limit?: number;
   offset?: number;
 }
@@ -184,9 +215,11 @@ export async function listSources(
         OR ci.summary LIKE ? ESCAPE '\\\\'
         OR sd.container_title LIKE ? ESCAPE '\\\\'
         OR sd.archive LIKE ? ESCAPE '\\\\'
-        OR sd.call_number LIKE ? ESCAPE '\\\\')`,
+        OR sd.call_number LIKE ? ESCAPE '\\\\'
+        ${GOVERNMENT_SEARCH_COLUMNS.map((column) => `OR gr.${column} LIKE ? ESCAPE '\\\\'`).join('\n        ')})`,
     );
     params.push(pattern, pattern, pattern, pattern, pattern, pattern);
+    for (let index = 0; index < GOVERNMENT_SEARCH_COLUMNS.length; index += 1) params.push(pattern);
   }
 
   // Only an administrator may filter by visibility; for anonymous viewers the
@@ -195,6 +228,20 @@ export async function listSources(
   if (options.visibility !== undefined && viewer.kind === 'admin') {
     conditions.push('ci.visibility = ?');
     params.push(options.visibility);
+  }
+
+  if (viewer.kind === 'admin') {
+    const facets: [string | undefined, string][] = [
+      [options.agency, 'gr.originating_agency'],
+      [options.classification, 'gr.original_classification'],
+      [options.collection, 'gr.release_collection'],
+    ];
+    for (const [value, column] of facets) {
+      const trimmed = value?.trim();
+      if (trimmed === undefined || trimmed === '') continue;
+      conditions.push(`${column} = ?`);
+      params.push(trimmed);
+    }
   }
 
   const where = `WHERE ${conditions.join(' AND ')}`;
@@ -246,6 +293,44 @@ export async function findSourceById(
   return row === null ? null : toRecord(row);
 }
 
+export interface GovernmentFacets {
+  agencies: string[];
+  classifications: string[];
+  collections: string[];
+}
+
+/**
+ * The distinct values the admin listing offers as filters.
+ *
+ * Read through `visibilityFilter` like everything else, although only the
+ * admin listing calls it: a facet value is catalogue text, and a list of them
+ * built for a visitor must not name what only private records hold.
+ */
+export async function listGovernmentFacets(
+  db: Pool | PoolConnection,
+  viewer: Viewer,
+): Promise<GovernmentFacets> {
+  const visible = visibilityFilter(viewer, 'ci');
+  const distinct = async (column: string): Promise<string[]> => {
+    const rows = await queryRows<RowDataPacket & { value: string }>(
+      db,
+      `SELECT DISTINCT gr.${column} AS value
+         FROM source_government_record gr
+         JOIN content_item ci ON ci.id = gr.content_item_id
+        WHERE ci.kind = 'source' AND gr.${column} IS NOT NULL AND ${visible.sql}
+        ORDER BY value ASC`,
+      visible.params,
+    );
+    return rows.map((row) => row.value);
+  };
+
+  return {
+    agencies: await distinct('originating_agency'),
+    classifications: await distinct('original_classification'),
+    collections: await distinct('release_collection'),
+  };
+}
+
 // --- Writes ----------------------------------------------------------------
 
 /** Form fields shared by create and update. */
@@ -254,6 +339,12 @@ export type SourceInput = Omit<SourceFormInput, 'id'> & {
   summary: string;
   visibility: Visibility;
   noindex: boolean;
+  /**
+   * The released-government-record catalogue. Absent means "leave whatever is
+   * stored alone", so callers that predate it -- and the tests that build
+   * sources directly -- keep their behaviour. All fields blank removes it.
+   */
+  government?: GovernmentRecordInput | undefined;
 };
 
 async function slugExists(
@@ -339,6 +430,10 @@ export async function createSource(pool: Pool, input: SourceInput): Promise<numb
       ],
     );
 
+    if (input.government !== undefined) {
+      await saveGovernmentRecord(connection, id, input.government);
+    }
+
     return id;
   });
 }
@@ -405,6 +500,10 @@ export async function updateSource(pool: Pool, id: number, input: SourceInput): 
         id,
       ],
     );
+
+    if (input.government !== undefined) {
+      await saveGovernmentRecord(connection, id, input.government);
+    }
 
     return true;
   });

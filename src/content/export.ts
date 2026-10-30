@@ -32,6 +32,11 @@ import { queryRows, type Pool, type PoolConnection } from '../db/pool.js';
 import { visibilityFilter, type Viewer } from './visibility.js';
 import { listEssays } from './essays.js';
 import { listSources } from './sources.js';
+import {
+  GOVERNMENT_DATE_FIELDS,
+  GOVERNMENT_TEXT_FIELDS,
+  type GovernmentRecord,
+} from './government-records.js';
 import { listArtifacts } from './artifacts.js';
 import { ENTITY_KINDS, findEntityBySlug, listEntities, type EntityKind } from './entities.js';
 
@@ -177,6 +182,14 @@ async function exportEssays(pool: Pool, viewer: Viewer, directory: string): Prom
  * an array: this drops straight into Zotero's importer and into Pandoc's
  * `--bibliography`, which is the whole point of storing it this way.
  */
+function governmentExport(record: GovernmentRecord | null): Record<string, string | null> | null {
+  if (record === null) return null;
+  const out: Record<string, string | null> = {};
+  for (const entry of GOVERNMENT_TEXT_FIELDS) out[entry.column] = record[entry.field];
+  for (const entry of GOVERNMENT_DATE_FIELDS) out[entry.column] = record[entry.field];
+  return out;
+}
+
 async function exportSources(pool: Pool, viewer: Viewer, directory: string): Promise<number> {
   const target = join(directory, 'sources');
   await mkdir(target, { recursive: true, mode: 0o700 });
@@ -191,7 +204,10 @@ async function exportSources(pool: Pool, viewer: Viewer, directory: string): Pro
     for (const source of page.items) {
       // The citation key is the slug, as everywhere else, so a [[cite:x]] in
       // exported prose and the entry here still name the same work.
-      items.push({ ...source.csl, id: source.slug });
+      // `citableCsl` rather than the stored record, so a Pandoc run over this
+      // file prints the same footnote for a government record as the site
+      // does. It is still plain CSL-JSON.
+      items.push({ ...source.citableCsl, id: source.slug });
 
       // Archive, call number and the operator's notes are what make a record
       // findable again in a reading room. CSL carries the first two; `notes`
@@ -202,7 +218,8 @@ async function exportSources(pool: Pool, viewer: Viewer, directory: string): Pro
         source.archiveLocation !== null ||
         source.callNumber !== null ||
         source.notes !== null ||
-        source.fileObjectId !== null
+        source.fileObjectId !== null ||
+        source.government !== null
       ) {
         provenance.push({
           id: source.slug,
@@ -212,6 +229,9 @@ async function exportSources(pool: Pool, viewer: Viewer, directory: string): Pro
           call_number: source.callNumber,
           accessed_on: source.accessedOn,
           notes: source.notes,
+          // CREST, FOIA, cable, FRUS and NARA identifiers have no CSL home
+          // either. Keyed by the column names, which say what each one is.
+          government_record: governmentExport(source.government),
           // The scan of the work itself, if one is attached. Named the same
           // way the artifact catalogue names its files, so one reader of this
           // export learns one convention.
