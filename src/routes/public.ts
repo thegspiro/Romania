@@ -12,6 +12,7 @@ import { renderPage } from '../http/context.js';
 import { notFound } from '../http/errors.js';
 import { findSourceBySlug, listCitingItems, listSources } from '../content/sources.js';
 import { renderBibliographyEntry, renderNote } from '../citations/render.js';
+import { naraLocation } from '../content/government-records.js';
 import { creatorSummary, sourceTypeLabel } from '../citations/csl.js';
 
 function slugParam(request: FastifyRequest): string {
@@ -49,7 +50,7 @@ export function registerPublicRoutes(app: FastifyInstance, context: AppContext):
         ...source,
         typeLabel: sourceTypeLabel(source.cslType),
         creators: creatorSummary(source.csl.author ?? source.csl.editor),
-        entry: renderBibliographyEntry(source.csl),
+        entry: renderBibliographyEntry(source.citableCsl),
       })),
       total: result.total,
       page: pageNumber,
@@ -76,8 +77,9 @@ export function registerPublicRoutes(app: FastifyInstance, context: AppContext):
       {
         source,
         typeLabel: sourceTypeLabel(source.cslType),
-        bibliographyEntry: renderBibliographyEntry(source.csl),
-        note: renderNote(source.csl),
+        bibliographyEntry: renderBibliographyEntry(source.citableCsl),
+        note: renderNote(source.citableCsl),
+        naraLocation: source.government === null ? null : naraLocation(source.government),
         citedBy,
         canonicalUrl: `${config.PUBLIC_BASE_URL}/sources/${encodeURIComponent(source.slug)}`,
       },

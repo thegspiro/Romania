@@ -24,7 +24,9 @@ import {
   type SourceRecord,
   attachSourceFile,
   detachSourceFile,
+  listGovernmentFacets,
 } from '../content/sources.js';
+import { governmentFormValues, readGovernmentForm } from '../content/government-records.js';
 import { storeStream, UnsupportedFileTypeError, UploadTooLargeError } from '../files/storage.js';
 import { enqueueDerivatives, insertFileObject } from '../files/repository.js';
 import {
@@ -72,7 +74,11 @@ function readSourceForm(body: unknown): { input: SourceInput; errors: string[] }
   const visibilityRaw = readString(body, 'visibility') || 'private';
   const visibility: Visibility = isVisibility(visibilityRaw) ? visibilityRaw : 'private';
 
+  const government = readGovernmentForm((name) => readString(body, name));
+  errors.push(...government.errors);
+
   const input: SourceInput = {
+    government: government.input,
     title,
     cslType,
     titleOriginal: readString(body, 'titleOriginal'),
@@ -140,6 +146,7 @@ function formValuesFrom(source: SourceRecord): Record<string, unknown> {
     doi: csl.DOI ?? '',
     isbn: csl.ISBN ?? '',
     note: source.notes ?? '',
+    government: governmentFormValues(source.government),
   };
 }
 
@@ -216,12 +223,29 @@ export async function registerAdminRoutes(
       // --- Sources ---------------------------------------------------------
 
       admin.get('/admin/sources', async (request, reply) => {
-        const query = request.query as { q?: string; visibility?: string; page?: string };
+        const query = request.query as {
+          q?: string;
+          visibility?: string;
+          page?: string;
+          agency?: string;
+          classification?: string;
+          collection?: string;
+        };
         const pageNumber = Math.max(Number(query.page ?? '1') || 1, 1);
         const perPage = 25;
 
         const visibility = isVisibility(query.visibility) ? query.visibility : undefined;
+        // Read as strings and nothing else: a repeated parameter arrives as an
+        // array, which is not a value any facet holds.
+        const facet = (value: unknown): string =>
+          typeof value === 'string' ? value.trim().slice(0, 255) : '';
+        const filters = {
+          agency: facet(query.agency),
+          classification: facet(query.classification),
+          collection: facet(query.collection),
+        };
         const result = await listSources(pool, request.viewer, {
+          ...filters,
           search: query.q,
           visibility,
           limit: perPage,
@@ -248,6 +272,8 @@ export async function registerAdminRoutes(
             pageCount: Math.max(Math.ceil(result.total / perPage), 1),
             search: query.q ?? '',
             visibilityFilter: visibility ?? '',
+            filters,
+            facets: await listGovernmentFacets(pool, request.viewer),
             zotero,
             zoteroDeletedIds,
           },
@@ -356,8 +382,8 @@ export async function registerAdminRoutes(
             errors: [],
             maxUploadBytes: config.UPLOAD_MAX_BYTES,
             preview: {
-              bibliography: renderBibliographyEntry(source.csl),
-              note: renderNote(source.csl),
+              bibliography: renderBibliographyEntry(source.citableCsl),
+              note: renderNote(source.citableCsl),
             },
           },
           { noindex: true, flash: flashFor(request) },

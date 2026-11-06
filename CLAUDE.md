@@ -725,6 +725,7 @@ the properties being asserted actually live.
 | Storage backends, local and S3              | `src/files/backend.ts`              |
 | Moving a corpus between backends            | `src/files/migrate.ts`              |
 | Access-checked file lookup, file owners     | `src/files/repository.ts`           |
+| Government-record catalogue, citation fill  | `src/content/government-records.ts` |
 | Zotero sync, link and merge rules           | `worker/jobs/zotero_sync.py`        |
 | Sync queueing and state for the admin       | `src/content/zotero.ts`             |
 | Job runner                                  | `worker/runner.py`                  |

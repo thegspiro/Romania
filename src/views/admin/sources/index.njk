@@ -36,7 +36,7 @@
 
   <form method="get" action="/admin/sources" class="filter-form" role="search">
     <label for="q">Search</label>
-    <input type="search" id="q" name="q" value="{{ search }}" placeholder="Title, archive, call number" />
+    <input type="search" id="q" name="q" value="{{ search }}" placeholder="Title, archive, call number, CREST or FOIA number" />
 
     <label for="visibility">Visibility</label>
     <select id="visibility" name="visibility">
@@ -44,6 +44,22 @@
       <option value="public"{% if visibilityFilter == 'public' %} selected{% endif %}>Public</option>
       <option value="private"{% if visibilityFilter == 'private' %} selected{% endif %}>Private</option>
     </select>
+
+    {# Government-record facets: offered only once some record carries a value. #}
+    {% macro facet(name, label, options, current) %}
+      {% if options.length > 0 %}
+        <label for="{{ name }}">{{ label }}</label>
+        <select id="{{ name }}" name="{{ name }}">
+          <option value=""{% if current == '' %} selected{% endif %}>All</option>
+          {% for option in options %}
+            <option value="{{ option }}"{% if current == option %} selected{% endif %}>{{ option }}</option>
+          {% endfor %}
+        </select>
+      {% endif %}
+    {% endmacro %}
+    {{ facet('agency', 'Agency', facets.agencies, filters.agency) }}
+    {{ facet('classification', 'Classification', facets.classifications, filters.classification) }}
+    {{ facet('collection', 'Release collection', facets.collections, filters.collection) }}
 
     <button type="submit">Filter</button>
   </form>
@@ -71,6 +87,14 @@
                 <span class="badge badge-alert">Deleted in Zotero</span>
               {% endif %}
               {% if source.archive %}<div class="muted small">{{ source.archive }}</div>{% endif %}
+              {% if source.government %}
+                <div class="muted small">
+                  {{ source.government.originatingAgency or 'Government record' }}
+                  {% if source.government.cableNumber %} · cable {{ source.government.cableNumber }}{% endif %}
+                  {% if source.government.crestNumber %} · {{ source.government.crestNumber }}{% endif %}
+                  {% if source.government.foiaCaseNumber %} · FOIA {{ source.government.foiaCaseNumber }}{% endif %}
+                </div>
+              {% endif %}
             </td>
             <td>{{ source.cslType }}</td>
             <td>{{ source.issuedYear if source.issuedYear else '—' }}</td>
@@ -103,11 +127,11 @@
     {% if pageCount > 1 %}
       <nav class="pagination" aria-label="Pagination">
         {% if page > 1 %}
-          <a href="/admin/sources?page={{ page - 1 }}{% if search %}&amp;q={{ search | urlencode }}{% endif %}">Previous</a>
+          <a href="/admin/sources?page={{ page - 1 }}{% if search %}&amp;q={{ search | urlencode }}{% endif %}{% if visibilityFilter %}&amp;visibility={{ visibilityFilter | urlencode }}{% endif %}{% if filters.agency %}&amp;agency={{ filters.agency | urlencode }}{% endif %}{% if filters.classification %}&amp;classification={{ filters.classification | urlencode }}{% endif %}{% if filters.collection %}&amp;collection={{ filters.collection | urlencode }}{% endif %}">Previous</a>
         {% endif %}
         <span>Page {{ page }} of {{ pageCount }}</span>
         {% if page < pageCount %}
-          <a href="/admin/sources?page={{ page + 1 }}{% if search %}&amp;q={{ search | urlencode }}{% endif %}">Next</a>
+          <a href="/admin/sources?page={{ page + 1 }}{% if search %}&amp;q={{ search | urlencode }}{% endif %}{% if visibilityFilter %}&amp;visibility={{ visibilityFilter | urlencode }}{% endif %}{% if filters.agency %}&amp;agency={{ filters.agency | urlencode }}{% endif %}{% if filters.classification %}&amp;classification={{ filters.classification | urlencode }}{% endif %}{% if filters.collection %}&amp;collection={{ filters.collection | urlencode }}{% endif %}">Next</a>
         {% endif %}
       </nav>
     {% endif %}
